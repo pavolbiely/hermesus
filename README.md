@@ -8,9 +8,17 @@ Do **not** edit `$HOME/.hermes/hermes-agent` directly during prototype work. Tre
 
 ```text
 backend/
-  hermes_cli/web_chat.py                    # proposed FastAPI router
+  hermes_cli/web_chat.py                    # FastAPI router entrypoint and domain orchestration
+  hermes_cli/web_chat_modules/              # extracted web-chat agent execution, capabilities, profiles, commands, models, sessions, session/message mutations, git changes, workspace, attachment, and run lifecycle helpers
   tests/hermes_cli/test_web_chat.py         # proposed pytest coverage
 web/                                        # Nuxt UI prototype
+  app/components/WorkspaceModal.vue         # workspace create/edit modal
+  app/components/SidebarSessionGroups.vue   # sidebar workspace groups and chat row actions
+  app/components/ChatMessageContent.vue      # chat message rendering and user-message actions
+  app/components/ChatRenameModal.vue        # chat rename modal
+  app/components/ChatConfirmActionModal.vue # chat duplicate/delete confirmation modal
+  app/utils/chatMessages.ts                 # pure chat message formatting/grouping helpers
+  app/utils/clipboard.ts                    # clipboard helper used by chat actions
 ```
 
 Keep `README.md` updated as the prototype changes, including project structure, setup, workflow, implemented behavior, and verification commands.

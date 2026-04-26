@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { DropdownMenuItem } from '@nuxt/ui'
 import type { SessionGroup } from '~/utils/sessionGroups'
 import type { WebChatProfile, WebChatSession, WebChatWorkspace } from '~/types/web-chat'
 import { buildSessionGroups } from '~/utils/sessionGroups'
@@ -29,7 +28,6 @@ const profileOptions = computed(() => (profilesData.value?.profiles || []).map(p
 const selectedProfile = ref<string | undefined>(profilesData.value?.activeProfile || undefined)
 const profileSwitchPending = ref(false)
 const now = ref(new Date())
-const openMenuSessionId = ref<string | null>(null)
 const readMessageCounts = ref<Record<string, number>>({})
 const readMessageCountsLoaded = ref(false)
 const renameSession = ref<WebChatSession | null>(null)
@@ -44,7 +42,6 @@ const workspacePath = ref('')
 const workspacePending = ref(false)
 const workspaceDirectorySuggestions = ref<string[]>([])
 let workspaceDirectorySuggestionTimer: ReturnType<typeof setTimeout> | undefined
-const contextMenuReference = shallowRef<{ getBoundingClientRect: () => DOMRect } | null>(null)
 const READ_MESSAGE_COUNTS_KEY = 'hermes-chat-read-message-counts'
 let timer: ReturnType<typeof setInterval> | undefined
 let unsubscribeRunFinished: (() => void) | undefined
@@ -274,16 +271,6 @@ watch(profilesData, () => {
   selectedProfile.value = activeProfileId()
 }, { immediate: true })
 
-function sessionTime(updatedAt: string) {
-  return formatCompactRelativeTime(updatedAt, now.value)
-}
-
-function sessionTimestampTitle(updatedAt: string) {
-  const timestamp = new Date(updatedAt).getTime()
-
-  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : undefined
-}
-
 function isActiveSession(session: WebChatSession) {
   return route.params.id === session.id
 }
@@ -346,11 +333,6 @@ function syncReadMessageCounts() {
   saveReadMessageCounts()
 }
 
-function isUnreadSession(session: WebChatSession) {
-  if (isActiveSession(session) || !readMessageCountsLoaded.value) return false
-  return (session.messageCount || 0) > (readMessageCounts.value[session.id] || 0)
-}
-
 function isSessionRunning(session: WebChatSession) {
   return activeChatRuns.isRunning(session.id)
 }
@@ -358,8 +340,6 @@ function isSessionRunning(session: WebChatSession) {
 function beginRename(session: WebChatSession) {
   renameSession.value = session
   renameTitle.value = sessionTitle(session)
-  openMenuSessionId.value = null
-  contextMenuReference.value = null
 }
 
 function cancelRename() {
@@ -394,8 +374,6 @@ async function saveRename() {
 }
 
 function beginConfirmAction(action: 'duplicate' | 'delete', session: WebChatSession) {
-  openMenuSessionId.value = null
-  contextMenuReference.value = null
   confirmAction.value = action
   confirmSession.value = session
 }
@@ -457,69 +435,6 @@ async function deleteSession(session: WebChatSession) {
 function openSession(session: WebChatSession) {
   markSessionRead(session)
   void router.push(`/chat/${session.id}`)
-}
-
-function onSessionDoubleClick(session: WebChatSession) {
-  if (!isActiveSession(session)) return
-  beginRename(session)
-}
-
-function openSessionMenu(session: WebChatSession) {
-  contextMenuReference.value = null
-  openMenuSessionId.value = session.id
-}
-
-function openSessionContextMenu(session: WebChatSession, event: MouseEvent) {
-  const { clientX, clientY } = event
-  contextMenuReference.value = {
-    getBoundingClientRect: () => new DOMRect(clientX, clientY, 0, 0)
-  }
-  openMenuSessionId.value = session.id
-}
-
-function closeSessionMenu(open: boolean, session: WebChatSession) {
-  openMenuSessionId.value = open ? session.id : null
-  if (!open) contextMenuReference.value = null
-}
-
-function sessionMenuContent(session: WebChatSession) {
-  if (contextMenuReference.value && openMenuSessionId.value === session.id) {
-    return {
-      reference: contextMenuReference.value,
-      align: 'start' as const,
-      side: 'bottom' as const,
-      sideOffset: 0
-    }
-  }
-
-  return { align: 'end' as const, side: 'right' as const, sideOffset: 6 }
-}
-
-function actionButtonClass(session: WebChatSession) {
-  return openMenuSessionId.value === session.id
-    ? 'opacity-100'
-    : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
-}
-
-function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
-  return [
-    {
-      label: 'Rename',
-      icon: 'i-lucide-pencil',
-      onSelect: () => beginRename(session)
-    },
-    {
-      label: 'Duplicate',
-      icon: 'i-lucide-copy',
-      onSelect: () => beginConfirmAction('duplicate', session)
-    },
-    {
-      label: 'Delete',
-      icon: 'i-lucide-trash-2',
-      color: 'error',
-      onSelect: () => beginConfirmAction('delete', session)
-    }
-  ]
 }
 
 watch(
@@ -598,253 +513,55 @@ provide('refreshSessions', refresh)
           </div>
         </div>
 
-        <nav class="space-y-4 px-2" aria-label="Chat sessions by workspace">
-          <section v-for="group in groupedSessions" :key="group.id" class="space-y-1">
-            <div class="group/workspace flex h-7 min-w-0 items-center justify-between gap-2 px-2 text-xs font-medium uppercase tracking-wide text-muted">
-              <span class="flex min-w-0 items-center gap-1.5 truncate" :title="group.path || undefined">
-                <UIcon
-                  name="i-lucide-folder"
-                  class="size-3.5 shrink-0 text-muted"
-                />
-                <span class="min-w-0 truncate">{{ group.label }}</span>
-              </span>
-              <div class="flex shrink-0 items-center gap-1">
-                <div class="opacity-0 transition-opacity group-hover/workspace:opacity-100 group-focus-within/workspace:opacity-100">
-                  <UTooltip v-if="group.workspace" text="Edit workspace">
-                    <UButton
-                      :aria-label="`Edit ${group.label}`"
-                      icon="i-lucide-pencil"
-                      color="neutral"
-                      variant="ghost"
-                      size="xs"
-                      square
-                      @click.stop="beginEditWorkspace(group.workspace)"
-                    />
-                  </UTooltip>
-                </div>
-                <UTooltip v-if="group.path" :text="`New chat in ${group.label}`">
-                  <UButton
-                    :aria-label="`New chat in ${group.label}`"
-                    icon="i-lucide-plus"
-                    color="neutral"
-                    variant="ghost"
-                    size="xs"
-                    square
-                    @click.stop="startWorkspaceChat(group.path)"
-                  />
-                </UTooltip>
-              </div>
-            </div>
-
-            <div v-if="group.sessions.length" class="space-y-1">
-              <div
-                v-for="session in group.sessions"
-                :key="session.id"
-                role="button"
-                tabindex="0"
-                class="group flex h-8 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md px-2 text-left text-sm outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-within:bg-elevated"
-                :class="[
-                  isActiveSession(session) ? 'bg-elevated text-highlighted' : 'text-default',
-                  isUnreadSession(session) ? 'font-semibold text-black dark:text-white' : 'font-normal'
-                ]"
-                @click="openSession(session)"
-                @keydown.enter.prevent="openSession(session)"
-                @keydown.space.prevent="openSession(session)"
-                @dblclick.stop.prevent="onSessionDoubleClick(session)"
-                @contextmenu.prevent="openSessionContextMenu(session, $event)"
-              >
-                <span v-if="isUnreadSession(session)" class="flex h-full shrink-0 items-center pr-1.5">
-                  <UChip
-                    standalone
-                    size="sm"
-                    color="primary"
-                    aria-hidden="true"
-                  />
-                </span>
-                <span class="min-w-0 flex-1 truncate">
-                  {{ sessionTitle(session) }}
-                </span>
-
-                <div class="relative flex h-6 w-10 shrink-0 items-center justify-end">
-                  <UDropdownMenu
-                    :items="sessionActionItems(session)"
-                    :content="sessionMenuContent(session)"
-                    size="sm"
-                    :open="openMenuSessionId === session.id"
-                    @update:open="closeSessionMenu($event, session)"
-                  >
-                    <UButton
-                      aria-label="Chat actions"
-                      icon="i-lucide-ellipsis"
-                      color="neutral"
-                      variant="ghost"
-                      size="xs"
-                      square
-                      class="absolute right-0 z-10 transition-opacity"
-                      :class="actionButtonClass(session)"
-                      :loading="pendingSessionId === session.id"
-                      @click.stop="openSessionMenu(session)"
-                    />
-                  </UDropdownMenu>
-
-                  <UIcon
-                    v-if="isSessionRunning(session) && openMenuSessionId !== session.id"
-                    name="i-lucide-loader-circle"
-                    class="absolute right-1 size-3.5 animate-spin text-muted group-hover:opacity-0 group-focus-within:opacity-0"
-                  />
-
-                  <span
-                    v-else-if="openMenuSessionId !== session.id"
-                    class="absolute right-0 text-xs text-muted group-hover:opacity-0 group-focus-within:opacity-0"
-                    :title="sessionTimestampTitle(session.updatedAt)"
-                  >
-                    {{ sessionTime(session.updatedAt) }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <p v-else class="px-2 text-xs text-muted">
-              No chats yet
-            </p>
-          </section>
-        </nav>
+        <SidebarSessionGroups
+          :groups="groupedSessions"
+          :active-session-id="typeof route.params.id === 'string' ? route.params.id : undefined"
+          :pending-session-id="pendingSessionId"
+          :now="now"
+          :read-message-counts="readMessageCounts"
+          :read-message-counts-loaded="readMessageCountsLoaded"
+          :is-session-running="isSessionRunning"
+          @edit-workspace="beginEditWorkspace"
+          @start-workspace-chat="startWorkspaceChat"
+          @open-session="openSession"
+          @rename-session="beginRename"
+          @confirm-session-action="beginConfirmAction"
+        />
       </template>
     </UDashboardSidebar>
 
     <slot />
 
-    <UModal
+    <WorkspaceModal
       v-model:open="workspaceModalOpen"
-      :title="editingWorkspace ? 'Edit workspace' : 'Add workspace'"
-      description="Give the workspace a display name and point it at a local project directory."
-    >
-      <template #body>
-        <form class="space-y-4" @submit.prevent="saveWorkspace">
-          <UFormField label="Name" required>
-            <UInput
-              v-model="workspaceLabel"
-              autofocus
-              placeholder="Hermesum"
-              class="w-full"
-              :disabled="workspacePending"
-              @keydown.esc.prevent="cancelWorkspaceEdit"
-            />
-          </UFormField>
+      v-model:label="workspaceLabel"
+      v-model:path="workspacePath"
+      :editing-workspace="editingWorkspace"
+      :suggestions="workspaceDirectorySuggestions"
+      :pending="workspacePending"
+      :can-save="canSaveWorkspace"
+      @save="saveWorkspace"
+      @cancel="cancelWorkspaceEdit"
+      @delete="deleteWorkspace"
+    />
 
-          <UFormField label="Directory path" required>
-            <UInput
-              v-model="workspacePath"
-              placeholder="/Users/pavolbiely/Sites/hermesum"
-              class="w-full font-mono"
-              list="workspace-directory-suggestions"
-              :disabled="workspacePending"
-              @keydown.esc.prevent="cancelWorkspaceEdit"
-            />
-            <datalist id="workspace-directory-suggestions">
-              <option
-                v-for="suggestion in workspaceDirectorySuggestions"
-                :key="suggestion"
-                :value="suggestion"
-              />
-            </datalist>
-          </UFormField>
-
-          <div class="flex items-center justify-between gap-2">
-            <UButton
-              v-if="editingWorkspace"
-              type="button"
-              color="error"
-              variant="ghost"
-              label="Delete"
-              :loading="workspacePending"
-              @click="deleteWorkspace"
-            />
-            <span v-else />
-
-            <div class="flex justify-end gap-2">
-              <UButton
-                type="button"
-                color="neutral"
-                variant="ghost"
-                label="Cancel"
-                :disabled="workspacePending"
-                @click="cancelWorkspaceEdit"
-              />
-              <UButton
-                type="submit"
-                color="primary"
-                :label="editingWorkspace ? 'Save' : 'Add workspace'"
-                :loading="workspacePending"
-                :disabled="!canSaveWorkspace"
-              />
-            </div>
-          </div>
-        </form>
-      </template>
-    </UModal>
-
-    <UModal
+    <ChatRenameModal
       v-model:open="renameModalOpen"
-      title="Rename chat"
-      description="Choose a new name for this chat."
-    >
-      <template #body>
-        <form class="space-y-4" @submit.prevent="saveRename">
-          <UInput
-            v-model="renameTitle"
-            autofocus
-            aria-label="Chat name"
-            class="w-full"
-            :disabled="pendingSessionId === renameSession?.id"
-            @keydown.esc.prevent="cancelRename"
-          />
+      v-model:title="renameTitle"
+      :pending="pendingSessionId === renameSession?.id"
+      :can-rename="canRename"
+      @save="saveRename"
+      @cancel="cancelRename"
+    />
 
-          <div class="flex justify-end gap-2">
-            <UButton
-              type="button"
-              color="neutral"
-              variant="ghost"
-              label="Cancel"
-              :disabled="pendingSessionId === renameSession?.id"
-              @click="cancelRename"
-            />
-            <UButton
-              type="submit"
-              color="primary"
-              label="Rename"
-              :loading="pendingSessionId === renameSession?.id"
-              :disabled="!canRename"
-            />
-          </div>
-        </form>
-      </template>
-    </UModal>
-
-    <UModal
+    <ChatConfirmActionModal
       v-model:open="confirmModalOpen"
+      :action="confirmAction"
       :title="confirmTitle"
       :description="confirmDescription"
-    >
-      <template #footer>
-        <div class="flex w-full justify-end gap-2">
-          <UButton
-            type="button"
-            color="neutral"
-            variant="ghost"
-            label="Cancel"
-            :disabled="pendingSessionId === confirmSession?.id"
-            @click="cancelConfirmAction"
-          />
-          <UButton
-            type="button"
-            :color="confirmAction === 'delete' ? 'error' : 'primary'"
-            :label="confirmAction === 'delete' ? 'Delete' : 'Duplicate'"
-            :loading="pendingSessionId === confirmSession?.id"
-            @click="confirmSessionAction"
-          />
-        </div>
-      </template>
-    </UModal>
+      :pending="pendingSessionId === confirmSession?.id"
+      @confirm="confirmSessionAction"
+      @cancel="cancelConfirmAction"
+    />
   </UDashboardGroup>
 </template>

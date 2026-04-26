@@ -1,0 +1,148 @@
+"""Session mutation helpers for the web chat API."""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Callable
+from uuid import uuid4
+
+from hermes_state import SessionDB
+
+from .models import SessionDetailResponse, WebChatSession, WebChatWorkspaceChanges, WebChatMessage
+
+
+def title_from_message(message: str) -> str:
+    text = " ".join(message.split())
+    return text[:80] or "New chat"
+
+
+def set_session_title_safely(db: SessionDB, session_id: str, title: str) -> None:
+    try:
+        db.set_session_title(session_id, title)
+    except ValueError:
+        suffix = session_id[:6]
+        trimmed = title[: max(1, 80 - len(suffix) - 4)]
+        db.set_session_title(session_id, f"{trimmed} #{suffix}")
+
+
+def unique_copy_title(db: SessionDB, title: str | None, session_id: str) -> str:
+    base = " ".join((title or "Untitled chat").split()).strip() or "Untitled chat"
+    for index in range(1, 100):
+        suffix = " copy" if index == 1 else f" copy {index}"
+        candidate = f"{base}{suffix}"
+        if len(candidate) > 80:
+            candidate = f"{base[:80 - len(suffix)]}{suffix}"
+        try:
+            db.set_session_title(session_id, candidate)
+            return candidate
+        except ValueError:
+            continue
+    fallback = f"{base[:69]} {session_id[:10]}"[:80]
+    db.set_session_title(session_id, fallback)
+    return fallback
+
+
+def duplicate_session(
+    db: SessionDB,
+    session_id: str,
+    *,
+    get_session_or_404: Callable[[SessionDB, str], dict[str, Any]],
+    parse_jsonish: Callable[[Any], Any],
+    copy_session_git_changes: Callable[..., None],
+    session_git_changes_by_message: Callable[[SessionDB, str], dict[str, WebChatWorkspaceChanges]],
+    serialize_session: Callable[[dict[str, Any]], WebChatSession],
+    serialize_messages: Callable[..., list[WebChatMessage]],
+    web_chat_source: str,
+) -> SessionDetailResponse:
+    session = get_session_or_404(db, session_id)
+    new_session_id = uuid4().hex
+    model_config = None
+    if session.get("model_config"):
+        try:
+            parsed = json.loads(session["model_config"])
+        except (TypeError, json.JSONDecodeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            model_config = parsed
+
+    db.create_session(
+        new_session_id,
+        source=session.get("source") or web_chat_source,
+        model=session.get("model"),
+        model_config=model_config,
+        system_prompt=session.get("system_prompt"),
+    )
+    unique_copy_title(db, session.get("title") or session.get("preview") or "Untitled chat", new_session_id)
+
+    message_id_map: dict[int, int] = {}
+    for message in db.get_messages(session_id):
+        new_message_id = db.append_message(
+            new_session_id,
+            message.get("role"),
+            message.get("content"),
+            tool_name=message.get("tool_name"),
+            tool_calls=message.get("tool_calls"),
+            tool_call_id=message.get("tool_call_id"),
+            token_count=message.get("token_count"),
+            finish_reason=message.get("finish_reason"),
+            reasoning=message.get("reasoning"),
+            reasoning_content=message.get("reasoning_content"),
+            reasoning_details=parse_jsonish(message.get("reasoning_details")),
+            codex_reasoning_items=parse_jsonish(message.get("codex_reasoning_items")),
+            codex_message_items=parse_jsonish(message.get("codex_message_items")),
+        )
+        if message.get("id") is not None:
+            message_id_map[int(message["id"])] = int(new_message_id)
+
+    copy_session_git_changes(
+        db,
+        source_session_id=session_id,
+        target_session_id=new_session_id,
+        message_id_map=message_id_map,
+    )
+    changes_by_message = session_git_changes_by_message(db, new_session_id)
+
+    duplicated = get_session_or_404(db, new_session_id)
+    return SessionDetailResponse(
+        session=serialize_session(duplicated),
+        messages=serialize_messages(db.get_messages(new_session_id), changes_by_message=changes_by_message),
+    )
+
+
+def session_with_tip_config(db: SessionDB, session: dict[str, Any]) -> dict[str, Any]:
+    if not session.get("_lineage_root_id"):
+        return session
+
+    tip_session_id = session.get("id")
+    if not isinstance(tip_session_id, str) or not tip_session_id:
+        return session
+
+    tip_session = db._get_session_rich_row(tip_session_id)
+    if not tip_session:
+        return session
+
+    return {**session, "model_config": tip_session.get("model_config")}
+
+
+def list_non_empty_sessions(
+    db: SessionDB,
+    limit: int,
+    offset: int,
+    *,
+    max_session_limit: int,
+) -> list[dict[str, Any]]:
+    sessions: list[dict[str, Any]] = []
+    db_offset = 0
+    batch_size = max_session_limit
+
+    while len(sessions) < offset + limit:
+        batch = db.list_sessions_rich(limit=batch_size, offset=db_offset)
+        if not batch:
+            break
+        for session in batch:
+            if session.get("message_count", 0) <= 0:
+                continue
+            sessions.append(session_with_tip_config(db, session))
+        db_offset += len(batch)
+
+    return sessions[offset:offset + limit]

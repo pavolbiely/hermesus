@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import highlight from '@comark/nuxt/plugins/highlight'
 import { prepareNotificationSound } from '../../utils/notificationSound'
 import { requiresWorkspaceBeforeSubmit } from '../../utils/slashCommands'
 import type { ExecuteCommandResponse, WebChatCommand, WebChatMessage, WebChatPart } from '~/types/web-chat'
+import { messageText } from '~/utils/chatMessages'
+import { writeClipboardText } from '~/utils/clipboard'
 import { toolDisplayName } from '~/utils/toolCalls'
-
-type MessagePartGroup =
-  | { type: 'tools', parts: WebChatPart[] }
-  | { type: 'part', part: WebChatPart }
 
 const route = useRoute()
 const api = useHermesApi()
@@ -76,83 +73,6 @@ const title = computed(() => {
 })
 const chatStatus = computed(() => submitStatus.value === 'submitted' || activeChatRuns.isRunning(sessionId.value) ? 'streaming' : 'ready')
 const isRunning = computed(() => activeChatRuns.isRunning(sessionId.value))
-
-function partText(part: WebChatPart) {
-  return typeof part.text === 'string' ? part.text : ''
-}
-
-function groupMessageParts(parts: WebChatPart[]): MessagePartGroup[] {
-  const groups: MessagePartGroup[] = []
-
-  for (const part of parts) {
-    const previous = groups.at(-1)
-    if (part.type === 'tool' && previous?.type === 'tools') {
-      previous.parts.push(part)
-      continue
-    }
-
-    groups.push(part.type === 'tool' ? { type: 'tools', parts: [part] } : { type: 'part', part })
-  }
-
-  return groups
-}
-
-function messageText(message: WebChatMessage) {
-  return message.parts.map(partText).filter(Boolean).join('\n\n')
-}
-
-function messageDate(createdAt: string) {
-  const date = new Date(createdAt)
-  return Number.isFinite(date.getTime()) ? date : null
-}
-
-function isSameLocalDay(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear()
-    && a.getMonth() === b.getMonth()
-    && a.getDate() === b.getDate()
-}
-
-function formatMessageTimestamp(createdAt: string) {
-  const date = messageDate(createdAt)
-  if (!date) return ''
-
-  const now = new Date()
-  const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date)
-  if (isSameLocalDay(date, now)) return time
-
-  const dateFormatter = new Intl.DateTimeFormat(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric'
-  })
-
-  return `${dateFormatter.format(date)}, ${time}`
-}
-
-function messageTimestampTitle(createdAt: string) {
-  return messageDate(createdAt)?.toLocaleString()
-}
-
-async function writeClipboardText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-
-  try {
-    document.execCommand('copy')
-  } finally {
-    document.body.removeChild(textarea)
-  }
-}
 
 async function copyUserMessage(message: WebChatMessage) {
   const text = messageText(message)
@@ -645,105 +565,20 @@ onBeforeUnmount(() => {
         <template v-else>
           <UChatMessages :messages="messages" :status="chatStatus">
             <template #content="{ message }: { message: WebChatMessage }">
-              <div v-if="isThinkingMessage(message)" class="flex items-center gap-2 text-sm text-muted">
-                <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
-                <span>Thinking…</span>
-              </div>
-
-              <template v-for="(group, index) in groupMessageParts(message.parts)" :key="`${message.id}-${group.type}-${index}`">
-                <div v-if="group.type === 'tools'" class="space-y-0.5">
-                  <ToolCallItem
-                    v-for="(toolPart, toolIndex) in group.parts"
-                    :key="`${message.id}-tool-${index}-${toolIndex}`"
-                    :part="toolPart"
-                  />
-                </div>
-
-                <template v-else>
-                  <UChatReasoning v-if="group.part.type === 'reasoning'" :text="partText(group.part)">
-                    <Comark :markdown="partText(group.part)" :plugins="[highlight()]" class="*:first:mt-0 *:last:mb-0" />
-                  </UChatReasoning>
-
-                  <div v-else-if="group.part.type === 'media' && group.part.attachments?.length" class="mb-2 flex flex-wrap gap-2">
-                    <ChatAttachmentPreview
-                      v-for="attachment in group.part.attachments"
-                      :key="attachment.id"
-                      :attachment="attachment"
-                    />
-                  </div>
-
-                  <ChatChangeSummary
-                    v-else-if="group.part.type === 'changes' && group.part.changes"
-                    :changes="group.part.changes"
-                  />
-
-                  <template v-else-if="group.part.type === 'text'">
-                    <Comark
-                      v-if="message.role === 'assistant'"
-                      :markdown="partText(group.part)"
-                      :plugins="[highlight()]"
-                      class="*:first:mt-0 *:last:mb-0"
-                    />
-                    <div v-else-if="editingMessageId === message.id" :ref="setEditingMessageContainer" class="space-y-2">
-                      <UTextarea
-                        v-model="editingText"
-                        autoresize
-                        :rows="3"
-                        class="w-full min-w-72"
-                        @keydown.esc.prevent="cancelEditingMessage"
-                      />
-                      <div class="flex justify-end gap-2">
-                        <UButton
-                          size="xs"
-                          color="neutral"
-                          variant="ghost"
-                          label="Cancel"
-                          :disabled="savingEditedMessageId === message.id"
-                          @click="cancelEditingMessage"
-                        />
-                        <UButton
-                          size="xs"
-                          color="primary"
-                          variant="soft"
-                          label="Save"
-                          :loading="savingEditedMessageId === message.id"
-                          :disabled="!editingText.trim()"
-                          @click="saveEditedMessage(message)"
-                        />
-                      </div>
-                    </div>
-                    <p v-else class="whitespace-pre-wrap">
-                      {{ partText(group.part) }}
-                    </p>
-                  </template>
-                </template>
-              </template>
-
-              <div
-                v-if="message.role === 'user'"
-                class="pointer-events-none absolute -bottom-6 right-0 flex w-max max-w-none flex-nowrap items-center justify-end gap-1 whitespace-nowrap text-xs leading-4 text-muted opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100"
-              >
-                <span class="whitespace-nowrap" :title="messageTimestampTitle(message.createdAt)">
-                  {{ formatMessageTimestamp(message.createdAt) }}
-                </span>
-                <button
-                  type="button"
-                  class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50"
-                  aria-label="Edit message"
-                  :disabled="isRunning || savingEditedMessageId === message.id"
-                  @click="startEditingMessage(message)"
-                >
-                  <UIcon name="i-lucide-pencil" class="size-3" />
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50"
-                  :aria-label="copiedMessageId === message.id ? 'Copied message' : 'Copy message'"
-                  @click="copyUserMessage(message)"
-                >
-                  <UIcon :name="copiedMessageId === message.id ? 'i-lucide-check' : 'i-lucide-copy'" class="size-3" />
-                </button>
-              </div>
+              <ChatMessageContent
+                v-model:editing-text="editingText"
+                :message="message"
+                :is-thinking="isThinkingMessage(message)"
+                :copied-message-id="copiedMessageId"
+                :editing-message-id="editingMessageId"
+                :saving-edited-message-id="savingEditedMessageId"
+                :is-running="isRunning"
+                :set-editing-message-container="setEditingMessageContainer"
+                @copy="copyUserMessage"
+                @edit="startEditingMessage"
+                @cancel-edit="cancelEditingMessage"
+                @save-edit="saveEditedMessage"
+              />
             </template>
           </UChatMessages>
           <div ref="bottomRef" class="h-px" aria-hidden="true" />
