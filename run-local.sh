@@ -376,6 +376,7 @@ run_watch() {
 
     if [[ -n "${CHILD_PID:-}" ]] && ! kill -0 "$CHILD_PID" 2>/dev/null; then
       echo "Dashboard process exited; restarting..."
+      kill_existing_port_processes "$PORT"
       prepare_runtime
       ensure_web_build
       start_dashboard
@@ -426,6 +427,7 @@ run_dev() {
 
     if [[ -n "${CHILD_PID:-}" ]] && ! kill -0 "$CHILD_PID" 2>/dev/null; then
       echo "Dashboard backend process exited; restarting..."
+      kill_existing_port_processes "$PORT"
       prepare_runtime
       start_dashboard
       current_sig="$(watch_signature)"
