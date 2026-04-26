@@ -39,8 +39,19 @@ export type RespondRunPromptResponse = {
   prompt: InteractivePrompt
 }
 
+export type SteerRunRequest = {
+  text: string
+}
+
+export type SteerRunResponse = {
+  runId: string
+  sessionId: string
+  accepted: boolean
+  messageId?: string | null
+}
+
 export type WebChatPart = {
-  type: 'text' | 'reasoning' | 'tool' | 'media' | 'interactive_prompt' | 'changes'
+  type: 'text' | 'reasoning' | 'tool' | 'media' | 'interactive_prompt' | 'changes' | 'steer'
   text?: string | null
   name?: string | null
   status?: string | null

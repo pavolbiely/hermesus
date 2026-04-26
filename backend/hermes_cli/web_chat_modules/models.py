@@ -56,7 +56,7 @@ class RespondRunPromptResponse(BaseModel):
 
 
 class WebChatPart(BaseModel):
-    type: Literal["text", "reasoning", "tool", "media", "interactive_prompt", "changes"]
+    type: Literal["text", "reasoning", "tool", "media", "interactive_prompt", "changes", "steer"]
     text: str | None = None
     name: str | None = None
     status: str | None = None
@@ -261,3 +261,14 @@ class StartRunResponse(BaseModel):
 class StopRunResponse(BaseModel):
     runId: str
     stopped: bool
+
+
+class SteerRunRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=65536)
+
+
+class SteerRunResponse(BaseModel):
+    runId: str
+    sessionId: str
+    accepted: bool = True
+    messageId: str | None = None

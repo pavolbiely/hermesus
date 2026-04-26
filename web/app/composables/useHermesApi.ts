@@ -6,6 +6,8 @@ import type {
   SessionDetailResponse,
   SessionListResponse,
   StartRunResponse,
+  SteerRunRequest,
+  SteerRunResponse,
   DeleteSessionResponse,
   RespondRunPromptRequest,
   RespondRunPromptResponse,
@@ -127,6 +129,11 @@ export function useHermesApi() {
     }),
     respondRunPrompt: (runId: string, promptId: string, payload: RespondRunPromptRequest) =>
       request<RespondRunPromptResponse>(`/api/web-chat/runs/${runId}/prompts/${promptId}/response`, {
+        method: 'POST',
+        body: payload
+      }),
+    steerRun: (runId: string, payload: SteerRunRequest) =>
+      request<SteerRunResponse>(`/api/web-chat/runs/${runId}/steer`, {
         method: 'POST',
         body: payload
       }),

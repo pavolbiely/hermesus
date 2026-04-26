@@ -55,6 +55,19 @@ const emit = defineEmits<{
         :prompt="group.part.prompt"
       />
 
+      <div
+        v-else-if="group.part.type === 'steer'"
+        class="rounded-lg border border-dashed border-default bg-muted/30 px-3 py-2 text-sm text-muted"
+      >
+        <div class="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-dimmed">
+          <UIcon name="i-lucide-route" class="size-3.5" />
+          <span>Steer</span>
+        </div>
+        <p class="whitespace-pre-wrap text-toned">
+          {{ partText(group.part) }}
+        </p>
+      </div>
+
       <template v-else-if="group.part.type === 'text'">
         <Comark
           v-if="message.role === 'assistant'"

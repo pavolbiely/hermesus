@@ -26,6 +26,8 @@ from .models import (
     SessionListResponse,
     StartRunRequest,
     StartRunResponse,
+    SteerRunRequest,
+    SteerRunResponse,
     StopRunResponse,
     SwitchProfileRequest,
     SwitchProfileResponse,
@@ -247,6 +249,10 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
     @router.post("/runs/{run_id}/prompts/{prompt_id}/response", response_model=RespondRunPromptResponse)
     def respond_run_prompt(run_id: str, prompt_id: str, payload: RespondRunPromptRequest) -> RespondRunPromptResponse:
         return services.run_manager().respond_prompt(run_id, prompt_id, payload)
+
+    @router.post("/runs/{run_id}/steer", response_model=SteerRunResponse)
+    def steer_run(run_id: str, payload: SteerRunRequest) -> SteerRunResponse:
+        return services.run_manager().steer(run_id, payload)
 
     @router.post("/runs/{run_id}/stop", response_model=StopRunResponse)
     def stop_run(run_id: str) -> StopRunResponse:

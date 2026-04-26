@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 
-from .models import ActiveRunSummary, RespondRunPromptRequest, RespondRunPromptResponse, StartRunRequest, StartRunResponse, StopRunResponse, WebChatPrompt
+from .models import ActiveRunSummary, RespondRunPromptRequest, RespondRunPromptResponse, StartRunRequest, StartRunResponse, SteerRunRequest, SteerRunResponse, StopRunResponse, WebChatPrompt
 
 RunExecutor = Callable[["RunContext", Callable[[dict[str, Any]], None]], str]
 
@@ -33,6 +33,7 @@ class RunContext:
     baseline_git_status: str | None = None
     stop_requested: threading.Event = field(default_factory=threading.Event)
     interrupt_agent: Callable[[str | None], None] | None = None
+    steer_agent: Callable[[str], None] | None = None
     request_prompt: Callable[[WebChatPrompt, float], str | None] | None = field(default=None, repr=False)
 
 
@@ -200,6 +201,30 @@ class RunManager:
         self._emit(active, {"type": "run.stopping"})
         return StopRunResponse(runId=run_id, stopped=True)
 
+    def steer(self, run_id: str, request: SteerRunRequest) -> SteerRunResponse:
+        active = self._get(run_id)
+        if active.terminal or not active.thread or not active.thread.is_alive():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run is no longer active")
+
+        steer_agent = active.context.steer_agent
+        if not steer_agent:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run does not support live steering")
+
+        steer_agent(request.text)
+        message_id = self._services.db().append_message(
+            active.context.session_id,
+            "system",
+            None,
+            codex_message_items=[{"type": "web_chat_steer", "text": request.text}],
+        )
+        self._emit(active, {"type": "run.steered", "messageId": str(message_id), "text": request.text})
+        return SteerRunResponse(
+            runId=run_id,
+            sessionId=active.context.session_id,
+            accepted=True,
+            messageId=str(message_id),
+        )
+
     def respond_prompt(self, run_id: str, prompt_id: str, request: RespondRunPromptRequest) -> RespondRunPromptResponse:
         active = self._get(run_id)
         with self._lock:
@@ -352,4 +377,6 @@ class RunManager:
             self._cancel_pending_prompts(active)
             if assistant_message_id is None:
                 self._services.persist_run_workspace_changes(active.context, None)
+            active.context.interrupt_agent = None
+            active.context.steer_agent = None
             self._finish(active, active.status)

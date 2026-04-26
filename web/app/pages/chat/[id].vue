@@ -3,6 +3,7 @@ import { prepareNotificationSound } from '../../utils/notificationSound'
 import { recoverActiveRun } from '../../utils/activeRunRecovery'
 import { connectRouteRun } from '../../utils/routeRunConnection'
 import type { WebChatMessage } from '~/types/web-chat'
+import type { QueuedMessage } from '~/utils/queuedMessages'
 import { messageText } from '~/utils/chatMessages'
 import { writeClipboardText } from '~/utils/clipboard'
 
@@ -20,6 +21,11 @@ let copiedMessageTimer: ReturnType<typeof setTimeout> | undefined
 const refreshSessions = inject<() => Promise<void> | void>('refreshSessions')
 
 const sessionId = computed(() => String(route.params.id))
+const queuedMessages = useQueuedMessages()
+const queuedForSession = computed(() => queuedMessages.forSession(sessionId.value))
+const steeringQueuedMessageId = ref<string | null>(null)
+const queuedMessageToSendAfterStop = ref<QueuedMessage | null>(null)
+let stopQueuedAutoSend: (() => void) | undefined
 const {
   data,
   error: sessionError,
@@ -168,12 +174,25 @@ async function stopRun() {
   await activeChatRuns.stop(sessionId.value)
 }
 
-async function onSubmit() {
-  const message = input.value.trim()
-  if (!message || activeChatRuns.isRunning(sessionId.value) || submitStatus.value === 'submitted') return
-  if (shouldBlockForMissingWorkspace(message)) return
-  if (await submitSlashCommandIfNeeded(message)) return
+function warnAttachmentsCannotBeQueued() {
+  toast.add({
+    color: 'warning',
+    title: 'Attachments cannot be queued yet',
+    description: 'Wait for the current response to finish, then send the message with attachments.'
+  })
+}
 
+function enqueueMessage(message: string) {
+  if (context.attachments.value.length) {
+    warnAttachmentsCannotBeQueued()
+    return
+  }
+
+  const queued = queuedMessages.enqueue(sessionId.value, message)
+  if (queued) input.value = ''
+}
+
+async function sendMessageNow(message: string) {
   const pendingAttachments = [...context.attachments.value]
   void prepareNotificationSound()
   input.value = ''
@@ -200,6 +219,118 @@ async function onSubmit() {
     showError(err, 'Failed to send message')
     submitStatus.value = 'error'
     activeChatRuns.markFinished(sessionId.value)
+    throw err
+  }
+}
+
+async function onSubmit() {
+  const message = input.value.trim()
+  if (!message) return
+  if (shouldBlockForMissingWorkspace(message)) return
+  if (await submitSlashCommandIfNeeded(message)) return
+
+  if (activeChatRuns.isRunning(sessionId.value) || submitStatus.value === 'submitted') {
+    enqueueMessage(message)
+    return
+  }
+
+  await sendMessageNow(message)
+}
+
+function editQueuedMessage(id: string) {
+  const queued = queuedForSession.value.find(message => message.id === id)
+  if (!queued) return
+  input.value = queued.text
+  queuedMessages.remove(id)
+}
+
+function deleteQueuedMessage(id: string) {
+  queuedMessages.remove(id)
+}
+
+function isConflictError(err: unknown) {
+  const candidate = err as { statusCode?: number, status?: number, response?: { status?: number } }
+  return candidate.statusCode === 409 || candidate.status === 409 || candidate.response?.status === 409
+}
+
+async function steerViaStopFallback(queued: QueuedMessage) {
+  queuedMessageToSendAfterStop.value = queued
+  await activeChatRuns.stop(sessionId.value)
+  queuedMessages.remove(queued.id)
+  toast.add({
+    color: 'neutral',
+    title: 'Steering after interrupt',
+    description: 'Hermes will continue with this message after the current run stops.'
+  })
+}
+
+async function steerQueuedMessage(id: string) {
+  const queued = queuedForSession.value.find(message => message.id === id)
+  if (!queued) return
+
+  const runId = activeChatRuns.runIdForSession(sessionId.value)
+  if (!runId) {
+    if (!activeChatRuns.isRunning(sessionId.value)) {
+      queuedMessages.remove(id)
+      try {
+        await sendMessageNow(queued.text)
+      } catch {
+        queuedMessages.prepend(queued)
+      }
+      return
+    }
+
+    toast.add({ color: 'warning', title: 'Could not steer run', description: 'The active run is still reconnecting.' })
+    return
+  }
+
+  steeringQueuedMessageId.value = id
+  try {
+    await api.steerRun(runId, { text: queued.text })
+    queuedMessages.remove(id)
+    messages.value.push({
+      id: crypto.randomUUID(),
+      role: 'system',
+      createdAt: new Date().toISOString(),
+      parts: [{ type: 'steer', text: queued.text }]
+    })
+  } catch (err) {
+    if (isConflictError(err)) {
+      try {
+        await steerViaStopFallback(queued)
+      } catch (fallbackErr) {
+        queuedMessageToSendAfterStop.value = null
+        showError(fallbackErr, 'Failed to steer run')
+      }
+    } else {
+      showError(err, 'Failed to steer run')
+    }
+  } finally {
+    steeringQueuedMessageId.value = null
+  }
+}
+
+async function sendNextQueuedMessage() {
+  if (!hasSession.value || activeChatRuns.isRunning(sessionId.value) || submitStatus.value === 'submitted') return
+
+  const priority = queuedMessageToSendAfterStop.value
+  if (priority) {
+    queuedMessageToSendAfterStop.value = null
+    try {
+      await sendMessageNow(priority.text)
+    } catch {
+      queuedMessages.prepend(priority)
+    }
+    return
+  }
+
+  const queued = queuedMessages.shiftForSession(sessionId.value)
+  if (!queued) return
+
+  try {
+    await sendMessageNow(queued.text)
+  } catch {
+    queuedMessages.prepend(queued)
   }
 }
 
@@ -229,8 +360,16 @@ watch(
   { immediate: true }
 )
 
+onMounted(() => {
+  stopQueuedAutoSend = activeChatRuns.onFinished(async (finishedSessionId) => {
+    if (finishedSessionId !== sessionId.value) return
+    await sendNextQueuedMessage()
+  })
+})
+
 onBeforeUnmount(() => {
   if (copiedMessageTimer) clearTimeout(copiedMessageTimer)
+  stopQueuedAutoSend?.()
   cleanupRunMessages()
 })
 </script>
@@ -302,48 +441,59 @@ onBeforeUnmount(() => {
           <UButton to="/" color="neutral" variant="soft" icon="i-lucide-plus" label="Start a new chat" />
         </div>
 
-        <UChatPrompt
-          v-else
-          v-model="input"
-          :aria-hidden="isLoadingSession"
-          :class="isLoadingSession ? 'pointer-events-none invisible' : undefined"
-          :error="error || context.contextError.value"
-          @submit="onSubmit"
-          @keydown.down="onPromptArrowDown"
-          @keydown.up="onPromptArrowUp"
-          @keydown.esc="onPromptEscape"
-          @keydown.enter="onPromptEnter"
-        >
-          <template #footer>
-            <ChatPromptFooter
-              :submit-status="chatStatus"
-              :workspaces="context.workspaces.value"
-              :selected-workspace="context.selectedWorkspace.value"
-              :workspace-invalid-signal="workspaceInvalidSignal"
-              :workspaces-loading="context.workspacesLoading.value"
-              :attachments="context.attachments.value"
-              :attachments-loading="context.attachmentsLoading.value"
-              :models="composer.models.value"
-              :selected-model="composer.selectedModel.value"
-              :selected-reasoning-effort="composer.selectedReasoningEffort.value"
-              :capabilities-loading="composer.capabilitiesLoading.value"
-              :slash-commands="slashCommands.filteredCommands.value"
-              :slash-commands-open="slashCommands.isOpen.value"
-              :slash-commands-loading="slashCommands.loading.value"
-              :highlighted-slash-command-index="slashCommands.highlightedIndex.value"
-              @stop="stopRun"
-              @update-selected-workspace="context.selectWorkspace"
-              @attach-files="attachFiles"
-              @remove-attachment="context.removeAttachment"
-              @voice-text="appendVoiceText"
-              @voice-error="showVoiceError"
-              @update-selected-model="composer.selectedModel.value = $event"
-              @update-selected-reasoning-effort="composer.selectedReasoningEffort.value = $event"
-              @select-slash-command="selectSlashCommand"
-              @highlight-slash-command="slashCommands.highlightedIndex.value = $event"
-            />
-          </template>
-        </UChatPrompt>
+        <div v-else class="space-y-2">
+          <ChatQueuedMessages
+            v-if="queuedForSession.length"
+            :messages="queuedForSession"
+            :steering-id="steeringQueuedMessageId"
+            :disabled="isLoadingSession || !hasSession"
+            @edit="editQueuedMessage"
+            @delete="deleteQueuedMessage"
+            @steer="steerQueuedMessage"
+          />
+
+          <UChatPrompt
+            v-model="input"
+            :aria-hidden="isLoadingSession"
+            :class="isLoadingSession ? 'pointer-events-none invisible' : undefined"
+            :error="error || context.contextError.value"
+            @submit="onSubmit"
+            @keydown.down="onPromptArrowDown"
+            @keydown.up="onPromptArrowUp"
+            @keydown.esc="onPromptEscape"
+            @keydown.enter="onPromptEnter"
+          >
+            <template #footer>
+              <ChatPromptFooter
+                :submit-status="chatStatus"
+                :workspaces="context.workspaces.value"
+                :selected-workspace="context.selectedWorkspace.value"
+                :workspace-invalid-signal="workspaceInvalidSignal"
+                :workspaces-loading="context.workspacesLoading.value"
+                :attachments="context.attachments.value"
+                :attachments-loading="context.attachmentsLoading.value"
+                :models="composer.models.value"
+                :selected-model="composer.selectedModel.value"
+                :selected-reasoning-effort="composer.selectedReasoningEffort.value"
+                :capabilities-loading="composer.capabilitiesLoading.value"
+                :slash-commands="slashCommands.filteredCommands.value"
+                :slash-commands-open="slashCommands.isOpen.value"
+                :slash-commands-loading="slashCommands.loading.value"
+                :highlighted-slash-command-index="slashCommands.highlightedIndex.value"
+                @stop="stopRun"
+                @update-selected-workspace="context.selectWorkspace"
+                @attach-files="attachFiles"
+                @remove-attachment="context.removeAttachment"
+                @voice-text="appendVoiceText"
+                @voice-error="showVoiceError"
+                @update-selected-model="composer.selectedModel.value = $event"
+                @update-selected-reasoning-effort="composer.selectedReasoningEffort.value = $event"
+                @select-slash-command="selectSlashCommand"
+                @highlight-slash-command="slashCommands.highlightedIndex.value = $event"
+              />
+            </template>
+          </UChatPrompt>
+        </div>
       </UContainer>
     </template>
   </UDashboardPanel>

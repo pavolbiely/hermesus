@@ -255,6 +255,7 @@ def agent_executor(
             tool_progress_callback=tool_progress,
         )
         context.interrupt_agent = getattr(agent, "interrupt", None)
+        context.steer_agent = getattr(agent, "steer", None)
 
         prompt = context.input
         if context.workspace:

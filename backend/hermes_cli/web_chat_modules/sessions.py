@@ -125,6 +125,21 @@ def message_prompts(message: dict[str, Any]) -> list[WebChatPrompt]:
     return prompts
 
 
+def message_steers(message: dict[str, Any]) -> list[str]:
+    items = parse_jsonish(message.get("codex_message_items"))
+    if not isinstance(items, list):
+        return []
+
+    steers: list[str] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "web_chat_steer":
+            continue
+        text = item.get("text")
+        if isinstance(text, str) and text.strip():
+            steers.append(text)
+    return steers
+
+
 def message_parts(message: dict[str, Any]) -> list[WebChatPart]:
     parts: list[WebChatPart] = []
     attachments = message_attachments(message)
@@ -132,6 +147,8 @@ def message_parts(message: dict[str, Any]) -> list[WebChatPart]:
         parts.append(WebChatPart(type="media", attachments=attachments))
     for prompt in message_prompts(message):
         parts.append(WebChatPart(type="interactive_prompt", prompt=prompt))
+    for steer in message_steers(message):
+        parts.append(WebChatPart(type="steer", text=steer))
     if message.get("reasoning") or message.get("reasoning_content"):
         parts.append(WebChatPart(type="reasoning", text=message.get("reasoning") or message.get("reasoning_content")))
     if message.get("content") and message.get("role") != "tool":

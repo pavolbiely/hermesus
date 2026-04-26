@@ -92,6 +92,10 @@ export function useActiveChatRuns() {
     return runningSessionIds.value.includes(sessionId)
   }
 
+  function runIdForSession(sessionId: string) {
+    return [...trackedRuns.values()].find(run => run.sessionId === sessionId)?.runId || null
+  }
+
   function markPromptUnread(sessionId: string) {
     if (!promptUnreadSessionIds.value.includes(sessionId)) {
       promptUnreadSessionIds.value = [...promptUnreadSessionIds.value, sessionId]
@@ -234,6 +238,7 @@ export function useActiveChatRuns() {
     markRunning,
     markFinished,
     isRunning,
+    runIdForSession,
     markPromptUnread,
     clearPromptUnread,
     hasPromptUnread,
