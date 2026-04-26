@@ -1,195 +1,27 @@
-"""Git status and persisted workspace-change helpers for web chat."""
+"""Git status and workspace diff helpers for web chat."""
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
-import time
 from pathlib import Path
 from typing import Any, Callable
 
-from hermes_state import SessionDB
-
 from .models import WebChatFileChange, WebChatWorkspaceChanges
-
-
-def ensure_git_change_schema(db: SessionDB) -> None:
-    def _do(conn):
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS web_chat_git_changes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                run_id TEXT,
-                message_id INTEGER,
-                workspace TEXT NOT NULL,
-                baseline_status TEXT,
-                final_status TEXT NOT NULL,
-                files_json TEXT NOT NULL,
-                patch_json TEXT,
-                patch_truncated INTEGER NOT NULL DEFAULT 0,
-                total_files INTEGER NOT NULL DEFAULT 0,
-                total_additions INTEGER NOT NULL DEFAULT 0,
-                total_deletions INTEGER NOT NULL DEFAULT 0,
-                created_at REAL NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_web_chat_git_changes_session ON web_chat_git_changes(session_id, created_at)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_web_chat_git_changes_message ON web_chat_git_changes(message_id)"
-        )
-
-    db._execute_write(_do)
-
-
-def record_session_git_changes(
-    db: SessionDB,
-    *,
-    session_id: str,
-    run_id: str | None,
-    message_id: int | None,
-    workspace: str,
-    baseline_status: str | None,
-    final_status: str,
-    changes: WebChatWorkspaceChanges,
-) -> None:
-    if not changes.files:
-        return
-
-    ensure_git_change_schema(db)
-    files_json = json.dumps([file.model_dump() for file in changes.files], separators=(",", ":"))
-    patch_json = json.dumps(changes.patch, separators=(",", ":")) if changes.patch else None
-
-    def _do(conn):
-        conn.execute(
-            """
-            INSERT INTO web_chat_git_changes (
-                session_id, run_id, message_id, workspace, baseline_status, final_status,
-                files_json, patch_json, patch_truncated, total_files, total_additions,
-                total_deletions, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                session_id,
-                run_id,
-                message_id,
-                workspace,
-                baseline_status,
-                final_status,
-                files_json,
-                patch_json,
-                1 if changes.patchTruncated else 0,
-                changes.totalFiles,
-                changes.totalAdditions,
-                changes.totalDeletions,
-                time.time(),
-            ),
-        )
-
-    db._execute_write(_do)
-
-
-def session_git_changes_by_message(
-    db: SessionDB,
-    session_id: str,
-    *,
-    iso_from_epoch: Callable[[Any], str],
-) -> dict[str, WebChatWorkspaceChanges]:
-    ensure_git_change_schema(db)
-    with db._lock:
-        rows = db._conn.execute(
-            """
-            SELECT * FROM web_chat_git_changes
-            WHERE session_id = ? AND message_id IS NOT NULL
-            ORDER BY created_at ASC, id ASC
-            """,
-            (session_id,),
-        ).fetchall()
-
-    changes_by_message: dict[str, WebChatWorkspaceChanges] = {}
-    for row in rows:
-        try:
-            files = [WebChatFileChange(**item) for item in json.loads(row["files_json"] or "[]")]
-            patch = json.loads(row["patch_json"]) if row["patch_json"] else None
-        except Exception:
-            continue
-        changes_by_message[str(row["message_id"])] = WebChatWorkspaceChanges(
-            files=files,
-            totalFiles=row["total_files"],
-            totalAdditions=row["total_additions"],
-            totalDeletions=row["total_deletions"],
-            workspace=row["workspace"],
-            runId=row["run_id"],
-            capturedAt=iso_from_epoch(row["created_at"]),
-            patch=patch,
-            patchTruncated=bool(row["patch_truncated"]),
-        )
-    return changes_by_message
-
-
-def copy_session_git_changes(
-    db: SessionDB,
-    *,
-    source_session_id: str,
-    target_session_id: str,
-    message_id_map: dict[int, int],
-    record_changes: Callable[..., None] = record_session_git_changes,
-) -> None:
-    ensure_git_change_schema(db)
-    with db._lock:
-        rows = db._conn.execute(
-            "SELECT * FROM web_chat_git_changes WHERE session_id = ? ORDER BY created_at ASC, id ASC",
-            (source_session_id,),
-        ).fetchall()
-
-    for row in rows:
-        source_message_id = row["message_id"]
-        target_message_id = message_id_map.get(source_message_id) if source_message_id is not None else None
-        files = [WebChatFileChange(**item) for item in json.loads(row["files_json"] or "[]")]
-        record_changes(
-            db,
-            session_id=target_session_id,
-            run_id=row["run_id"],
-            message_id=target_message_id,
-            workspace=row["workspace"],
-            baseline_status=row["baseline_status"],
-            final_status=row["final_status"],
-            changes=WebChatWorkspaceChanges(
-                files=files,
-                totalFiles=row["total_files"],
-                totalAdditions=row["total_additions"],
-                totalDeletions=row["total_deletions"],
-                workspace=row["workspace"],
-                runId=row["run_id"],
-                patch=json.loads(row["patch_json"]) if row["patch_json"] else None,
-                patchTruncated=bool(row["patch_truncated"]),
-            ),
-        )
-
-
-def delete_session_git_changes(db: SessionDB, session_id: str) -> None:
-    ensure_git_change_schema(db)
-
-    def _do(conn):
-        conn.execute("DELETE FROM web_chat_git_changes WHERE session_id = ?", (session_id,))
-
-    db._execute_write(_do)
-
-
-def delete_session_git_changes_after_message(db: SessionDB, session_id: str, message_id: int) -> None:
-    ensure_git_change_schema(db)
-
-    def _do(conn):
-        conn.execute(
-            "DELETE FROM web_chat_git_changes WHERE session_id = ? AND message_id > ?",
-            (session_id, message_id),
-        )
-
-    db._execute_write(_do)
+from .git_patches import (
+    file_patch,
+    is_git_tracked,
+    untracked_file_patch,
+    workspace_patch,
+)
+from .persisted_git_changes import (
+    copy_session_git_changes,
+    delete_session_git_changes,
+    delete_session_git_changes_after_message,
+    ensure_git_change_schema,
+    record_session_git_changes,
+    session_git_changes_by_message,
+)
 
 
 def workspace_root(workspace: str | None = None) -> Path | None:
@@ -266,87 +98,6 @@ def workspace_changes_since(
         patch=patch,
         patchTruncated=patch_truncated,
     )
-
-
-def workspace_patch(
-    root: Path,
-    files: list[WebChatFileChange],
-    *,
-    max_patch_bytes_per_file: int,
-    max_patch_bytes_per_run: int,
-) -> tuple[dict[str, Any] | None, bool]:
-    patch_files: list[dict[str, Any]] = []
-    total_bytes = 0
-    truncated_any = False
-
-    for file in files:
-        patch_text = file_patch(root, file)
-        truncated = False
-        if patch_text is not None:
-            encoded = patch_text.encode("utf-8", errors="ignore")
-            if len(encoded) > max_patch_bytes_per_file:
-                patch_text = encoded[:max_patch_bytes_per_file].decode("utf-8", errors="ignore")
-                truncated = True
-            total_bytes += len(patch_text.encode("utf-8", errors="ignore"))
-            if total_bytes > max_patch_bytes_per_run:
-                patch_text = None
-                truncated = True
-        truncated_any = truncated_any or truncated
-        patch_files.append({
-            "path": file.path,
-            "status": file.status,
-            "patch": patch_text,
-            "truncated": truncated,
-        })
-
-    return ({"files": patch_files} if patch_files else None), truncated_any
-
-
-def file_patch(root: Path, file: WebChatFileChange) -> str | None:
-    if file.status == "created" and not is_git_tracked(root, file.path):
-        return untracked_file_patch(root, file.path)
-
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(root), "diff", "--", file.path],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except Exception:
-        return None
-    return result.stdout or None
-
-
-def is_git_tracked(root: Path, path: str) -> bool:
-    return subprocess.run(
-        ["git", "-C", str(root), "ls-files", "--error-unmatch", path],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    ).returncode == 0
-
-
-def untracked_file_patch(root: Path, path: str) -> str | None:
-    file_path = root / path
-    try:
-        data = file_path.read_bytes()
-    except Exception:
-        return None
-    if b"\0" in data:
-        return None
-    text = data.decode("utf-8", errors="ignore")
-    lines = text.splitlines()
-    header = [
-        "diff --git a/{path} b/{path}".format(path=path),
-        "new file mode 100644",
-        "--- /dev/null",
-        f"+++ b/{path}",
-        f"@@ -0,0 +1,{len(lines)} @@",
-    ]
-    body = [f"+{line}" for line in lines]
-    return "\n".join(header + body) + "\n"
 
 
 def workspace_changes(
