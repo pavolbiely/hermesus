@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { prepareNotificationSound } from '../../utils/notificationSound'
-import { requiresWorkspaceBeforeSubmit } from '../../utils/slashCommands'
-import type { ExecuteCommandResponse, WebChatCommand, WebChatMessage, WebChatPart } from '~/types/web-chat'
+import type { WebChatMessage } from '~/types/web-chat'
 import { messageText } from '~/utils/chatMessages'
 import { writeClipboardText } from '~/utils/clipboard'
-import { toolDisplayName } from '~/utils/toolCalls'
 
 const route = useRoute()
 const api = useHermesApi()
@@ -14,23 +12,9 @@ const context = useChatComposerContext()
 const toast = useToast()
 const input = ref('')
 const slashCommands = useSlashCommands({ input })
-const messages = ref<WebChatMessage[]>([])
-const bottomRef = ref<HTMLElement | null>(null)
-const autoScrollEnabled = ref(true)
 const copiedMessageId = ref<string | null>(null)
-const editingMessageId = ref<string | null>(null)
-const editingText = ref('')
-const editingMessageContainer = ref<HTMLElement | null>(null)
-const editingMessageBubble = ref<HTMLElement | null>(null)
-const editingMessageRow = ref<HTMLElement | null>(null)
-const savingEditedMessageId = ref<string | null>(null)
-const submitStatus = ref<'ready' | 'submitted' | 'streaming' | 'error'>('ready')
-const streamError = ref<Error | undefined>()
 const workspaceInvalidSignal = ref(0)
-const connectedRunIds = new Set<string>()
 let copiedMessageTimer: ReturnType<typeof setTimeout> | undefined
-let unsubscribeRun: (() => void) | undefined
-const error = computed(() => streamError.value)
 const refreshSessions = inject<() => Promise<void> | void>('refreshSessions')
 
 const sessionId = computed(() => String(route.params.id))
@@ -47,6 +31,77 @@ const {
 
 const isLoadingSession = computed(() => sessionStatus.value === 'idle' || sessionStatus.value === 'pending')
 const hasSession = computed(() => Boolean(data.value?.session))
+const {
+  messages,
+  bottomRef,
+  autoScrollEnabled,
+  submitStatus,
+  streamError,
+  chatStatus,
+  isRunning,
+  createThinkingMessage,
+  isThinkingMessage,
+  scheduleAutoScroll,
+  pauseAutoScroll,
+  connectRun,
+  hasConnectedRun,
+  cleanupRunMessages
+} = useChatRunMessages({
+  sessionId,
+  refresh,
+  refreshSessions,
+  toast,
+  activeChatRuns
+})
+const error = computed(() => streamError.value)
+const {
+  shouldBlockForMissingWorkspace,
+  submitSlashCommandIfNeeded,
+  selectSlashCommand,
+  onPromptArrowDown,
+  onPromptArrowUp,
+  onPromptEscape,
+  onPromptEnter
+} = useChatSlashCommandSubmission({
+  api,
+  input,
+  messages,
+  sessionId,
+  selectedWorkspace: context.selectedWorkspace,
+  selectedModel: composer.selectedModel,
+  selectedReasoningEffort: composer.selectedReasoningEffort,
+  streamError,
+  workspaceInvalidSignal,
+  slashCommands,
+  toast,
+  scheduleAutoScroll
+})
+const {
+  editingMessageId,
+  editingText,
+  savingEditedMessageId,
+  setEditingMessageContainer,
+  resetEditingTextareaLayout,
+  startEditingMessage,
+  cancelEditingMessage,
+  saveEditedMessage
+} = useChatMessageEditing({
+  api,
+  data,
+  messages,
+  sessionId,
+  submitStatus,
+  autoScrollEnabled,
+  selectedWorkspace: context.selectedWorkspace,
+  selectedModel: composer.selectedModel,
+  selectedReasoningEffort: composer.selectedReasoningEffort,
+  activeChatRuns,
+  createThinkingMessage,
+  scheduleAutoScroll,
+  connectRun,
+  rememberLastUsedSelection: composer.rememberLastUsedSelection,
+  showError
+})
 
 watchEffect(() => {
   if (data.value?.session.id !== sessionId.value) {
@@ -71,8 +126,6 @@ const title = computed(() => {
   if (sessionError.value || !hasSession.value) return 'Chat unavailable'
   return data.value?.session.title || 'Chat'
 })
-const chatStatus = computed(() => submitStatus.value === 'submitted' || activeChatRuns.isRunning(sessionId.value) ? 'streaming' : 'ready')
-const isRunning = computed(() => activeChatRuns.isRunning(sessionId.value))
 
 async function copyUserMessage(message: WebChatMessage) {
   const text = messageText(message)
@@ -94,159 +147,6 @@ async function copyUserMessage(message: WebChatMessage) {
   }
 }
 
-function isThinkingMessage(message: WebChatMessage) {
-  return message.role === 'assistant' && message.parts.some(part => part.status === 'thinking') && isRunning.value
-}
-
-function createThinkingMessage() {
-  const message = createLocalMessage('assistant', '')
-  message.parts = [{ type: 'text', text: '', status: 'thinking' }]
-  return message
-}
-
-function ensureThinkingMessage() {
-  const lastMessage = messages.value.at(-1)
-  if (lastMessage?.role === 'assistant') return
-  messages.value.push(createThinkingMessage())
-}
-
-function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
-  if (!autoScrollEnabled.value) return
-  bottomRef.value?.scrollIntoView({ block: 'end', behavior })
-}
-
-function isNearBottom() {
-  const scrollTop = window.scrollY || document.documentElement.scrollTop
-  return window.innerHeight + scrollTop >= document.documentElement.scrollHeight - 80
-}
-
-const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
-
-function pauseAutoScroll(event?: Event) {
-  if (!isRunning.value) return
-  if (event instanceof KeyboardEvent && !scrollKeys.has(event.key)) return
-  if (event?.type === 'scroll' && isNearBottom()) return
-  autoScrollEnabled.value = false
-}
-
-function scheduleAutoScroll(behavior: ScrollBehavior = 'smooth') {
-  nextTick(() => scrollToBottom(behavior))
-}
-
-function appendAssistantDelta(content: string) {
-  if (!content) return
-
-  let assistant = messages.value[messages.value.length - 1]
-  if (!assistant || assistant.role !== 'assistant') {
-    assistant = createLocalMessage('assistant', '')
-    messages.value.push(assistant)
-  }
-
-  const textPart = assistant.parts.find(part => part.type === 'text')
-  if (textPart) {
-    textPart.text = textPart.status === 'thinking' ? content : `${textPart.text || ''}${content}`
-    textPart.status = null
-  } else {
-    assistant.parts.push({ type: 'text', text: content })
-  }
-
-  scheduleAutoScroll()
-}
-
-function replaceAssistantMessage(content?: string) {
-  if (!content) return
-
-  const assistant = messages.value[messages.value.length - 1]
-  if (assistant?.role === 'assistant') {
-    assistant.parts = [{ type: 'text', text: content, status: null }]
-    scheduleAutoScroll()
-  }
-}
-
-function appendToolStarted(payload: { name?: string, preview?: string, input?: unknown }) {
-  let assistant = messages.value[messages.value.length - 1]
-  if (!assistant || assistant.role !== 'assistant') {
-    assistant = createLocalMessage('assistant', '')
-    messages.value.push(assistant)
-  }
-
-  const thinkingIndex = assistant.parts.findIndex(part => part.status === 'thinking')
-  if (thinkingIndex >= 0) assistant.parts.splice(thinkingIndex, 1)
-
-  const toolPart: WebChatPart = {
-    type: 'tool',
-    name: payload.name,
-    status: 'running',
-    input: payload.input ?? payload.preview ?? null
-  }
-  toolPart.name = toolDisplayName(toolPart)
-  assistant.parts.push(toolPart)
-  scheduleAutoScroll()
-}
-
-function markToolCompleted(payload: { name?: string }) {
-  const assistant = [...messages.value].reverse().find(message => message.role === 'assistant')
-  const toolPart = assistant?.parts.findLast(part => part.type === 'tool' && part.status === 'running' && (!payload.name || part.name === payload.name))
-  if (toolPart) toolPart.status = 'completed'
-}
-
-function connectRun(runId: string, targetSessionId = sessionId.value) {
-  connectedRunIds.add(runId)
-  const tracked = activeChatRuns.trackRun(targetSessionId, runId)
-  if (!tracked) {
-    submitStatus.value = 'ready'
-    void refresh()
-    void refreshSessions?.()
-    return
-  }
-
-  if (targetSessionId === sessionId.value) {
-    submitStatus.value = 'streaming'
-    ensureThinkingMessage()
-    scheduleAutoScroll()
-  }
-
-  unsubscribeRun?.()
-  unsubscribeRun = activeChatRuns.subscribe(targetSessionId, {
-    onDelta: (content) => {
-      if (targetSessionId === sessionId.value) appendAssistantDelta(content)
-    },
-    onCompleted: (content) => {
-      if (targetSessionId === sessionId.value) replaceAssistantMessage(content)
-    },
-    onToolStarted: (payload) => {
-      if (targetSessionId === sessionId.value) appendToolStarted(payload)
-    },
-    onToolCompleted: (payload) => {
-      if (targetSessionId === sessionId.value) markToolCompleted(payload)
-    },
-    onError: (err) => {
-      if (targetSessionId !== sessionId.value) return
-      streamError.value = err
-      submitStatus.value = 'error'
-      toast.add({ color: 'error', title: 'Run failed', description: err.message })
-    },
-    async onFinished() {
-      if (targetSessionId === sessionId.value) {
-        submitStatus.value = 'ready'
-        await refresh()
-      }
-      await refreshSessions?.()
-    }
-  })
-}
-
-watch(
-  () => [route.query.run, data.value?.session.id] as const,
-  ([runId]) => {
-    const targetSessionId = data.value?.session.id
-    if (typeof runId !== 'string' || !targetSessionId || connectedRunIds.has(runId) || targetSessionId !== sessionId.value) return
-    autoScrollEnabled.value = true
-    connectRun(runId, targetSessionId)
-  },
-  { immediate: true }
-)
-
 function appendVoiceText(text: string) {
   input.value = input.value ? `${input.value} ${text}` : text
 }
@@ -255,11 +155,6 @@ function showError(err: unknown, fallback: string) {
   const message = getHermesErrorMessage(err, fallback)
   streamError.value = new Error(message)
   toast.add({ color: 'error', title: fallback, description: message })
-}
-
-function showCommandError(err: unknown, commandText: string) {
-  const message = getHermesErrorMessage(err, 'Command failed')
-  toast.add({ color: 'warning', title: commandText, description: message })
 }
 
 async function attachFiles(files: File[]) {
@@ -276,206 +171,6 @@ function showVoiceError(message: string) {
 
 async function stopRun() {
   await activeChatRuns.stop(sessionId.value)
-}
-
-function messageAttachmentIds(message: WebChatMessage) {
-  return message.parts
-    .flatMap(part => part.type === 'media' ? part.attachments || [] : [])
-    .map(attachment => attachment.id)
-}
-
-function setEditingMessageContainer(el: unknown) {
-  editingMessageContainer.value = el instanceof HTMLElement ? el : null
-}
-
-function appendCommandResponse(commandText: string, response: ExecuteCommandResponse) {
-  messages.value.push({
-    id: `command-user-${Date.now()}`,
-    role: 'user',
-    createdAt: new Date().toISOString(),
-    parts: [{ type: 'text', text: commandText }]
-  })
-  if (response.message) {
-    if (response.changes) response.message.parts.push({ type: 'changes', changes: response.changes })
-    messages.value.push(response.message)
-  }
-  scheduleAutoScroll()
-}
-
-function shouldBlockForMissingWorkspace(message: string) {
-  if (!requiresWorkspaceBeforeSubmit(message, context.selectedWorkspace.value)) return false
-  workspaceInvalidSignal.value += 1
-  return true
-}
-
-async function executeSlashCommand(commandText: string) {
-  if (shouldBlockForMissingWorkspace(commandText)) return false
-
-  streamError.value = undefined
-  try {
-    const response = await api.executeCommand({
-      command: commandText,
-      sessionId: sessionId.value,
-      workspace: context.selectedWorkspace.value,
-      model: composer.selectedModel.value,
-      reasoningEffort: composer.selectedReasoningEffort.value
-    })
-    appendCommandResponse(commandText, response)
-  } catch (err) {
-    showCommandError(err, commandText)
-  }
-  return true
-}
-
-async function submitSlashCommandIfNeeded(message: string) {
-  if (!message.startsWith('/')) return false
-  await slashCommands.loadCommands()
-  const command = slashCommands.exactCommand(message)
-  if (!command) return false
-  const executed = await executeSlashCommand(command.name)
-  if (executed) input.value = ''
-  return true
-}
-
-async function selectSlashCommand(command: WebChatCommand) {
-  input.value = command.name
-  const executed = await executeSlashCommand(command.name)
-  if (executed) input.value = ''
-}
-
-function onPromptArrowDown(event: KeyboardEvent) {
-  if (!slashCommands.isOpen.value) return
-  event.preventDefault()
-  slashCommands.moveHighlight(1)
-}
-
-function onPromptArrowUp(event: KeyboardEvent) {
-  if (!slashCommands.isOpen.value) return
-  event.preventDefault()
-  slashCommands.moveHighlight(-1)
-}
-
-function onPromptEscape(event: KeyboardEvent) {
-  if (!slashCommands.isOpen.value) return
-  event.preventDefault()
-  event.stopPropagation()
-  slashCommands.close()
-}
-
-function onPromptEnter(event: KeyboardEvent) {
-  if (!slashCommands.isOpen.value) return
-  const command = slashCommands.highlightedCommand()
-  if (!command) return
-  event.preventDefault()
-  selectSlashCommand(command)
-}
-
-function resetEditingTextareaLayout() {
-  if (editingMessageContainer.value) {
-    editingMessageContainer.value.style.width = ''
-    editingMessageContainer.value.style.marginLeft = ''
-  }
-
-  if (editingMessageBubble.value) {
-    editingMessageBubble.value.style.width = ''
-    editingMessageBubble.value = null
-  }
-
-  if (editingMessageRow.value) {
-    editingMessageRow.value.style.width = ''
-    editingMessageRow.value.style.maxWidth = ''
-    editingMessageRow.value.style.transform = ''
-    editingMessageRow.value = null
-  }
-}
-
-function alignEditingTextareaWithPrompt() {
-  const container = editingMessageContainer.value
-  const promptTextarea = document.querySelector<HTMLTextAreaElement>('textarea[placeholder="Type your message here…"]')
-  const promptRoot = promptTextarea?.closest<HTMLElement>('[data-slot="root"]')
-  const bubble = container?.parentElement
-  const row = bubble?.parentElement
-  if (!container || !promptRoot || !bubble || !row) return
-
-  const promptRect = promptRoot.getBoundingClientRect()
-  const bubbleStyle = getComputedStyle(bubble)
-  const bubblePaddingLeft = parseFloat(bubbleStyle.paddingLeft) || 0
-  const bubblePadding = bubblePaddingLeft + (parseFloat(bubbleStyle.paddingRight) || 0)
-  const bubbleWidth = promptRect.width + bubblePadding
-
-  editingMessageBubble.value = bubble
-  editingMessageRow.value = row
-  row.style.width = `${bubbleWidth}px`
-  row.style.maxWidth = 'none'
-  row.style.transform = `translateX(-${bubblePaddingLeft}px)`
-  bubble.style.width = `${bubbleWidth}px`
-  container.style.width = `${promptRect.width}px`
-  container.style.marginLeft = '0'
-}
-
-async function focusEditingTextarea() {
-  await nextTick()
-  alignEditingTextareaWithPrompt()
-  const textarea = editingMessageContainer.value?.querySelector('textarea')
-  if (!textarea) return
-  textarea.focus()
-  const end = textarea.value.length
-  textarea.setSelectionRange(end, end)
-}
-
-function startEditingMessage(message: WebChatMessage) {
-  if (activeChatRuns.isRunning(sessionId.value) || submitStatus.value === 'submitted') return
-  resetEditingTextareaLayout()
-  editingMessageId.value = message.id
-  editingText.value = messageText(message)
-  void focusEditingTextarea()
-}
-
-function cancelEditingMessage() {
-  resetEditingTextareaLayout()
-  editingMessageId.value = null
-  editingText.value = ''
-}
-
-async function saveEditedMessage(message: WebChatMessage) {
-  const content = editingText.value.trim()
-  if (!content || savingEditedMessageId.value || activeChatRuns.isRunning(sessionId.value)) return
-
-  const previousMessages = [...messages.value]
-  savingEditedMessageId.value = message.id
-  void prepareNotificationSound()
-
-  try {
-    const updated = await api.editMessage(sessionId.value, message.id, content)
-    data.value = updated
-    messages.value = [...updated.messages]
-    resetEditingTextareaLayout()
-    editingMessageId.value = null
-    editingText.value = ''
-    submitStatus.value = 'submitted'
-    autoScrollEnabled.value = true
-    messages.value.push(createThinkingMessage())
-    scheduleAutoScroll()
-
-    const attachmentIds = messageAttachmentIds(message)
-    const run = await api.startRun(content, {
-      sessionId: sessionId.value,
-      model: composer.selectedModel.value,
-      reasoningEffort: composer.selectedReasoningEffort.value,
-      workspace: context.selectedWorkspace.value || undefined,
-      attachments: attachmentIds,
-      editedMessageId: message.id
-    })
-    composer.rememberLastUsedSelection()
-    connectRun(run.runId, sessionId.value)
-  } catch (err) {
-    messages.value = previousMessages
-    submitStatus.value = 'error'
-    activeChatRuns.markFinished(sessionId.value)
-    showError(err, 'Failed to edit message')
-  } finally {
-    savingEditedMessageId.value = null
-  }
 }
 
 async function onSubmit() {
@@ -532,7 +227,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('touchmove', pauseAutoScroll)
   window.removeEventListener('keydown', pauseAutoScroll)
   if (copiedMessageTimer) clearTimeout(copiedMessageTimer)
-  unsubscribeRun?.()
+  cleanupRunMessages()
 })
 </script>
 

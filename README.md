@@ -15,9 +15,16 @@ web/                                        # Nuxt UI prototype
   app/components/WorkspaceModal.vue         # workspace create/edit modal
   app/components/SidebarSessionGroups.vue   # sidebar workspace groups and chat row actions
   app/components/ChatMessageContent.vue      # chat message rendering and user-message actions
+  app/components/ChatSlashCommandMenu.vue    # slash-command autocomplete menu
+  app/components/ChatAttachmentList.vue      # composer attachment chips
+  app/components/ToolCallDetailSection.vue   # tool-call detail modal payload section
+  app/composables/useChatRunMessages.ts      # chat run streaming message state and autoscroll handling
+  app/composables/useChatSlashCommandSubmission.ts # slash-command submit and keyboard handling
+  app/composables/useChatMessageEditing.ts   # user-message edit state, layout, and rerun handling
   app/components/ChatRenameModal.vue        # chat rename modal
   app/components/ChatConfirmActionModal.vue # chat duplicate/delete confirmation modal
   app/utils/chatMessages.ts                 # pure chat message formatting/grouping helpers
+  app/utils/toolCallDetails.ts              # pure tool-call detail formatting helpers
   app/utils/clipboard.ts                    # clipboard helper used by chat actions
 ```
 

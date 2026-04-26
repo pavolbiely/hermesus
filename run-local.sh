@@ -77,9 +77,14 @@ prepare_runtime() {
     --exclude '__pycache__' \
     --exclude '.venv' \
     --exclude 'venv' \
+    --exclude 'hermes_cli/web_chat_modules' \
     "$UPSTREAM/" "$RUNTIME/"
 
   cp "$ROOT/backend/hermes_cli/web_chat.py" "$RUNTIME/hermes_cli/web_chat.py"
+  mkdir -p "$RUNTIME/hermes_cli/web_chat_modules"
+  rsync -a --delete \
+    --exclude '__pycache__' \
+    "$ROOT/backend/hermes_cli/web_chat_modules/" "$RUNTIME/hermes_cli/web_chat_modules/"
   mkdir -p "$RUNTIME/tests/hermes_cli"
   cp "$ROOT/backend/tests/hermes_cli/test_web_chat.py" "$RUNTIME/tests/hermes_cli/test_web_chat.py"
 
