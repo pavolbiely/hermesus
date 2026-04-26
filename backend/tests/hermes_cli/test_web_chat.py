@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import pytest
@@ -99,6 +100,53 @@ def test_returns_session_with_messages(client):
     assert data["messages"][1]["parts"][0]["type"] == "reasoning"
     assert data["messages"][1]["parts"][0]["text"] == "Short reasoning"
     assert data["messages"][1]["parts"][1]["text"] == "Yes."
+
+
+def test_attaches_tool_output_to_tool_call_part(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("session-tools", source="web-chat", model="test-model")
+    db.append_message("session-tools", "user", "Find files")
+    db.append_message(
+        "session-tools",
+        "assistant",
+        None,
+        tool_calls=[
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "search_files",
+                    "arguments": "{\"query\":\"package.json\"}",
+                },
+            }
+        ],
+    )
+    db.append_message(
+        "session-tools",
+        "tool",
+        json.dumps({
+            "total_count": 1,
+            "files": ["/Users/pavolbiely/Sites/hermesum/web/package.json"],
+        }),
+        tool_call_id="call_1",
+        tool_name="search_files",
+    )
+
+    response = client.get("/api/web-chat/sessions/session-tools")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [message["role"] for message in data["messages"]] == ["user", "assistant"]
+    tool_part = data["messages"][1]["parts"][0]
+    assert tool_part["type"] == "tool"
+    assert tool_part["name"] == "search_files"
+    assert tool_part["input"]["id"] == "call_1"
+    assert tool_part["output"] == {
+        "total_count": 1,
+        "files": ["/Users/pavolbiely/Sites/hermesum/web/package.json"],
+    }
 
 
 def test_returns_chat_capabilities(client, monkeypatch):

@@ -364,10 +364,17 @@ def _message_parts(message: dict[str, Any]) -> list[WebChatPart]:
     parts: list[WebChatPart] = []
     if message.get("reasoning") or message.get("reasoning_content"):
         parts.append(WebChatPart(type="reasoning", text=message.get("reasoning") or message.get("reasoning_content")))
-    if message.get("content"):
+    if message.get("content") and message.get("role") != "tool":
         parts.append(WebChatPart(type="text", text=message["content"]))
-    if message.get("tool_name") or message.get("tool_calls"):
-        parts.append(WebChatPart(type="tool", name=message.get("tool_name"), input=message.get("tool_calls")))
+    if message.get("role") == "tool":
+        parts.append(WebChatPart(type="tool", name=message.get("tool_name"), output=_parse_jsonish(message.get("content"))))
+    elif message.get("tool_name") or message.get("tool_calls"):
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tool_call in tool_calls:
+                parts.append(WebChatPart(type="tool", name=_tool_call_name(tool_call) or message.get("tool_name"), input=tool_call))
+        else:
+            parts.append(WebChatPart(type="tool", name=message.get("tool_name"), input=tool_calls))
     return parts
 
 
@@ -381,6 +388,81 @@ def _serialize_message(message: dict[str, Any]) -> WebChatMessage:
         toolName=message.get("tool_name"),
         toolCalls=message.get("tool_calls"),
     )
+
+
+def _parse_jsonish(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    if not text or text[0] not in "[{":
+        return value
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+def _tool_call_name(tool_call: Any) -> str | None:
+    if not isinstance(tool_call, dict):
+        return None
+
+    function = tool_call.get("function")
+    if isinstance(function, dict) and isinstance(function.get("name"), str):
+        return function["name"]
+    if isinstance(tool_call.get("name"), str):
+        return tool_call["name"]
+    return None
+
+
+def _tool_call_id(tool_call: Any) -> str | None:
+    if not isinstance(tool_call, dict):
+        return None
+
+    value = tool_call.get("id") or tool_call.get("tool_call_id")
+    return str(value) if value else None
+
+
+def _attach_tool_output(messages: list[WebChatMessage], tool_message: dict[str, Any]) -> bool:
+    output = _parse_jsonish(tool_message.get("content"))
+    tool_call_id = str(tool_message.get("tool_call_id") or "")
+    tool_name = tool_message.get("tool_name")
+
+    for message in reversed(messages):
+        if message.role != "assistant":
+            continue
+
+        fallback_part: WebChatPart | None = None
+        for part in message.parts:
+            if part.type != "tool" or part.output is not None:
+                continue
+
+            if not fallback_part:
+                fallback_part = part
+
+            if tool_call_id and _tool_call_id(part.input) == tool_call_id:
+                part.output = output
+                if tool_name and not part.name:
+                    part.name = tool_name
+                return True
+
+        if fallback_part:
+            fallback_part.output = output
+            if tool_name and not fallback_part.name:
+                fallback_part.name = tool_name
+            return True
+
+    return False
+
+
+def _serialize_messages(messages: list[dict[str, Any]]) -> list[WebChatMessage]:
+    serialized: list[WebChatMessage] = []
+    for message in messages:
+        if message.get("role") == "tool" and _attach_tool_output(serialized, message):
+            continue
+        serialized.append(_serialize_message(message))
+    return serialized
 
 
 def _get_session_or_404(db: SessionDB, session_id: str) -> dict[str, Any]:
@@ -579,7 +661,7 @@ def create_session(payload: CreateSessionRequest) -> SessionDetailResponse:
     messages = db.get_messages(session_id)
     return SessionDetailResponse(
         session=_serialize_session(session),
-        messages=[_serialize_message(message) for message in messages],
+        messages=_serialize_messages(messages),
     )
 
 
@@ -590,7 +672,7 @@ def get_session(session_id: str) -> SessionDetailResponse:
     messages = db.get_messages(session_id)
     return SessionDetailResponse(
         session=_serialize_session(session),
-        messages=[_serialize_message(message) for message in messages],
+        messages=_serialize_messages(messages),
     )
 
 

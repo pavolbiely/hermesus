@@ -198,7 +198,7 @@ onBeforeUnmount(() => {
                 <Comark :markdown="partText(part)" :plugins="[highlight()]" class="*:first:mt-0 *:last:mb-0" />
               </UChatReasoning>
 
-              <UChatTool v-else-if="part.type === 'tool'" :text="part.name || 'Tool call'" />
+              <ToolCallItem v-else-if="part.type === 'tool'" :part="part" />
 
               <template v-else-if="part.type === 'text'">
                 <Comark
