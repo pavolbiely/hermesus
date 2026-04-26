@@ -1,3 +1,4 @@
+import { nextTick } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import type { WebChatCommand, WebChatMessage } from '~/types/web-chat'
 import { requiresWorkspaceBeforeSubmit } from '~/utils/slashCommands'
@@ -14,7 +15,7 @@ type UseChatSlashCommandSubmissionOptions = {
   workspaceInvalidSignal: Ref<number>
   slashCommands: ReturnType<typeof useSlashCommands>
   toast: ReturnType<typeof useToast>
-  scheduleAutoScroll: (behavior?: ScrollBehavior, options?: { force?: boolean }) => void
+  submitStatus: Ref<'ready' | 'submitted' | 'streaming' | 'error'>
 }
 
 export function useChatSlashCommandSubmission(options: UseChatSlashCommandSubmissionOptions) {
@@ -36,7 +37,6 @@ export function useChatSlashCommandSubmission(options: UseChatSlashCommandSubmis
       if (response.changes) response.message.parts.push({ type: 'changes', changes: response.changes })
       options.messages.value.push(response.message)
     }
-    options.scheduleAutoScroll('auto', { force: true })
   }
 
   function shouldBlockForMissingWorkspace(message: string) {
@@ -50,6 +50,7 @@ export function useChatSlashCommandSubmission(options: UseChatSlashCommandSubmis
     if (shouldBlockForMissingWorkspace(commandText)) return false
 
     commandSubmitting.value = true
+    options.submitStatus.value = 'submitted'
     options.streamError.value = undefined
     try {
       const response = await options.api.executeCommand({
@@ -63,6 +64,8 @@ export function useChatSlashCommandSubmission(options: UseChatSlashCommandSubmis
     } catch (err) {
       showCommandError(err, commandText)
     } finally {
+      await nextTick()
+      options.submitStatus.value = 'ready'
       commandSubmitting.value = false
     }
     return true

@@ -10,13 +10,11 @@ type UseChatMessageEditingOptions = {
   messages: Ref<WebChatMessage[]>
   sessionId: ComputedRef<string>
   submitStatus: Ref<'ready' | 'submitted' | 'streaming' | 'error'>
-  autoScrollEnabled: Ref<boolean>
   selectedWorkspace: Ref<string | null>
   selectedModel: Ref<string | null>
   selectedReasoningEffort: Ref<string | null>
   activeChatRuns: ReturnType<typeof useActiveChatRuns>
   createThinkingMessage: () => WebChatMessage
-  scheduleAutoScroll: () => void
   connectRun: (runId: string, sessionId: string) => void
   rememberLastUsedSelection: () => void
   showError: (err: unknown, fallback: string) => void
@@ -123,9 +121,7 @@ export function useChatMessageEditing(options: UseChatMessageEditingOptions) {
       editingMessageId.value = null
       editingText.value = ''
       options.submitStatus.value = 'submitted'
-      options.autoScrollEnabled.value = true
       options.messages.value.push(options.createThinkingMessage())
-      options.scheduleAutoScroll()
 
       const attachmentIds = messageAttachmentIds(message)
       const run = await options.api.startRun(content, {

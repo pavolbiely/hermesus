@@ -33,16 +33,12 @@ const isLoadingSession = computed(() => sessionStatus.value === 'idle' || sessio
 const hasSession = computed(() => Boolean(data.value?.session))
 const {
   messages,
-  bottomRef,
-  autoScrollEnabled,
   submitStatus,
   streamError,
   chatStatus,
   isRunning,
   createThinkingMessage,
   isThinkingMessage,
-  scheduleAutoScroll,
-  pauseAutoScroll,
   connectRun,
   hasConnectedRun,
   cleanupRunMessages
@@ -75,7 +71,7 @@ const {
   workspaceInvalidSignal,
   slashCommands,
   toast,
-  scheduleAutoScroll
+  submitStatus
 })
 const {
   editingMessageId,
@@ -92,13 +88,11 @@ const {
   messages,
   sessionId,
   submitStatus,
-  autoScrollEnabled,
   selectedWorkspace: context.selectedWorkspace,
   selectedModel: composer.selectedModel,
   selectedReasoningEffort: composer.selectedReasoningEffort,
   activeChatRuns,
   createThinkingMessage,
-  scheduleAutoScroll,
   connectRun,
   rememberLastUsedSelection: composer.rememberLastUsedSelection,
   showError
@@ -183,13 +177,11 @@ async function onSubmit() {
   const pendingAttachments = [...context.attachments.value]
   void prepareNotificationSound()
   input.value = ''
-  autoScrollEnabled.value = true
   submitStatus.value = 'submitted'
   const userMessage = createLocalMessage('user', message)
   if (pendingAttachments.length) userMessage.parts.unshift({ type: 'media', attachments: pendingAttachments })
   messages.value.push(userMessage)
   messages.value.push(createThinkingMessage())
-  scheduleAutoScroll()
 
   try {
     const run = await api.startRun(message, {
@@ -215,18 +207,7 @@ async function onSubmit() {
   }
 }
 
-onMounted(() => {
-  window.addEventListener('scroll', pauseAutoScroll, { passive: true })
-  window.addEventListener('wheel', pauseAutoScroll, { passive: true })
-  window.addEventListener('touchmove', pauseAutoScroll, { passive: true })
-  window.addEventListener('keydown', pauseAutoScroll)
-})
-
 onBeforeUnmount(() => {
-  window.removeEventListener('scroll', pauseAutoScroll)
-  window.removeEventListener('wheel', pauseAutoScroll)
-  window.removeEventListener('touchmove', pauseAutoScroll)
-  window.removeEventListener('keydown', pauseAutoScroll)
   if (copiedMessageTimer) clearTimeout(copiedMessageTimer)
   cleanupRunMessages()
 })
@@ -283,7 +264,6 @@ onBeforeUnmount(() => {
               />
             </template>
           </UChatMessages>
-          <div ref="bottomRef" class="h-px" aria-hidden="true" />
         </template>
       </UContainer>
     </template>

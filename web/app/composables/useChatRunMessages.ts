@@ -4,7 +4,6 @@ import { toolDisplayName } from '~/utils/toolCalls'
 import { createLocalMessage } from './useHermesRunStream'
 
 type SubmitStatus = 'ready' | 'submitted' | 'streaming' | 'error'
-type AutoScrollOptions = { force?: boolean }
 
 type UseChatRunMessagesOptions = {
   sessionId: ComputedRef<string>
@@ -15,12 +14,8 @@ type UseChatRunMessagesOptions = {
   activeChatRuns: ReturnType<typeof useActiveChatRuns>
 }
 
-const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
-
 export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   const messages = ref<WebChatMessage[]>([])
-  const bottomRef = ref<HTMLElement | null>(null)
-  const autoScrollEnabled = ref(true)
   const submitStatus: Ref<SubmitStatus> = ref('ready')
   const streamError = ref<Error | undefined>()
   const connectedRunIds = new Set<string>()
@@ -45,49 +40,6 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     messages.value.push(createThinkingMessage())
   }
 
-  function scrollElementToBottom(element: HTMLElement) {
-    let parent = element.parentElement
-    while (parent) {
-      if (parent.scrollHeight > parent.clientHeight) parent.scrollTop = parent.scrollHeight
-      parent = parent.parentElement
-    }
-
-    const page = document.scrollingElement
-    if (page) page.scrollTop = page.scrollHeight
-  }
-
-  function scrollToBottom(behavior: ScrollBehavior = 'smooth', options: AutoScrollOptions = {}) {
-    if (!autoScrollEnabled.value && !options.force) return
-
-    const element = bottomRef.value
-    if (!element) return
-
-    if (options.force) scrollElementToBottom(element)
-    element.scrollIntoView({ block: 'end', behavior })
-  }
-
-  function isNearBottom() {
-    const scrollTop = window.scrollY || document.documentElement.scrollTop
-    return window.innerHeight + scrollTop >= document.documentElement.scrollHeight - 80
-  }
-
-  function pauseAutoScroll(event?: Event) {
-    if (!isRunning.value) return
-    if (event instanceof KeyboardEvent && !scrollKeys.has(event.key)) return
-    if (event?.type === 'scroll' && isNearBottom()) return
-    autoScrollEnabled.value = false
-  }
-
-  function runPostRenderScroll(behavior: ScrollBehavior, options: AutoScrollOptions, frames = 2) {
-    scrollToBottom(behavior, options)
-    if (frames <= 0) return
-    requestAnimationFrame(() => runPostRenderScroll(behavior, options, frames - 1))
-  }
-
-  function scheduleAutoScroll(behavior: ScrollBehavior = 'smooth', options: AutoScrollOptions = {}) {
-    nextTick(() => runPostRenderScroll(behavior, options))
-  }
-
   function appendAssistantDelta(content: string) {
     if (!content) return
 
@@ -105,7 +57,6 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       assistant.parts.push({ type: 'text', text: content })
     }
 
-    scheduleAutoScroll()
   }
 
   function replaceAssistantMessage(content?: string) {
@@ -114,7 +65,6 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     const assistant = messages.value[messages.value.length - 1]
     if (assistant?.role === 'assistant') {
       assistant.parts = [{ type: 'text', text: content, status: null }]
-      scheduleAutoScroll()
     }
   }
 
@@ -136,7 +86,6 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     }
     toolPart.name = toolDisplayName(toolPart)
     assistant.parts.push(toolPart)
-    scheduleAutoScroll()
   }
 
   function markToolCompleted(payload: { name?: string }) {
@@ -158,7 +107,6 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     if (targetSessionId === options.sessionId.value) {
       submitStatus.value = 'streaming'
       ensureThinkingMessage()
-      scheduleAutoScroll()
     }
 
     unsubscribeRun?.()
@@ -203,16 +151,12 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
 
   return {
     messages,
-    bottomRef,
-    autoScrollEnabled,
     submitStatus,
     streamError,
     chatStatus,
     isRunning,
     createThinkingMessage,
     isThinkingMessage,
-    scheduleAutoScroll,
-    pauseAutoScroll,
     connectRun,
     hasConnectedRun,
     cleanupRunMessages
