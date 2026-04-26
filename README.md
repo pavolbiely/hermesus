@@ -45,7 +45,7 @@ Use this for day-to-day iteration:
 ./run-local.sh --dev
 ```
 
-Then open `http://127.0.0.1:3019/`.
+Then open `http://127.0.0.1:3019/`. In dev mode, opening the Hermes backend URL (`http://127.0.0.1:9119/`) redirects browser UI requests to the Nuxt dev server so you do not accidentally view stale static output.
 
 What this does:
 

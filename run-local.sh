@@ -100,6 +100,23 @@ if "app.include_router(web_chat_router)" not in text:
         1,
     )
 
+if "HERMES_DEV_WEB_ORIGIN" not in text:
+    needle = 'app = FastAPI(title="Hermes Agent", version=__version__)'
+    redirect_code = """
+
+@app.middleware("http")
+async def _redirect_static_requests_to_dev_server(request, call_next):
+    dev_web_origin = os.environ.get("HERMES_DEV_WEB_ORIGIN")
+    if dev_web_origin and not request.url.path.startswith(("/api", "/ws")):
+        from fastapi.responses import RedirectResponse
+        target = f"{dev_web_origin.rstrip('/')}{request.url.path}"
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return RedirectResponse(target, status_code=307)
+    return await call_next(request)
+"""
+    text = text.replace(needle, needle + redirect_code, 1)
+
 if 'request.query_params.get("session_token", "")' not in text:
     needle = """    if session_header and hmac.compare_digest(\n        session_header.encode(),\n        _SESSION_TOKEN.encode(),\n    ):\n        return True\n\n"""
     replacement = needle + """    if request.url.path.startswith("/api/web-chat/runs/") and request.url.path.endswith("/events"):\n        session_token = request.query_params.get("session_token", "")\n        if session_token and hmac.compare_digest(session_token.encode(), _SESSION_TOKEN.encode()):\n            return True\n\n"""
@@ -249,7 +266,10 @@ start_dashboard() {
   (
     cd "$RUNTIME"
     local env_args=("HERMES_WEB_DIST=$WEB/.output/public")
-    if [[ -n "${DEV_AUTH_VALUE:-}" ]]; then
+    if [[ "$DEV" == "1" ]]; then
+      env_args+=("HERMES_DEV_WEB_ORIGIN=http://127.0.0.1:$WEB_DEV_PORT")
+    fi
+    if [[ -n "${HERMES_SESSION_TOKEN_OVERRIDE:-}" ]]; then
       env_args+=("HERMES_SESSION_TOKEN=$HERMES_SESSION_TOKEN_OVERRIDE")
     fi
     env "${env_args[@]}" "$PYTHON" -m hermes_cli.main dashboard --port "$PORT"
