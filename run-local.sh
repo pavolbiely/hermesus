@@ -215,6 +215,25 @@ stop_dashboard() {
   CHILD_PID=""
 }
 
+kill_existing_port_processes() {
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "Warning: lsof not found; cannot auto-stop existing process on port $PORT" >&2
+    return
+  fi
+
+  local pids
+  pids="$(lsof -ti tcp:"$PORT" 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return
+  fi
+
+  echo "Stopping existing process(es) on port $PORT: $pids"
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+  done <<< "$pids"
+}
+
 cleanup() {
   stop_dashboard
 }
@@ -222,6 +241,7 @@ cleanup() {
 run_once() {
   prepare_runtime
   ensure_web_build
+  kill_existing_port_processes
   echo "Starting Hermes dashboard with Nuxt prototype on http://127.0.0.1:$PORT"
   echo "Runtime copy: $RUNTIME"
   echo "Source checkout is only read/copied, not modified: $UPSTREAM"
@@ -234,6 +254,7 @@ run_watch() {
 
   prepare_runtime
   ensure_web_build
+  kill_existing_port_processes
   local current_sig
   current_sig="$(watch_signature)"
   start_dashboard
