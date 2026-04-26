@@ -18,27 +18,16 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   const messages = ref<WebChatMessage[]>([])
   const submitStatus: Ref<SubmitStatus> = ref('ready')
   const streamError = ref<Error | undefined>()
+  const hasAssistantResponseStarted = ref(false)
   const connectedRunIds = new Set<string>()
   let unsubscribeRun: (() => void) | undefined
 
-  const chatStatus = computed(() => submitStatus.value === 'submitted' || options.activeChatRuns.isRunning(options.sessionId.value) ? 'streaming' : 'ready')
   const isRunning = computed(() => options.activeChatRuns.isRunning(options.sessionId.value))
-
-  function createThinkingMessage() {
-    const message = createLocalMessage('assistant', '')
-    message.parts = [{ type: 'text', text: '', status: 'thinking' }]
-    return message
-  }
-
-  function isThinkingMessage(message: WebChatMessage) {
-    return message.role === 'assistant' && message.parts.some(part => part.status === 'thinking') && isRunning.value
-  }
-
-  function ensureThinkingMessage() {
-    const lastMessage = messages.value.at(-1)
-    if (lastMessage?.role === 'assistant') return
-    messages.value.push(createThinkingMessage())
-  }
+  const chatStatus = computed(() => {
+    if (submitStatus.value === 'error') return 'error'
+    if (submitStatus.value === 'submitted' || (isRunning.value && !hasAssistantResponseStarted.value)) return 'submitted'
+    return isRunning.value ? 'streaming' : 'ready'
+  })
 
   function assistantMessage() {
     let assistant = messages.value[messages.value.length - 1]
@@ -57,6 +46,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   function appendAssistantDelta(content: string) {
     if (!content) return
 
+    hasAssistantResponseStarted.value = true
     const assistant = assistantMessage()
     removeThinkingPart(assistant)
 
@@ -73,6 +63,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   function replaceAssistantMessage(content?: string) {
     if (!content) return
 
+    hasAssistantResponseStarted.value = true
     const assistant = assistantMessage()
     removeThinkingPart(assistant)
     const textPart = assistant.parts.find(part => part.type === 'text')
@@ -85,6 +76,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   }
 
   function appendToolStarted(payload: { name?: string, preview?: string, input?: unknown }) {
+    hasAssistantResponseStarted.value = true
     let assistant = messages.value[messages.value.length - 1]
     if (!assistant || assistant.role !== 'assistant') {
       assistant = createLocalMessage('assistant', '')
@@ -111,6 +103,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   }
 
   function appendPrompt(prompt: InteractivePrompt) {
+    hasAssistantResponseStarted.value = true
     const assistant = assistantMessage()
     removeThinkingPart(assistant)
     const existing = assistant.parts.find(part => part.prompt?.id === prompt.id)
@@ -133,6 +126,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
 
   function connectRun(runId: string, targetSessionId = options.sessionId.value) {
     connectedRunIds.add(runId)
+    if (targetSessionId === options.sessionId.value) hasAssistantResponseStarted.value = false
     const tracked = options.activeChatRuns.trackRun(targetSessionId, runId)
     if (!tracked) {
       submitStatus.value = 'ready'
@@ -143,7 +137,6 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
 
     if (targetSessionId === options.sessionId.value) {
       submitStatus.value = 'streaming'
-      ensureThinkingMessage()
     }
 
     unsubscribeRun?.()
@@ -198,8 +191,6 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     streamError,
     chatStatus,
     isRunning,
-    createThinkingMessage,
-    isThinkingMessage,
     connectRun,
     hasConnectedRun,
     cleanupRunMessages

@@ -1,5 +1,6 @@
 import type { InteractivePrompt } from '~/types/web-chat'
 import { playNotificationSound } from '../utils/notificationSound'
+import { createRunEventReplay } from '../utils/runEventReplay'
 
 type RunEventPayload = Record<string, unknown>
 
@@ -19,6 +20,7 @@ type TrackedRun = {
   sessionId: string
   source: EventSource
   subscribers: Set<ActiveRunHandlers>
+  replay: ReturnType<typeof createRunEventReplay>
 }
 
 const trackedRuns = new Map<string, TrackedRun>()
@@ -44,6 +46,15 @@ function parsePayload(event: Event): RunEventPayload {
 
 function notify(run: TrackedRun, notifySubscriber: (subscriber: ActiveRunHandlers) => void) {
   for (const subscriber of run.subscribers) notifySubscriber(subscriber)
+}
+
+function recordAndNotify<K extends keyof ActiveRunHandlers>(
+  run: TrackedRun,
+  handler: K,
+  payload: Parameters<NonNullable<ActiveRunHandlers[K]>>[0]
+) {
+  run.replay.record(handler, payload)
+  notify(run, subscriber => subscriber[handler]?.(payload as never))
 }
 
 function closeTrackedRun(runId: string) {
@@ -116,7 +127,8 @@ export function useActiveChatRuns() {
       runId,
       sessionId,
       source,
-      subscribers: new Set()
+      subscribers: new Set(),
+      replay: createRunEventReplay()
     }
     trackedRuns.set(runId, run)
 
@@ -153,14 +165,14 @@ export function useActiveChatRuns() {
       if (!prompt) return
       if (!isActiveVisibleChat(run.sessionId)) markPromptUnread(run.sessionId)
       playNotificationSound(isActiveVisibleChat(run.sessionId) ? 'default' : 'attention')
-      notify(run, subscriber => subscriber.onPromptRequested?.(prompt))
+      recordAndNotify(run, 'onPromptRequested', prompt)
     })
 
     const updatePrompt = (event: Event) => {
       const payload = parsePayload(event)
       const prompt = promptFromPayload(payload)
       if (!prompt) return
-      notify(run, subscriber => subscriber.onPromptUpdated?.(prompt))
+      recordAndNotify(run, 'onPromptUpdated', prompt)
     }
 
     source.addEventListener('prompt.answered', updatePrompt)
@@ -188,7 +200,10 @@ export function useActiveChatRuns() {
 
   function subscribe(sessionId: string, handlers: ActiveRunHandlers) {
     const runs = [...trackedRuns.values()].filter(run => run.sessionId === sessionId)
-    for (const run of runs) run.subscribers.add(handlers)
+    for (const run of runs) {
+      run.subscribers.add(handlers)
+      run.replay.replay(handlers)
+    }
 
     return () => {
       for (const run of runs) run.subscribers.delete(handlers)

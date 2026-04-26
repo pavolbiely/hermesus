@@ -7,7 +7,6 @@ const editingText = defineModel<string>('editingText', { required: true })
 
 defineProps<{
   message: WebChatMessage
-  isThinking: boolean
   copiedMessageId: string | null
   editingMessageId: string | null
   savingEditedMessageId: string | null
@@ -24,11 +23,6 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div v-if="isThinking" class="flex items-center gap-2 text-sm text-muted">
-    <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
-    <span>Thinking…</span>
-  </div>
-
   <template v-for="(group, index) in groupMessageParts(message.parts)" :key="`${message.id}-${group.type}-${index}`">
     <div v-if="group.type === 'tools'" class="space-y-0.5">
       <ToolCallItem

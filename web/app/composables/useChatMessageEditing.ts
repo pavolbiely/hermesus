@@ -14,7 +14,6 @@ type UseChatMessageEditingOptions = {
   selectedModel: Ref<string | null>
   selectedReasoningEffort: Ref<string | null>
   activeChatRuns: ReturnType<typeof useActiveChatRuns>
-  createThinkingMessage: () => WebChatMessage
   connectRun: (runId: string, sessionId: string) => void
   rememberLastUsedSelection: () => void
   showError: (err: unknown, fallback: string) => void
@@ -121,7 +120,6 @@ export function useChatMessageEditing(options: UseChatMessageEditingOptions) {
       editingMessageId.value = null
       editingText.value = ''
       options.submitStatus.value = 'submitted'
-      options.messages.value.push(options.createThinkingMessage())
 
       const attachmentIds = messageAttachmentIds(message)
       const run = await options.api.startRun(content, {

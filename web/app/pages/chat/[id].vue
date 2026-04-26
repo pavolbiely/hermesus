@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { prepareNotificationSound } from '../../utils/notificationSound'
+import { connectRouteRun } from '../../utils/routeRunConnection'
 import type { WebChatMessage } from '~/types/web-chat'
 import { messageText } from '~/utils/chatMessages'
 import { writeClipboardText } from '~/utils/clipboard'
@@ -37,8 +38,6 @@ const {
   streamError,
   chatStatus,
   isRunning,
-  createThinkingMessage,
-  isThinkingMessage,
   connectRun,
   hasConnectedRun,
   cleanupRunMessages
@@ -92,7 +91,6 @@ const {
   selectedModel: composer.selectedModel,
   selectedReasoningEffort: composer.selectedReasoningEffort,
   activeChatRuns,
-  createThinkingMessage,
   connectRun,
   rememberLastUsedSelection: composer.rememberLastUsedSelection,
   showError
@@ -182,7 +180,6 @@ async function onSubmit() {
   const userMessage = createLocalMessage('user', message)
   if (pendingAttachments.length) userMessage.parts.unshift({ type: 'media', attachments: pendingAttachments })
   messages.value.push(userMessage)
-  messages.value.push(createThinkingMessage())
 
   try {
     const run = await api.startRun(message, {
@@ -196,9 +193,6 @@ async function onSubmit() {
     context.clearAttachments()
     connectRun(run.runId, sessionId.value)
   } catch (err) {
-    if (messages.value.at(-1)?.role === 'assistant' && messages.value.at(-1)?.parts.some(part => part.status === 'thinking')) {
-      messages.value.pop()
-    }
     messages.value = messages.value.filter(message => message.id !== userMessage.id)
     input.value = message
     context.attachments.value = pendingAttachments
@@ -207,6 +201,19 @@ async function onSubmit() {
     activeChatRuns.markFinished(sessionId.value)
   }
 }
+
+watch(
+  [sessionId, () => route.query.run],
+  ([currentSessionId, queryRun]) => {
+    connectRouteRun({
+      sessionId: currentSessionId,
+      queryRun,
+      hasConnectedRun,
+      connectRun
+    })
+  },
+  { immediate: true }
+)
 
 onBeforeUnmount(() => {
   if (copiedMessageTimer) clearTimeout(copiedMessageTimer)
@@ -248,11 +255,17 @@ onBeforeUnmount(() => {
             :shouldScrollToBottom="true"
             :autoScroll="true"
           >
+            <template #indicator>
+              <div class="flex items-center gap-2 overflow-hidden text-muted">
+                <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin" />
+                <UChatShimmer text="Thinking…" class="text-sm" />
+              </div>
+            </template>
+
             <template #content="{ message }: { message: WebChatMessage }">
               <ChatMessageContent
                 v-model:editing-text="editingText"
                 :message="message"
-                :is-thinking="isThinkingMessage(message)"
                 :copied-message-id="copiedMessageId"
                 :editing-message-id="editingMessageId"
                 :saving-edited-message-id="savingEditedMessageId"
