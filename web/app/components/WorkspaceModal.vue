@@ -62,7 +62,7 @@ function updateOpen(open: boolean) {
         <UFormField label="Directory path" required>
           <UInput
             v-model="workspacePath"
-            placeholder="/Users/pavolbiely/Sites/hermesum"
+            placeholder="~/Sites/hermesum"
             class="w-full font-mono"
             list="workspace-directory-suggestions"
             :disabled="pending"

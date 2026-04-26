@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
 from hermes_state import SessionDB
 
@@ -222,6 +222,7 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
             session_git_changes_by_message=services.session_git_changes_by_message,
             serialize_session=services.serialize_session,
             serialize_messages=services.serialize_messages,
+            active_run_for_session=services.run_manager().active_run_for_session,
         )
 
     @router.post("/runs", status_code=status.HTTP_202_ACCEPTED, response_model=StartRunResponse)
@@ -229,8 +230,19 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
         return services.run_manager().start(payload)
 
     @router.get("/runs/{run_id}/events")
-    def run_events(run_id: str) -> StreamingResponse:
-        return StreamingResponse(services.run_manager().events(run_id), media_type="text/event-stream")
+    def run_events(
+        run_id: str,
+        after: int | None = Query(default=None, ge=0),
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    ) -> StreamingResponse:
+        event_after = after
+        if event_after is None and last_event_id and last_event_id.isdigit():
+            event_after = int(last_event_id)
+        return StreamingResponse(
+            services.run_manager().events(run_id, after=event_after),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @router.post("/runs/{run_id}/prompts/{prompt_id}/response", response_model=RespondRunPromptResponse)
     def respond_run_prompt(run_id: str, prompt_id: str, payload: RespondRunPromptRequest) -> RespondRunPromptResponse:

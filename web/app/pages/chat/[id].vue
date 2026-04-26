@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { prepareNotificationSound } from '../../utils/notificationSound'
+import { recoverActiveRun } from '../../utils/activeRunRecovery'
 import { connectRouteRun } from '../../utils/routeRunConnection'
 import type { WebChatMessage } from '~/types/web-chat'
 import { messageText } from '~/utils/chatMessages'
@@ -201,6 +202,19 @@ async function onSubmit() {
     activeChatRuns.markFinished(sessionId.value)
   }
 }
+
+watch(
+  () => data.value?.activeRun,
+  (activeRun) => {
+    recoverActiveRun({
+      sessionId: sessionId.value,
+      activeRun,
+      hasConnectedRun,
+      connectRun
+    })
+  },
+  { immediate: true }
+)
 
 watch(
   [sessionId, () => route.query.run],

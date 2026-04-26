@@ -194,9 +194,17 @@ export type SessionListResponse = {
   sessions: WebChatSession[]
 }
 
+export type ActiveRunSummary = {
+  runId: string
+  sessionId: string
+  status: 'running' | 'stopping' | 'completed' | 'stopped' | 'failed'
+  prompts: InteractivePrompt[]
+}
+
 export type SessionDetailResponse = {
   session: WebChatSession
   messages: WebChatMessage[]
+  activeRun?: ActiveRunSummary | null
 }
 
 export type ExecuteCommandRequest = {

@@ -43,10 +43,10 @@ def find_managed_workspace_by_path(
     db: SessionDB | None = None,
 ) -> WebChatWorkspace | None:
     del db
-    resolved = str(path.resolve())
+    resolved = path.resolve()
     with settings_lock:
         for entry in workspace_entries(load_project_settings(db_factory)):
-            if entry["path"] == resolved:
+            if Path(entry["path"]).expanduser().resolve() == resolved:
                 return workspace_from_mapping(entry)
     return None
 

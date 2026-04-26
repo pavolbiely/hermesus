@@ -156,7 +156,7 @@ git -C "$HOME/.hermes/hermes-agent" status --short
 
 Before finalizing changes, check:
 
-- Did the change touch the correct repository (`/Users/pavolbiely/Sites/hermesum`) and not `$HOME/.hermes/hermes-agent` or another project?
+- Did the change touch this repository root and not `$HOME/.hermes/hermes-agent` or another project?
 - Are backend Pydantic models, route behavior, frontend types, and API composables aligned?
 - Are SSE event names and payloads still compatible with frontend consumers?
 - Are run cancellation, cleanup, and error states handled?

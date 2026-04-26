@@ -190,9 +190,8 @@ export function useActiveChatRuns() {
     })
 
     source.onerror = () => {
-      const error = new Error('Lost connection to Hermes run stream')
+      const error = new Error('Temporarily lost connection to Hermes run stream; reconnecting…')
       notify(run, subscriber => subscriber.onError?.(error))
-      finishRun(run)
     }
 
     return true

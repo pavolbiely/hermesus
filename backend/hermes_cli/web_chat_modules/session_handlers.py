@@ -121,6 +121,7 @@ def get_session_response(
     session_git_changes_by_message: Callable[[SessionDB, str], dict[str, WebChatWorkspaceChanges]],
     serialize_session: Callable[[dict[str, Any]], WebChatSession],
     serialize_messages: Callable[..., list[WebChatMessage]],
+    active_run_for_session: Callable[[str], Any | None] | None = None,
 ) -> SessionDetailResponse:
     session = get_session_or_404(db, session_id)
     messages = db.get_messages(session_id)
@@ -128,4 +129,5 @@ def get_session_response(
     return SessionDetailResponse(
         session=serialize_session(session),
         messages=serialize_messages(messages, changes_by_message=changes_by_message),
+        activeRun=active_run_for_session(session_id) if active_run_for_session else None,
     )

@@ -168,3 +168,70 @@ def test_agent_executor_routes_cross_thread_terminal_approval_to_web_prompt(monk
     assert prompts[0].kind == "approval"
     assert prompts[0].detail == "rm -rf /tmp/hermesum-approval-test/a"
     assert [choice.id for choice in prompts[0].choices] == ["once", "session", "always", "deny"]
+
+
+def test_prompt_response_rejects_ambiguous_choice_and_text(client, monkeypatch):
+    import hermes_cli.web_chat as web_chat
+    from hermes_cli.web_chat_modules.models import WebChatPrompt
+
+    prompt_requested = threading.Event()
+
+    def fake_executor(context, emit):
+        prompt = WebChatPrompt(
+            id="prompt-ambiguous",
+            runId=context.run_id,
+            sessionId=context.session_id,
+            kind="question",
+            title="Choose",
+            choices=[{"id": "yes", "label": "Yes"}],
+        )
+        prompt_requested.set()
+        context.request_prompt(prompt, 5)
+        return "done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+    start = client.post("/api/web-chat/runs", json={"input": "Ask"}).json()
+    assert prompt_requested.wait(timeout=2)
+
+    response = client.post(
+        f"/api/web-chat/runs/{start['runId']}/prompts/prompt-ambiguous/response",
+        json={"choice": "yes", "text": "also text"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Prompt response requires exactly one of choice or text"
+
+    cleanup = client.post(
+        f"/api/web-chat/runs/{start['runId']}/prompts/prompt-ambiguous/response",
+        json={"choice": "yes"},
+    )
+    assert cleanup.status_code == 200
+    with client.stream("GET", f"/api/web-chat/runs/{start['runId']}/events") as stream:
+        stream.read()
+
+
+def test_prompt_requested_sets_expires_at(client, monkeypatch):
+    import hermes_cli.web_chat as web_chat
+    from hermes_cli.web_chat_modules.models import WebChatPrompt
+
+    def fake_executor(context, emit):
+        prompt = WebChatPrompt(
+            id="prompt-expiry",
+            runId=context.run_id,
+            sessionId=context.session_id,
+            kind="approval",
+            title="Allow?",
+            choices=[{"id": "deny", "label": "Deny"}],
+        )
+        context.request_prompt(prompt, 0.01)
+        return "done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+    start = client.post("/api/web-chat/runs", json={"input": "Ask"}).json()
+
+    with client.stream("GET", f"/api/web-chat/runs/{start['runId']}/events") as stream:
+        body = stream.read().decode()
+
+    requested_line = next(line for line in body.splitlines() if line.startswith("data: ") and "prompt.requested" in line)
+    prompt = __import__("json").loads(requested_line.removeprefix("data: "))["prompt"]
+    assert prompt["expiresAt"] is not None

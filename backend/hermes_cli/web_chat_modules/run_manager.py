@@ -7,13 +7,13 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from uuid import uuid4
 
 from fastapi import HTTPException, status
 
-from .models import RespondRunPromptRequest, RespondRunPromptResponse, StartRunRequest, StartRunResponse, StopRunResponse, WebChatPrompt
+from .models import ActiveRunSummary, RespondRunPromptRequest, RespondRunPromptResponse, StartRunRequest, StartRunResponse, StopRunResponse, WebChatPrompt
 
 RunExecutor = Callable[["RunContext", Callable[[dict[str, Any]], None]], str]
 
@@ -39,11 +39,15 @@ class RunContext:
 @dataclass
 class ActiveRun:
     context: RunContext
-    events: "queue.Queue[dict[str, Any] | None]" = field(default_factory=queue.Queue)
     prompts: dict[str, WebChatPrompt] = field(default_factory=dict)
     prompt_responses: dict[str, "queue.Queue[str | None]"] = field(default_factory=dict)
     thread: threading.Thread | None = None
     created_at: float = field(default_factory=time.time)
+    events: list[dict[str, Any]] = field(default_factory=list)
+    event_condition: threading.Condition = field(default_factory=lambda: threading.Condition(threading.Lock()))
+    status: str = "running"
+    terminal: bool = False
+    next_event_id: int = 1
 
 
 @dataclass(frozen=True)
@@ -165,22 +169,35 @@ class RunManager:
         active.thread.start()
         return StartRunResponse(sessionId=session_id, runId=run_id)
 
-    def events(self, run_id: str):
+    def events(self, run_id: str, after: int | None = None):
         active = self._get(run_id)
+        cursor = max((after or 0) + 1, 1)
         while True:
-            event = active.events.get()
-            if event is None:
+            with active.event_condition:
+                while active.next_event_id <= cursor and not active.terminal:
+                    active.event_condition.wait(timeout=15)
+                    if active.next_event_id <= cursor and not active.terminal:
+                        yield ": keepalive\n\n"
+                events = [event for event in active.events if event["id"] >= cursor]
+                terminal = active.terminal
+
+            for event in events:
+                cursor = int(event["id"]) + 1
+                yield f"id: {event['id']}\n"
+                yield f"event: {event['type']}\n"
+                yield f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
+
+            if terminal and cursor >= active.next_event_id:
                 break
-            yield f"event: {event['type']}\n"
-            yield f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
 
     def stop(self, run_id: str) -> StopRunResponse:
         active = self._get(run_id)
         active.context.stop_requested.set()
+        active.status = "stopping"
         self._cancel_pending_prompts(active)
         if active.context.interrupt_agent:
             active.context.interrupt_agent("Chat interrupted by user")
-        active.events.put({"type": "run.stopping", "runId": run_id})
+        self._emit(active, {"type": "run.stopping"})
         return StopRunResponse(runId=run_id, stopped=True)
 
     def respond_prompt(self, run_id: str, prompt_id: str, request: RespondRunPromptRequest) -> RespondRunPromptResponse:
@@ -192,13 +209,13 @@ class RunManager:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt not found")
             if prompt.status != "pending":
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Prompt is no longer pending")
-            if not request.choice and not request.text:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Prompt response requires a choice or text")
+            if (request.choice is None) == (request.text is None):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Prompt response requires exactly one of choice or text")
             if request.choice:
                 allowed_choices = {choice.id for choice in prompt.choices}
                 if request.choice not in allowed_choices:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid prompt choice")
-            if request.text and not prompt.freeText and not request.choice:
+            if request.text and not prompt.freeText:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Prompt does not accept free-text responses")
 
             prompt.status = "answered"
@@ -215,6 +232,20 @@ class RunManager:
         with self._lock:
             return any(active.thread and active.thread.is_alive() for active in self._runs.values())
 
+    def active_run_for_session(self, session_id: str) -> ActiveRunSummary | None:
+        with self._lock:
+            runs = [active for active in self._runs.values() if active.context.session_id == session_id and not active.terminal]
+            if not runs:
+                return None
+            active = max(runs, key=lambda run: run.created_at)
+            prompts = list(active.prompts.values())
+            return ActiveRunSummary(
+                runId=active.context.run_id,
+                sessionId=active.context.session_id,
+                status=active.status,  # type: ignore[arg-type]
+                prompts=prompts,
+            )
+
     def _get(self, run_id: str) -> ActiveRun:
         with self._lock:
             active = self._runs.get(run_id)
@@ -223,7 +254,17 @@ class RunManager:
         return active
 
     def _emit(self, active: ActiveRun, event: dict[str, Any]) -> None:
-        active.events.put({"runId": active.context.run_id, "sessionId": active.context.session_id, **event})
+        with active.event_condition:
+            event_id = active.next_event_id
+            active.next_event_id += 1
+            active.events.append({"id": event_id, "runId": active.context.run_id, "sessionId": active.context.session_id, **event})
+            active.event_condition.notify_all()
+
+    def _finish(self, active: ActiveRun, status: str) -> None:
+        active.status = status
+        active.terminal = True
+        with active.event_condition:
+            active.event_condition.notify_all()
 
     def _iso_now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
@@ -232,6 +273,7 @@ class RunManager:
         prompt.runId = active.context.run_id
         prompt.sessionId = active.context.session_id
         prompt.createdAt = prompt.createdAt or self._iso_now()
+        prompt.expiresAt = prompt.expiresAt or (datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)).isoformat()
         prompt.status = "pending"
         response_queue: "queue.Queue[str | None]" = queue.Queue(maxsize=1)
         with self._lock:
@@ -290,6 +332,7 @@ class RunManager:
                 self._services.persist_run_workspace_changes(active.context, assistant_message_id)
                 self._emit(active, {"type": "message.completed", "content": interrupted_text})
                 self._emit(active, {"type": "run.stopped"})
+                self._finish(active, "stopped")
                 return
             if final_text:
                 assistant_message_id = self._services.db().append_message(
@@ -301,10 +344,12 @@ class RunManager:
                 self._services.persist_run_workspace_changes(active.context, assistant_message_id)
                 self._emit(active, {"type": "message.completed", "content": final_text})
             self._emit(active, {"type": "run.completed"})
+            self._finish(active, "completed")
         except Exception as exc:
             self._emit(active, {"type": "run.failed", "error": str(exc)})
+            self._finish(active, "failed")
         finally:
             self._cancel_pending_prompts(active)
             if assistant_message_id is None:
                 self._services.persist_run_workspace_changes(active.context, None)
-            active.events.put(None)
+            self._finish(active, active.status)

@@ -135,7 +135,7 @@ def test_attaches_tool_output_to_tool_call_part(client):
         "tool",
         json.dumps({
             "total_count": 1,
-            "files": ["/Users/pavolbiely/Sites/hermesum/web/package.json"],
+            "files": ["/workspace/hermesum/web/package.json"],
         }),
         tool_call_id="call_1",
         tool_name="search_files",
@@ -152,7 +152,7 @@ def test_attaches_tool_output_to_tool_call_part(client):
     assert tool_part["input"]["id"] == "call_1"
     assert tool_part["output"] == {
         "total_count": 1,
-        "files": ["/Users/pavolbiely/Sites/hermesum/web/package.json"],
+        "files": ["/workspace/hermesum/web/package.json"],
     }
 
 

@@ -211,9 +211,17 @@ class SessionListResponse(BaseModel):
     sessions: list[WebChatSession]
 
 
+class ActiveRunSummary(BaseModel):
+    runId: str
+    sessionId: str
+    status: Literal["running", "stopping", "completed", "stopped", "failed"]
+    prompts: list[WebChatPrompt] = Field(default_factory=list)
+
+
 class SessionDetailResponse(BaseModel):
     session: WebChatSession
     messages: list[WebChatMessage]
+    activeRun: ActiveRunSummary | None = None
 
 
 class CreateSessionRequest(BaseModel):

@@ -256,3 +256,66 @@ def test_stop_run_marks_active_run_as_stopping(client, monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.json() == {"runId": start["runId"], "stopped": True}
+
+
+def test_session_detail_exposes_active_run_and_pending_prompt(client, monkeypatch):
+    import hermes_cli.web_chat as web_chat
+    from hermes_cli.web_chat_modules.models import WebChatPrompt
+
+    prompt_requested = threading.Event()
+
+    def fake_executor(context, emit):
+        prompt = WebChatPrompt(
+            id="prompt-active",
+            runId=context.run_id,
+            sessionId=context.session_id,
+            kind="approval",
+            title="Allow command?",
+            choices=[{"id": "deny", "label": "Deny"}],
+        )
+        prompt_requested.set()
+        context.request_prompt(prompt, 5)
+        return "done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+    start = client.post("/api/web-chat/runs", json={"input": "Need approval"}).json()
+    assert prompt_requested.wait(timeout=2)
+
+    detail = client.get(f"/api/web-chat/sessions/{start['sessionId']}")
+
+    assert detail.status_code == 200
+    active_run = detail.json()["activeRun"]
+    assert active_run["runId"] == start["runId"]
+    assert active_run["sessionId"] == start["sessionId"]
+    assert active_run["status"] == "running"
+    assert active_run["prompts"][0]["id"] == "prompt-active"
+    assert active_run["prompts"][0]["status"] == "pending"
+
+    response = client.post(
+        f"/api/web-chat/runs/{start['runId']}/prompts/prompt-active/response",
+        json={"choice": "deny"},
+    )
+    assert response.status_code == 200
+    with client.stream("GET", f"/api/web-chat/runs/{start['runId']}/events") as stream:
+        stream.read()
+
+
+def test_run_events_can_be_replayed_from_event_id(client, monkeypatch):
+    import hermes_cli.web_chat as web_chat
+
+    def fake_executor(context, emit):
+        emit({"type": "message.delta", "content": "Done"})
+        return "Done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+    start = client.post("/api/web-chat/runs", json={"input": "Say done"}).json()
+
+    with client.stream("GET", f"/api/web-chat/runs/{start['runId']}/events") as stream:
+        first_body = stream.read().decode()
+    with client.stream("GET", f"/api/web-chat/runs/{start['runId']}/events?after=0") as stream:
+        replayed_body = stream.read().decode()
+
+    assert "id: 1" in first_body
+    assert "event: run.started" in replayed_body
+    assert "event: message.delta" in replayed_body
+    assert "event: run.completed" in replayed_body

@@ -125,15 +125,16 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   }
 
   function connectRun(runId: string, targetSessionId = options.sessionId.value) {
-    connectedRunIds.add(runId)
     if (targetSessionId === options.sessionId.value) hasAssistantResponseStarted.value = false
     const tracked = options.activeChatRuns.trackRun(targetSessionId, runId)
     if (!tracked) {
+      connectedRunIds.delete(runId)
       submitStatus.value = 'ready'
       void options.refresh()
       void options.refreshSessions?.()
       return
     }
+    connectedRunIds.add(runId)
 
     if (targetSessionId === options.sessionId.value) {
       submitStatus.value = 'streaming'
