@@ -23,6 +23,7 @@ Treat this repository as the source of truth for prototype work. Do not edit `$H
 - Favor focused modules, typed boundaries, explicit validation, and predictable error handling.
 - Prefer project-native and framework-native APIs before adding new dependencies.
 - Do not couple prototype code unnecessarily to local machine paths beyond documented Hermes integration points.
+- Keep `README.md` updated when project structure, setup, development workflow, implemented behavior, or verification commands change.
 - Keep the source tree clean: do not commit generated `.nuxt`, `.output`, `node_modules`, runtime copies, logs, or disposable verification artifacts.
 
 ## Architecture Boundaries

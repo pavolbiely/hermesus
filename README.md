@@ -13,6 +13,8 @@ backend/
 web/                                        # Nuxt UI prototype
 ```
 
+Keep `README.md` updated as the prototype changes, including project structure, setup, workflow, implemented behavior, and verification commands.
+
 ## Implemented backend prototype
 
 - `GET /api/web-chat/sessions`
