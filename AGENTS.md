@@ -8,8 +8,9 @@ Treat this repository as the source of truth for prototype work. Do not edit `$H
 
 ## Repository Map
 
-- `backend/hermes_cli/web_chat.py`: proposed FastAPI router for native web chat JSON/SSE APIs.
-- `backend/tests/hermes_cli/test_web_chat.py`: pytest coverage for the backend prototype.
+- `backend/hermes_cli/web_chat.py`: FastAPI web-chat entrypoint; keep it thin (router creation, public compatibility wrappers, dependency wiring).
+- `backend/hermes_cli/web_chat_modules/`: modular backend implementation split by domain: route registration, Pydantic models, run lifecycle, agent execution, sessions, session handlers, session/message mutations, commands, capabilities, profiles, attachments, workspaces/settings, git changes/patches/persistence.
+- `backend/tests/hermes_cli/test_web_chat*.py`: pytest coverage split by backend web-chat domain; shared fixtures/helpers live beside the split tests.
 - `web/`: Nuxt 4 static SPA prototype using Nuxt UI and Comark.
 - `web/app`: Nuxt application code, pages, components, composables, types, and assets.
 - `run-local.sh`: local orchestration for Hermes backend runtime, Nuxt dev mode, and static preview.
@@ -24,6 +25,7 @@ Treat this repository as the source of truth for prototype work. Do not edit `$H
 - Prefer project-native and framework-native APIs before adding new dependencies.
 - Do not couple prototype code unnecessarily to local machine paths beyond documented Hermes integration points.
 - Keep `README.md` updated when project structure, setup, development workflow, implemented behavior, or verification commands change.
+- Do not add new large catch-all files. When a file starts mixing unrelated concerns or grows past a comfortable review size, split it into cohesive modules before adding more behavior.
 - Keep the source tree clean: do not commit generated `.nuxt`, `.output`, `node_modules`, runtime copies, logs, or disposable verification artifacts.
 
 ## Architecture Boundaries
@@ -33,6 +35,22 @@ Treat this repository as the source of truth for prototype work. Do not edit `$H
 - `run-local.sh` may patch/copy into `.runtime/hermes-agent`; those patches must be reproducible from source files in this repository.
 - Shared request/response shapes should remain aligned between Python Pydantic models and TypeScript frontend types.
 - When backend payloads change, update Python models, API behavior, frontend types, frontend API helpers, and tests in the same logical change.
+
+## Backend Modularity Rules
+
+The backend web-chat implementation is intentionally modular. Do not regress to a monolithic `web_chat.py` or one huge test file.
+
+- Keep `web_chat.py` as the stable public entrypoint: router instance, constants, compatibility wrappers used by tests/monkeypatching, `RunManager` factory, and service wiring.
+- Put route definitions and FastAPI-specific endpoint registration in `web_chat_modules/routes.py`.
+- Put Pydantic request/response DTOs in `web_chat_modules/models.py`; do not define new API models inline in route handlers.
+- Keep run queue/thread/SSE lifecycle behavior in `web_chat_modules/run_manager.py`.
+- Keep agent invocation/conversation-history assembly in `web_chat_modules/agent_runner.py`.
+- Keep serialization/parsing of sessions, messages, parts, attachments, and tool calls in `web_chat_modules/sessions.py`.
+- Keep session endpoint orchestration in `web_chat_modules/session_handlers.py` and session/message mutation helpers in `session_mutations.py` / `message_mutations.py`.
+- Keep slash-command logic in `commands.py`, profile/capability logic in `profiles.py` / `capabilities.py`, attachment storage/lookup in `attachments.py`, workspace/settings logic in `workspaces.py` / `workspace_settings.py`, and git-change behavior in `git_changes.py` / `git_patches.py` / `persisted_git_changes.py`.
+- Prefer adding behavior to the closest existing domain module. Create a new focused module only when the behavior does not fit an existing boundary.
+- Preserve thin wrappers in `web_chat.py` when existing tests or monkeypatch patterns rely on those names. If an extracted module needs such behavior, pass callbacks/dependencies from `web_chat.py` rather than importing back into it.
+- Keep backend web-chat tests split by domain (`test_web_chat_commands.py`, `test_web_chat_attachments.py`, `test_web_chat_workspaces.py`, `test_web_chat_runs.py`, `test_web_chat_run_options.py`, plus core session tests). Move shared setup to `conftest.py` and simple helpers to `web_chat_test_helpers.py`.
 
 ## Backend API Rules
 
@@ -116,11 +134,13 @@ pnpm typecheck
 pnpm build
 ```
 
-Backend verification should run pytest against the prototype code, preferably in the same environment used by the Hermes runtime:
+Backend verification should run syntax checks against canonical sources and pytest against the runtime mirror, because backend tests import the runtime package layout:
 
 ```sh
-python -m pytest backend/tests/hermes_cli/test_web_chat.py
+python3 -m py_compile backend/hermes_cli/web_chat.py backend/hermes_cli/web_chat_modules/*.py backend/tests/hermes_cli/test_web_chat*.py backend/tests/hermes_cli/conftest.py backend/tests/hermes_cli/web_chat_test_helpers.py
 ```
+
+For mirrored runtime pytest, copy canonical backend/test files into `.runtime/hermes-agent` inside the `uv run --no-project ... bash -lc` command immediately before pytest. Target the explicit split web-chat test files (`test_web_chat*.py`), not the whole runtime test directory, to avoid unrelated upstream tests/dependencies.
 
 When verifying integration with the real Hermes runtime:
 
