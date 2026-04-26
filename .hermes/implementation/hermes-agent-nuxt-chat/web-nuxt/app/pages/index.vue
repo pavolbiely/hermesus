@@ -39,7 +39,9 @@ async function onSubmit() {
           </div>
 
           <UChatPrompt v-model="input" :error="error" @submit="onSubmit">
-            <UChatPromptSubmit :status="loading ? 'submitted' : 'ready'" />
+            <template #footer>
+              <ChatPromptFooter :submit-status="loading ? 'submitted' : 'ready'" />
+            </template>
           </UChatPrompt>
         </div>
       </UContainer>

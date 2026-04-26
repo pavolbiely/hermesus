@@ -206,7 +206,9 @@ onBeforeUnmount(() => {
     <template #footer>
       <UContainer class="pb-4 sm:pb-6">
         <UChatPrompt v-model="input" :error="error" @submit="onSubmit">
-          <UChatPromptSubmit :status="chatStatus" @stop="runStream.stop" />
+          <template #footer>
+            <ChatPromptFooter :submit-status="chatStatus" @stop="runStream.stop" />
+          </template>
         </UChatPrompt>
       </UContainer>
     </template>
