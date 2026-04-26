@@ -12,8 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, UploadFile
 
 from hermes_state import SessionDB
 
@@ -130,8 +129,8 @@ from .web_chat_modules.profiles import (
     switch_web_chat_profile as _switch_web_chat_profile_impl,
     validate_profile as _validate_profile_impl,
 )
-from .web_chat_modules import session_handlers as _session_handlers
 from .web_chat_modules.run_manager import RunContext, RunManager as _RunManager, RunManagerServices
+from .web_chat_modules.routes import WebChatRouteServices, register_web_chat_routes
 from .web_chat_modules.session_mutations import (
     duplicate_session as _duplicate_session_impl,
     list_non_empty_sessions as _list_non_empty_sessions_impl,
@@ -753,182 +752,38 @@ def RunManager(executor=None):
 
 run_manager = RunManager()
 
-@router.get("/sessions", response_model=SessionListResponse)
-def list_sessions(
-    limit: int = Query(default=50, ge=1, le=MAX_SESSION_LIMIT),
-    offset: int = Query(default=0, ge=0),
-) -> SessionListResponse:
-    return _session_handlers.list_sessions_response(
-        _db(),
-        limit=limit,
-        offset=offset,
+register_web_chat_routes(
+    router,
+    WebChatRouteServices(
+        db=_db,
+        run_manager=lambda: run_manager,
+        web_chat_source=WEB_CHAT_SOURCE,
+        max_session_limit=MAX_SESSION_LIMIT,
+        max_attachments_per_request=MAX_ATTACHMENTS_PER_REQUEST,
         list_non_empty_sessions=_list_non_empty_sessions,
         serialize_session=_serialize_session,
-    )
-
-
-@router.get("/commands", response_model=WebChatCommandsResponse)
-def list_commands() -> WebChatCommandsResponse:
-    return WebChatCommandsResponse(commands=_web_chat_commands())
-
-
-@router.post("/commands/execute", response_model=ExecuteCommandResponse, response_model_exclude_none=True)
-def execute_command(payload: ExecuteCommandRequest) -> ExecuteCommandResponse:
-    return _persist_command_exchange(payload, _execute_web_chat_command(payload))
-
-
-@router.get("/capabilities", response_model=WebChatCapabilitiesResponse)
-def get_capabilities() -> WebChatCapabilitiesResponse:
-    return WebChatCapabilitiesResponse(
-        provider="codex",
-        defaultModel=_default_model_id(),
-        models=_model_capabilities(),
-    )
-
-
-@router.get("/profiles", response_model=WebChatProfilesResponse)
-def get_profiles() -> WebChatProfilesResponse:
-    return _list_web_chat_profiles()
-
-
-@router.post("/profiles/active", response_model=SwitchProfileResponse)
-def switch_profile(payload: SwitchProfileRequest) -> SwitchProfileResponse:
-    return _switch_web_chat_profile(payload)
-
-
-@router.get("/workspaces", response_model=WebChatWorkspacesResponse)
-def get_workspaces() -> WebChatWorkspacesResponse:
-    return _list_web_chat_workspaces()
-
-
-@router.get("/workspace-directories", response_model=DirectorySuggestionsResponse)
-def get_workspace_directories(prefix: str = Query(min_length=1, max_length=4096)) -> DirectorySuggestionsResponse:
-    return DirectorySuggestionsResponse(suggestions=_directory_suggestions(prefix))
-
-
-@router.post("/workspaces", status_code=status.HTTP_201_CREATED, response_model=WebChatWorkspaceResponse)
-def create_workspace(payload: SaveWorkspaceRequest) -> WebChatWorkspaceResponse:
-    return WebChatWorkspaceResponse(workspace=_create_managed_workspace(payload))
-
-
-@router.patch("/workspaces/{workspace_id}", response_model=WebChatWorkspaceResponse)
-def update_workspace(workspace_id: str, payload: SaveWorkspaceRequest) -> WebChatWorkspaceResponse:
-    return WebChatWorkspaceResponse(workspace=_update_managed_workspace(workspace_id, payload))
-
-
-@router.delete("/workspaces/{workspace_id}", response_model=DeleteSessionResponse)
-def delete_workspace(workspace_id: str) -> DeleteSessionResponse:
-    _delete_managed_workspace(workspace_id)
-    return DeleteSessionResponse(ok=True)
-
-
-@router.post("/attachments", status_code=status.HTTP_201_CREATED, response_model=UploadAttachmentsResponse)
-async def upload_attachments(
-    files: list[UploadFile] = File(...),
-    workspace: str | None = Form(default=None),
-) -> UploadAttachmentsResponse:
-    if len(files) > MAX_ATTACHMENTS_PER_REQUEST:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Too many attachments")
-    return UploadAttachmentsResponse(attachments=[await _store_upload(file, workspace) for file in files])
-
-
-@router.get("/attachments/{attachment_id}", response_model=WebChatAttachment)
-def get_attachment(attachment_id: str, workspace: str | None = None) -> WebChatAttachment:
-    return _load_attachment(attachment_id, workspace)
-
-
-@router.get("/attachments/{attachment_id}/content")
-def get_attachment_content(attachment_id: str, workspace: str | None = None) -> FileResponse:
-    attachment = _load_attachment(attachment_id, workspace)
-    path = Path(attachment.path)
-    if not path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment file not found")
-    return FileResponse(path, media_type=attachment.mediaType, filename=attachment.name, content_disposition_type="inline")
-
-
-@router.get("/workspace-changes", response_model=WebChatWorkspaceChanges, response_model_exclude_none=True)
-def get_workspace_changes(workspace: str | None = None) -> WebChatWorkspaceChanges:
-    validated = _validate_workspace(workspace)
-    return _workspace_changes(str(validated) if validated else None)
-
-
-
-@router.post("/sessions", status_code=status.HTTP_201_CREATED, response_model=SessionDetailResponse)
-def create_session(payload: CreateSessionRequest) -> SessionDetailResponse:
-    return _session_handlers.create_session_response(
-        _db(),
-        payload=payload,
-        web_chat_source=WEB_CHAT_SOURCE,
+        serialize_messages=_serialize_messages,
+        web_chat_commands=_web_chat_commands,
+        execute_web_chat_command=_execute_web_chat_command,
+        persist_command_exchange=_persist_command_exchange,
+        default_model_id=_default_model_id,
+        model_capabilities=_model_capabilities,
+        list_web_chat_profiles=_list_web_chat_profiles,
+        switch_web_chat_profile=_switch_web_chat_profile,
+        list_web_chat_workspaces=_list_web_chat_workspaces,
+        directory_suggestions=_directory_suggestions,
+        create_managed_workspace=_create_managed_workspace,
+        update_managed_workspace=_update_managed_workspace,
+        delete_managed_workspace=_delete_managed_workspace,
+        store_upload=_store_upload,
+        load_attachment=_load_attachment,
+        validate_workspace=_validate_workspace,
+        workspace_changes=_workspace_changes,
         title_from_message=_title_from_message,
         get_session_or_404=_get_session_or_404,
-        serialize_session=_serialize_session,
-        serialize_messages=_serialize_messages,
-    )
-
-
-@router.patch("/sessions/{session_id}", response_model=SessionDetailResponse)
-def rename_session(session_id: str, payload: RenameSessionRequest) -> SessionDetailResponse:
-    return _session_handlers.rename_session_response(
-        _db(),
-        session_id=session_id,
-        payload=payload,
-        get_session_or_404=_get_session_or_404,
-        serialize_session=_serialize_session,
-        serialize_messages=_serialize_messages,
-    )
-
-
-@router.patch("/sessions/{session_id}/messages/{message_id}", response_model=SessionDetailResponse)
-def edit_message(session_id: str, message_id: str, payload: EditMessageRequest) -> SessionDetailResponse:
-    return _session_handlers.edit_message_response(
-        _db(),
-        session_id=session_id,
-        message_id=message_id,
-        payload=payload,
-        get_session_or_404=_get_session_or_404,
         edit_user_message=_edit_user_message,
-        serialize_session=_serialize_session,
-        serialize_messages=_serialize_messages,
-    )
-
-
-@router.delete("/sessions/{session_id}", response_model=DeleteSessionResponse)
-def delete_session(session_id: str) -> DeleteSessionResponse:
-    return _session_handlers.delete_session_response(
-        _db(),
-        session_id=session_id,
         delete_session_git_changes=_delete_session_git_changes,
-    )
-
-
-@router.post("/sessions/{session_id}/duplicate", status_code=status.HTTP_201_CREATED, response_model=SessionDetailResponse)
-def duplicate_session(session_id: str) -> SessionDetailResponse:
-    return _duplicate_session(_db(), session_id)
-
-
-@router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
-def get_session(session_id: str, includeWorkspaceChanges: bool = Query(default=False)) -> SessionDetailResponse:
-    return _session_handlers.get_session_response(
-        _db(),
-        session_id=session_id,
-        include_workspace_changes=includeWorkspaceChanges,
-        get_session_or_404=_get_session_or_404,
+        duplicate_session=_duplicate_session,
         session_git_changes_by_message=_session_git_changes_by_message,
-        serialize_session=_serialize_session,
-        serialize_messages=_serialize_messages,
-    )
-
-
-@router.post("/runs", status_code=status.HTTP_202_ACCEPTED, response_model=StartRunResponse)
-def start_run(payload: StartRunRequest) -> StartRunResponse:
-    return run_manager.start(payload)
-
-
-@router.get("/runs/{run_id}/events")
-def run_events(run_id: str) -> StreamingResponse:
-    return StreamingResponse(run_manager.events(run_id), media_type="text/event-stream")
-
-
-@router.post("/runs/{run_id}/stop", response_model=StopRunResponse)
-def stop_run(run_id: str) -> StopRunResponse:
-    return run_manager.stop(run_id)
+    ),
+)
