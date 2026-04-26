@@ -4,6 +4,7 @@ import { toolDisplayName } from '~/utils/toolCalls'
 import { createLocalMessage } from './useHermesRunStream'
 
 type SubmitStatus = 'ready' | 'submitted' | 'streaming' | 'error'
+type AutoScrollOptions = { force?: boolean }
 
 type UseChatRunMessagesOptions = {
   sessionId: ComputedRef<string>
@@ -44,9 +45,25 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     messages.value.push(createThinkingMessage())
   }
 
-  function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
-    if (!autoScrollEnabled.value) return
-    bottomRef.value?.scrollIntoView({ block: 'end', behavior })
+  function scrollElementToBottom(element: HTMLElement) {
+    let parent = element.parentElement
+    while (parent) {
+      if (parent.scrollHeight > parent.clientHeight) parent.scrollTop = parent.scrollHeight
+      parent = parent.parentElement
+    }
+
+    const page = document.scrollingElement
+    if (page) page.scrollTop = page.scrollHeight
+  }
+
+  function scrollToBottom(behavior: ScrollBehavior = 'smooth', options: AutoScrollOptions = {}) {
+    if (!autoScrollEnabled.value && !options.force) return
+
+    const element = bottomRef.value
+    if (!element) return
+
+    if (options.force) scrollElementToBottom(element)
+    element.scrollIntoView({ block: 'end', behavior })
   }
 
   function isNearBottom() {
@@ -61,8 +78,14 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     autoScrollEnabled.value = false
   }
 
-  function scheduleAutoScroll(behavior: ScrollBehavior = 'smooth') {
-    nextTick(() => scrollToBottom(behavior))
+  function runPostRenderScroll(behavior: ScrollBehavior, options: AutoScrollOptions, frames = 2) {
+    scrollToBottom(behavior, options)
+    if (frames <= 0) return
+    requestAnimationFrame(() => runPostRenderScroll(behavior, options, frames - 1))
+  }
+
+  function scheduleAutoScroll(behavior: ScrollBehavior = 'smooth', options: AutoScrollOptions = {}) {
+    nextTick(() => runPostRenderScroll(behavior, options))
   }
 
   function appendAssistantDelta(content: string) {

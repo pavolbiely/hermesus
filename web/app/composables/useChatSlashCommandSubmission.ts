@@ -14,10 +14,12 @@ type UseChatSlashCommandSubmissionOptions = {
   workspaceInvalidSignal: Ref<number>
   slashCommands: ReturnType<typeof useSlashCommands>
   toast: ReturnType<typeof useToast>
-  scheduleAutoScroll: () => void
+  scheduleAutoScroll: (behavior?: ScrollBehavior, options?: { force?: boolean }) => void
 }
 
 export function useChatSlashCommandSubmission(options: UseChatSlashCommandSubmissionOptions) {
+  const commandSubmitting = ref(false)
+
   function showCommandError(err: unknown, commandText: string) {
     const message = getHermesErrorMessage(err, 'Command failed')
     options.toast.add({ color: 'warning', title: commandText, description: message })
@@ -34,7 +36,7 @@ export function useChatSlashCommandSubmission(options: UseChatSlashCommandSubmis
       if (response.changes) response.message.parts.push({ type: 'changes', changes: response.changes })
       options.messages.value.push(response.message)
     }
-    options.scheduleAutoScroll()
+    options.scheduleAutoScroll('auto', { force: true })
   }
 
   function shouldBlockForMissingWorkspace(message: string) {
@@ -44,8 +46,10 @@ export function useChatSlashCommandSubmission(options: UseChatSlashCommandSubmis
   }
 
   async function executeSlashCommand(commandText: string) {
+    if (commandSubmitting.value) return true
     if (shouldBlockForMissingWorkspace(commandText)) return false
 
+    commandSubmitting.value = true
     options.streamError.value = undefined
     try {
       const response = await options.api.executeCommand({
@@ -58,6 +62,8 @@ export function useChatSlashCommandSubmission(options: UseChatSlashCommandSubmis
       appendCommandResponse(commandText, response)
     } catch (err) {
       showCommandError(err, commandText)
+    } finally {
+      commandSubmitting.value = false
     }
     return true
   }
@@ -102,6 +108,7 @@ export function useChatSlashCommandSubmission(options: UseChatSlashCommandSubmis
     const command = options.slashCommands.highlightedCommand()
     if (!command) return
     event.preventDefault()
+    event.stopPropagation()
     void selectSlashCommand(command)
   }
 
