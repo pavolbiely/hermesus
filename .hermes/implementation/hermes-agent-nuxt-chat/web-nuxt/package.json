@@ -1,0 +1,23 @@
+{
+  "name": "hermes-agent-web-nuxt-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev --host 127.0.0.1 --port 3019",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "@comark/nuxt": "^0.3.1",
+    "@nuxt/ui": "^4.2.0",
+    "nuxt": "^4.2.0",
+    "shiki": "^4.0.2",
+    "vue": "^3.5.0",
+    "vue-router": "^4.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vue-tsc": "^3.1.0"
+  }
+}
