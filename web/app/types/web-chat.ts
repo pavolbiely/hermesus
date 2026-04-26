@@ -15,6 +15,7 @@ export type WebChatPart = {
   mediaType?: string | null
   approvalId?: string | null
   changes?: WebChatWorkspaceChanges | null
+  attachments?: WebChatAttachment[] | null
 }
 
 export type WebChatMessage = {
@@ -34,6 +35,7 @@ export type WebChatSession = {
   source: string | null
   model: string | null
   reasoningEffort: string | null
+  workspace: string | null
   messageCount: number
   createdAt: string
   updatedAt: string
@@ -52,6 +54,63 @@ export type WebChatCapabilitiesResponse = {
   models: WebChatModelCapability[]
 }
 
+export type WebChatProfile = {
+  id: string
+  label: string
+  path: string
+  active: boolean
+}
+
+export type WebChatProfilesResponse = {
+  profiles: WebChatProfile[]
+  activeProfile: string
+}
+
+export type SwitchProfileResponse = WebChatProfilesResponse & {
+  restarting: boolean
+}
+
+export type WebChatWorkspace = {
+  id: string
+  label: string
+  path: string
+  active: boolean
+}
+
+export type WebChatWorkspacesResponse = {
+  workspaces: WebChatWorkspace[]
+  activeWorkspace: string | null
+}
+
+export type WebChatWorkspaceResponse = {
+  workspace: WebChatWorkspace
+}
+
+export type SaveWorkspaceRequest = {
+  label: string
+  path: string
+}
+
+export type DirectorySuggestionsResponse = {
+  suggestions: string[]
+}
+
+export type WebChatAttachment = {
+  id: string
+  name: string
+  mediaType: string
+  size: number
+  path: string
+  workspace?: string | null
+  relativePath?: string | null
+  url?: string | null
+  exists?: boolean
+}
+
+export type UploadAttachmentsResponse = {
+  attachments: WebChatAttachment[]
+}
+
 export type WebChatFileChange = {
   path: string
   status: 'created' | 'edited' | 'deleted' | 'renamed' | 'copied'
@@ -59,11 +118,26 @@ export type WebChatFileChange = {
   deletions: number
 }
 
+export type WebChatPatch = {
+  files: Array<{
+    path: string
+    oldPath?: string | null
+    status: WebChatFileChange['status']
+    patch: string | null
+    truncated?: boolean
+  }>
+}
+
 export type WebChatWorkspaceChanges = {
   files: WebChatFileChange[]
   totalFiles: number
   totalAdditions: number
   totalDeletions: number
+  workspace?: string | null
+  runId?: string | null
+  capturedAt?: string | null
+  patch?: WebChatPatch | null
+  patchTruncated?: boolean | null
 }
 
 export type SessionListResponse = {
@@ -78,6 +152,10 @@ export type SessionDetailResponse = {
 export type StartRunResponse = {
   sessionId: string
   runId: string
+}
+
+export type DeleteSessionResponse = {
+  ok: boolean
 }
 
 export {}

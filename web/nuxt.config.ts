@@ -1,3 +1,6 @@
+const apiOrigin = process.env.HERMES_API_ORIGIN || 'http://127.0.0.1:9119'
+const apiProxyTarget = `${apiOrigin.replace(/\/$/, '')}/api`
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
@@ -18,15 +21,11 @@ export default defineNuxtConfig({
     }
   },
   nitro: {
-    preset: 'static'
-  },
-  vite: {
-    server: {
-      proxy: {
-        '/api': {
-          target: process.env.HERMES_API_ORIGIN || 'http://127.0.0.1:9119',
-          changeOrigin: true
-        }
+    preset: 'static',
+    devProxy: {
+      '/api': {
+        target: apiProxyTarget,
+        changeOrigin: true
       }
     }
   },

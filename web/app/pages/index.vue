@@ -1,30 +1,67 @@
 <script setup lang="ts">
+import { prepareNotificationSound } from '../utils/notificationSound'
+
 const input = ref('')
 const loading = ref(false)
 const error = ref<Error | undefined>()
+const workspaceInvalidSignal = ref(0)
 const api = useHermesApi()
 const router = useRouter()
 const refreshSessions = inject<() => Promise<void> | void>('refreshSessions')
 const composer = useChatComposerCapabilities()
+const activeChatRuns = useActiveChatRuns()
+const context = useChatComposerContext()
+const toast = useToast()
 
-await composer.initializeForNewChat()
+await Promise.all([composer.initializeForNewChat(), context.initialize()])
+
+function appendVoiceText(text: string) {
+  input.value = input.value ? `${input.value} ${text}` : text
+}
+
+function showError(err: unknown, fallback: string) {
+  const message = getHermesErrorMessage(err, fallback)
+  error.value = new Error(message)
+  toast.add({ color: 'error', title: fallback, description: message })
+}
+
+async function attachFiles(files: File[]) {
+  try {
+    await context.uploadFiles(files)
+  } catch (err) {
+    showError(err, 'Could not upload attachment.')
+  }
+}
+
+function showVoiceError(message: string) {
+  showError(new Error(message), 'Voice input failed')
+}
 
 async function onSubmit() {
   const message = input.value.trim()
   if (!message || loading.value) return
+  if (!context.selectedWorkspace.value) {
+    workspaceInvalidSignal.value += 1
+    return
+  }
 
   loading.value = true
   error.value = undefined
+  void prepareNotificationSound()
   try {
     const result = await api.startRun(message, {
       model: composer.selectedModel.value,
-      reasoningEffort: composer.selectedReasoningEffort.value
+      reasoningEffort: composer.selectedReasoningEffort.value,
+      workspace: context.selectedWorkspace.value,
+      attachments: context.attachments.value.map(attachment => attachment.id)
     })
     composer.rememberLastUsedSelection()
+    context.clearAttachments()
+    activeChatRuns.trackRun(result.sessionId, result.runId)
     await router.push({ path: `/chat/${result.sessionId}`, query: { run: result.runId } })
     void refreshSessions?.()
   } catch (err) {
-    error.value = err instanceof Error ? err : new Error('Failed to create chat')
+    showError(err, 'Failed to create chat')
   } finally {
     loading.value = false
   }
@@ -34,7 +71,7 @@ async function onSubmit() {
 <template>
   <UDashboardPanel>
     <template #header>
-      <UDashboardNavbar title="New chat" />
+      <AppNavbar title="New chat" />
     </template>
 
     <template #body>
@@ -45,14 +82,25 @@ async function onSubmit() {
             <p class="text-muted">Start a native web chat session backed by Hermes Agent.</p>
           </div>
 
-          <UChatPrompt v-model="input" :error="error" @submit="onSubmit">
+          <UChatPrompt v-model="input" :error="error || context.contextError.value" @submit="onSubmit">
             <template #footer>
               <ChatPromptFooter
                 :submit-status="loading ? 'submitted' : 'ready'"
+                :workspaces="context.workspaces.value"
+                :selected-workspace="context.selectedWorkspace.value"
+                :workspace-invalid-signal="workspaceInvalidSignal"
+                :workspaces-loading="context.workspacesLoading.value"
+                :attachments="context.attachments.value"
+                :attachments-loading="context.attachmentsLoading.value"
                 :models="composer.models.value"
                 :selected-model="composer.selectedModel.value"
                 :selected-reasoning-effort="composer.selectedReasoningEffort.value"
                 :capabilities-loading="composer.capabilitiesLoading.value"
+                @update-selected-workspace="context.selectWorkspace"
+                @attach-files="attachFiles"
+                @remove-attachment="context.removeAttachment"
+                @voice-text="appendVoiceText"
+                @voice-error="showVoiceError"
                 @update-selected-model="composer.selectedModel.value = $event"
                 @update-selected-reasoning-effort="composer.selectedReasoningEffort.value = $event"
               />

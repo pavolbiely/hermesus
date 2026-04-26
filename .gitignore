@@ -1,5 +1,7 @@
 .idea
 .hermes/plans
+.hermes/attachments/
+.hermes/web-chat/
 
 # Dependencies
 node_modules/

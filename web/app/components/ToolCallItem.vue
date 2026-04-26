@@ -9,10 +9,14 @@ type DetailSection = {
   label: string
   value: unknown
   text: string
+  type: string
 }
 
 const toolName = computed(() => props.part.name || 'Tool call')
 const isRunning = computed(() => ['running', 'thinking', 'streaming', 'started'].includes(String(props.part.status || '')))
+const copiedSection = ref<string | null>(null)
+const wrappedSections = ref<Record<string, boolean>>({})
+let copiedTimer: ReturnType<typeof setTimeout> | undefined
 
 function normalizeValue(value: unknown) {
   if (typeof value !== 'string') return value
@@ -36,9 +40,62 @@ function formatValue(value: unknown) {
   return JSON.stringify(normalized, null, 2)
 }
 
+function valueType(value: unknown) {
+  const normalized = normalizeValue(value)
+  if (Array.isArray(normalized)) return 'array'
+  if (normalized === null) return 'null'
+  return typeof normalized
+}
+
 function isPresent(value: unknown) {
   return value !== undefined && value !== null && value !== ''
 }
+
+function isWrapped(label: string) {
+  return wrappedSections.value[label] === true
+}
+
+function toggleWrap(label: string) {
+  wrappedSections.value = {
+    ...wrappedSections.value,
+    [label]: !isWrapped(label)
+  }
+}
+
+async function writeClipboardText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+
+  try {
+    document.execCommand('copy')
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
+async function copySection(section: DetailSection) {
+  await writeClipboardText(section.text)
+  copiedSection.value = section.label
+
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => {
+    copiedSection.value = null
+  }, 1600)
+}
+
+onBeforeUnmount(() => {
+  if (copiedTimer) clearTimeout(copiedTimer)
+})
 
 const sections = computed<DetailSection[]>(() => {
   return [
@@ -46,11 +103,15 @@ const sections = computed<DetailSection[]>(() => {
     ['Output', props.part.output]
   ]
     .filter(([, value]) => isPresent(value))
-    .map(([label, value]) => ({
-      label: String(label),
-      value,
-      text: formatValue(value)
-    }))
+    .map(([label, value]) => {
+      const text = formatValue(value)
+      return {
+        label: String(label),
+        value,
+        text,
+        type: valueType(value)
+      }
+    })
 })
 
 function valueSummary(value: unknown) {
@@ -93,11 +154,11 @@ const actionLabel = computed(() => `${isRunning.value ? 'Running' : 'Ran'} ${too
     :title="toolName"
     :description="summary"
     scrollable
-    :ui="{ content: 'sm:max-w-3xl', body: 'p-0' }"
+    :ui="{ content: 'sm:max-w-7xl', body: 'p-0' }"
   >
     <button
       type="button"
-      class="group my-1 flex max-w-full items-center gap-1.5 overflow-hidden text-left text-sm text-muted transition-colors hover:text-default"
+      class="group flex max-w-full items-center gap-1.5 overflow-hidden text-left text-sm text-muted transition-colors hover:text-default"
     >
       <UIcon
         :name="isRunning ? 'i-lucide-loader-circle' : 'i-lucide-chevron-down'"
@@ -113,18 +174,53 @@ const actionLabel = computed(() => `${isRunning.value ? 'Running' : 'Ran'} ${too
     </button>
 
     <template #body>
-      <div class="max-h-[70vh] overflow-y-auto p-4">
-        <div v-if="sections.length" class="space-y-4">
-          <section v-for="section in sections" :key="section.label" class="space-y-2">
-            <div class="flex items-center justify-between gap-3">
-              <h3 class="text-sm font-medium text-highlighted">
-                {{ section.label }}
-              </h3>
-              <UBadge color="neutral" variant="soft" size="sm">
-                {{ typeof normalizeValue(section.value) }}
-              </UBadge>
+      <div class="h-[75vh] overflow-y-auto p-4 lg:overflow-hidden">
+        <div v-if="sections.length" class="grid min-h-0 gap-4 lg:h-full lg:grid-cols-2 lg:auto-rows-fr">
+          <section
+            v-for="section in sections"
+            :key="section.label"
+            class="flex min-h-0 max-h-full flex-col overflow-hidden rounded-lg border border-default bg-muted/40"
+            :class="{ 'lg:col-span-2': sections.length === 1 }"
+          >
+            <div class="flex items-center justify-between gap-3 border-b border-default px-3 py-2">
+              <div class="flex min-w-0 items-center gap-2">
+                <h3 class="truncate text-sm font-medium text-highlighted">
+                  {{ section.label }}
+                </h3>
+                <UBadge color="neutral" variant="soft" size="sm">
+                  {{ section.type }}
+                </UBadge>
+              </div>
+              <div class="flex shrink-0 items-center gap-1">
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  :icon="isWrapped(section.label) ? 'i-lucide-wrap-text' : 'i-lucide-arrow-left-right'"
+                  :aria-label="isWrapped(section.label) ? `Use horizontal scroll for ${section.label}` : `Wrap ${section.label}`"
+                  @click="toggleWrap(section.label)"
+                />
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  :icon="copiedSection === section.label ? 'i-lucide-check' : 'i-lucide-copy'"
+                  :aria-label="copiedSection === section.label ? `Copied ${section.label}` : `Copy ${section.label}`"
+                  @click="copySection(section)"
+                />
+              </div>
             </div>
-            <pre class="overflow-x-hidden rounded-md bg-muted p-3 text-xs leading-5 whitespace-pre-wrap break-words text-highlighted">{{ section.text }}</pre>
+            <div
+              class="min-h-0 flex-1 overflow-y-auto p-3"
+              :class="isWrapped(section.label) ? 'overflow-x-hidden' : 'overflow-x-auto'"
+            >
+              <JsonTree
+                :value="section.value"
+                :path="`${toolName}-${section.label}`"
+                :default-expanded-depth="3"
+                :wrap-lines="isWrapped(section.label)"
+              />
+            </div>
           </section>
         </div>
 

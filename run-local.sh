@@ -75,6 +75,8 @@ prepare_runtime() {
     --exclude '.mypy_cache' \
     --exclude '.pytest_cache' \
     --exclude '__pycache__' \
+    --exclude '.venv' \
+    --exclude 'venv' \
     "$UPSTREAM/" "$RUNTIME/"
 
   cp "$ROOT/backend/hermes_cli/web_chat.py" "$RUNTIME/hermes_cli/web_chat.py"
@@ -121,6 +123,16 @@ if 'request.query_params.get("session_token", "")' not in text:
     needle = """    if session_header and hmac.compare_digest(\n        session_header.encode(),\n        _SESSION_TOKEN.encode(),\n    ):\n        return True\n\n"""
     replacement = needle + """    if request.url.path.startswith("/api/web-chat/runs/") and request.url.path.endswith("/events"):\n        session_token = request.query_params.get("session_token", "")\n        if session_token and hmac.compare_digest(session_token.encode(), _SESSION_TOKEN.encode()):\n            return True\n\n"""
     text = text.replace(needle, replacement, 1)
+
+static_assets_mount = '    application.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")'
+if static_assets_mount in text:
+    text = text.replace(
+        static_assets_mount,
+        '''    assets_dir = WEB_DIST / "assets"
+    if assets_dir.exists():
+        application.mount("/assets", StaticFiles(directory=assets_dir), name="assets")''',
+        1,
+    )
 
 env_name = "HERMES_" + "SESSION_" + "TOKEN"
 if f'os.environ.get("{env_name}")' not in text:
@@ -263,6 +275,9 @@ start_dashboard() {
   echo "Starting Hermes dashboard backend on http://127.0.0.1:$PORT"
   echo "Runtime copy: $RUNTIME"
   echo "Source checkout is only read/copied, not modified: $UPSTREAM"
+  # Hermes' current SPA mount expects this directory even in dev mode, where
+  # the browser is served by Nuxt and only API requests hit this backend.
+  mkdir -p "$WEB/.output/public/assets"
   (
     cd "$RUNTIME"
     local env_args=("HERMES_WEB_DIST=$WEB/.output/public")

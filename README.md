@@ -23,6 +23,11 @@ Keep `README.md` updated as the prototype changes, including project structure, 
 - `POST /api/web-chat/runs`
 - `GET /api/web-chat/runs/{run_id}/events` via SSE
 - `POST /api/web-chat/runs/{run_id}/stop`
+- `POST /api/web-chat/attachments`
+- `GET /api/web-chat/attachments/{attachment_id}`
+- `GET /api/web-chat/attachments/{attachment_id}/content`
+
+Chat attachments uploaded through the web UI are stored in the selected project under `.hermes/attachments/`, which is ignored by git in this prototype. Existing filenames are preserved when possible and automatically suffixed instead of overwritten. Image attachments render as inline thumbnails with a larger preview; other files open inline through the authenticated content endpoint when the browser supports their MIME type. Persisted attachment URLs include workspace context on the client side so previews can still be fetched after backend/runtime state is reset. Deleted files remain visible in chat history as unavailable placeholders; deleting a chat does not remove attachment files. Current limits are 8 files per upload request and 25 MB per file.
 
 The run executor is intentionally injectable. The current default emits a placeholder assistant response; wiring to the real `AIAgent` should happen only after explicit approval to integrate these changes into the real Hermes repo or in a disposable worktree.
 
