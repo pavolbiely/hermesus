@@ -254,11 +254,15 @@ from pathlib import Path
 root = Path(os.environ["ROOT"])
 upstream = Path(os.environ["UPSTREAM"])
 
+# In --dev, restart the backend only for backend runtime source changes.
+# Do not watch tests or the whole upstream checkout: editor/test/tooling touches
+# there are noisy and can cause the dev server to restart itself repeatedly.
 watch_roots = [
-    root / "backend",
-    upstream,
+    root / "backend" / "hermes_cli",
+    upstream / "hermes_cli",
+    upstream / "tools",
 ]
-skip_dirs = {".git", ".mypy_cache", ".pytest_cache", "__pycache__", "venv", ".venv", "node_modules", ".runtime"}
+skip_dirs = {".git", ".mypy_cache", ".pytest_cache", "__pycache__", "venv", ".venv", "node_modules", ".runtime", "tests"}
 items: list[str] = []
 
 for base in watch_roots:
