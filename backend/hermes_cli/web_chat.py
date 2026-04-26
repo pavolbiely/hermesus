@@ -11,7 +11,6 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
-from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
@@ -131,6 +130,7 @@ from .web_chat_modules.profiles import (
     switch_web_chat_profile as _switch_web_chat_profile_impl,
     validate_profile as _validate_profile_impl,
 )
+from .web_chat_modules import session_handlers as _session_handlers
 from .web_chat_modules.run_manager import RunContext, RunManager as _RunManager, RunManagerServices
 from .web_chat_modules.session_mutations import (
     duplicate_session as _duplicate_session_impl,
@@ -758,9 +758,13 @@ def list_sessions(
     limit: int = Query(default=50, ge=1, le=MAX_SESSION_LIMIT),
     offset: int = Query(default=0, ge=0),
 ) -> SessionListResponse:
-    db = _db()
-    sessions = _list_non_empty_sessions(db, limit=limit, offset=offset)
-    return SessionListResponse(sessions=[_serialize_session(session) for session in sessions])
+    return _session_handlers.list_sessions_response(
+        _db(),
+        limit=limit,
+        offset=offset,
+        list_non_empty_sessions=_list_non_empty_sessions,
+        serialize_session=_serialize_session,
+    )
 
 
 @router.get("/commands", response_model=WebChatCommandsResponse)
@@ -851,56 +855,50 @@ def get_workspace_changes(workspace: str | None = None) -> WebChatWorkspaceChang
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED, response_model=SessionDetailResponse)
 def create_session(payload: CreateSessionRequest) -> SessionDetailResponse:
-    db = _db()
-    session_id = uuid4().hex
-    title = _title_from_message(payload.message)
-
-    db.create_session(session_id, source=WEB_CHAT_SOURCE)
-    db.set_session_title(session_id, title)
-    db.append_message(session_id, "user", payload.message)
-
-    session = _get_session_or_404(db, session_id)
-    messages = db.get_messages(session_id)
-    return SessionDetailResponse(
-        session=_serialize_session(session),
-        messages=_serialize_messages(messages),
+    return _session_handlers.create_session_response(
+        _db(),
+        payload=payload,
+        web_chat_source=WEB_CHAT_SOURCE,
+        title_from_message=_title_from_message,
+        get_session_or_404=_get_session_or_404,
+        serialize_session=_serialize_session,
+        serialize_messages=_serialize_messages,
     )
 
 
 @router.patch("/sessions/{session_id}", response_model=SessionDetailResponse)
 def rename_session(session_id: str, payload: RenameSessionRequest) -> SessionDetailResponse:
-    db = _db()
-    _get_session_or_404(db, session_id)
-    try:
-        db.set_session_title(session_id, payload.title)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    session = _get_session_or_404(db, session_id)
-    return SessionDetailResponse(
-        session=_serialize_session(session),
-        messages=_serialize_messages(db.get_messages(session_id)),
+    return _session_handlers.rename_session_response(
+        _db(),
+        session_id=session_id,
+        payload=payload,
+        get_session_or_404=_get_session_or_404,
+        serialize_session=_serialize_session,
+        serialize_messages=_serialize_messages,
     )
 
 
 @router.patch("/sessions/{session_id}/messages/{message_id}", response_model=SessionDetailResponse)
 def edit_message(session_id: str, message_id: str, payload: EditMessageRequest) -> SessionDetailResponse:
-    db = _db()
-    _get_session_or_404(db, session_id)
-    _edit_user_message(db, session_id, message_id, payload.content)
-    session = _get_session_or_404(db, session_id)
-    return SessionDetailResponse(
-        session=_serialize_session(session),
-        messages=_serialize_messages(db.get_messages(session_id)),
+    return _session_handlers.edit_message_response(
+        _db(),
+        session_id=session_id,
+        message_id=message_id,
+        payload=payload,
+        get_session_or_404=_get_session_or_404,
+        edit_user_message=_edit_user_message,
+        serialize_session=_serialize_session,
+        serialize_messages=_serialize_messages,
     )
 
 
 @router.delete("/sessions/{session_id}", response_model=DeleteSessionResponse)
 def delete_session(session_id: str) -> DeleteSessionResponse:
-    db = _db()
-    if not db.delete_session(session_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-    _delete_session_git_changes(db, session_id)
-    return DeleteSessionResponse(ok=True)
+    return _session_handlers.delete_session_response(
+        _db(),
+        session_id=session_id,
+        delete_session_git_changes=_delete_session_git_changes,
+    )
 
 
 @router.post("/sessions/{session_id}/duplicate", status_code=status.HTTP_201_CREATED, response_model=SessionDetailResponse)
@@ -910,13 +908,14 @@ def duplicate_session(session_id: str) -> SessionDetailResponse:
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
 def get_session(session_id: str, includeWorkspaceChanges: bool = Query(default=False)) -> SessionDetailResponse:
-    db = _db()
-    session = _get_session_or_404(db, session_id)
-    messages = db.get_messages(session_id)
-    changes_by_message = _session_git_changes_by_message(db, session_id) if includeWorkspaceChanges else None
-    return SessionDetailResponse(
-        session=_serialize_session(session),
-        messages=_serialize_messages(messages, changes_by_message=changes_by_message),
+    return _session_handlers.get_session_response(
+        _db(),
+        session_id=session_id,
+        include_workspace_changes=includeWorkspaceChanges,
+        get_session_or_404=_get_session_or_404,
+        session_git_changes_by_message=_session_git_changes_by_message,
+        serialize_session=_serialize_session,
+        serialize_messages=_serialize_messages,
     )
 
 
