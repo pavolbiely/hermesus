@@ -9,6 +9,7 @@ type UseChatRunMessagesOptions = {
   sessionId: ComputedRef<string>
   refresh: () => Promise<unknown> | unknown
   refreshSessions?: () => Promise<void> | void
+  refreshSessionOnFinish?: boolean
   toast: ReturnType<typeof useToast>
   activeChatRuns: ReturnType<typeof useActiveChatRuns>
 }
@@ -160,7 +161,9 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       async onFinished() {
         if (targetSessionId === options.sessionId.value) {
           submitStatus.value = 'ready'
-          await options.refresh()
+          if (options.refreshSessionOnFinish !== false) {
+            await options.refresh()
+          }
         }
         await options.refreshSessions?.()
       }

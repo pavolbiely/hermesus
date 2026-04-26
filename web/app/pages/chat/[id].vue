@@ -50,6 +50,7 @@ const {
   sessionId,
   refresh,
   refreshSessions,
+  refreshSessionOnFinish: false,
   toast,
   activeChatRuns
 })

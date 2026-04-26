@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from web_chat_test_helpers import git_repo
@@ -71,6 +72,29 @@ def test_attachment_metadata_and_content_endpoints(client, tmp_path):
     assert content.status_code == 200
     assert content.content == b"hello"
     assert content.headers["content-type"].startswith("text/plain")
+
+
+def test_attachment_content_rejects_tampered_metadata_path(client, tmp_path):
+    repo = git_repo(tmp_path)
+    secret_path = tmp_path / "secret.txt"
+    secret_path.write_text("do not serve", encoding="utf-8")
+
+    upload = client.post(
+        "/api/web-chat/attachments",
+        data={"workspace": str(repo)},
+        files=[("files", ("notes.txt", b"hello", "text/plain"))],
+    )
+    attachment = upload.json()["attachments"][0]
+    meta_path = repo / ".hermes" / "attachments" / "notes.txt.web-chat.json"
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    metadata["path"] = str(secret_path)
+    meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    metadata_response = client.get(f"/api/web-chat/attachments/{attachment['id']}")
+    content_response = client.get(f"/api/web-chat/attachments/{attachment['id']}/content")
+
+    assert metadata_response.status_code == 404
+    assert content_response.status_code == 404
 
 
 def test_attachment_content_can_be_loaded_by_workspace_after_registry_reset(client, monkeypatch, tmp_path):

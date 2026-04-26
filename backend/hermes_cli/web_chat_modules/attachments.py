@@ -57,6 +57,14 @@ def attachment_with_runtime_state(attachment: WebChatAttachment) -> WebChatAttac
     return attachment.model_copy(update={"url": attachment_url(attachment.id), "exists": exists})
 
 
+def is_attachment_path_within_root(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def attachment_metadata_roots(
     workspace: str | None,
     *,
@@ -101,7 +109,13 @@ def load_attachment(
             except Exception:
                 continue
             if metadata.get("id") == attachment_id:
-                return attachment_with_runtime_state(WebChatAttachment(**metadata))
+                try:
+                    attachment = WebChatAttachment(**metadata)
+                except Exception:
+                    continue
+                if not is_attachment_path_within_root(Path(attachment.path), root):
+                    continue
+                return attachment_with_runtime_state(attachment)
 
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
 
