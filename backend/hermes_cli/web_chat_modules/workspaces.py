@@ -17,9 +17,11 @@ from .workspace_settings import (
     ensure_workspace_schema,
     load_project_settings,
     normalize_workspace_path,
+    portable_workspace_path,
     project_root,
     project_web_chat_settings_path,
     read_legacy_db_workspaces,
+    settings_workspace_entries,
     workspace_entries,
     workspace_from_mapping,
     write_project_settings,
@@ -66,7 +68,9 @@ def get_managed_workspace(
 
 
 def create_managed_workspace(request: SaveWorkspaceRequest, db_factory: DbFactory, settings_lock: threading.Lock) -> WebChatWorkspace:
-    path = str(normalize_workspace_path(request.path))
+    resolved_path = normalize_workspace_path(request.path)
+    path = str(resolved_path)
+    stored_path = portable_workspace_path(resolved_path)
     workspace_id = uuid4().hex
     label = request.label.strip()
 
@@ -75,11 +79,11 @@ def create_managed_workspace(request: SaveWorkspaceRequest, db_factory: DbFactor
         entries = workspace_entries(settings)
         if any(entry["path"] == path for entry in entries):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path already exists")
-        workspace = {"id": workspace_id, "label": label, "path": path}
-        settings["workspaces"] = [*entries, workspace]
+        workspace = {"id": workspace_id, "label": label, "path": stored_path}
+        settings["workspaces"] = [*settings_workspace_entries(settings), workspace]
         write_project_settings(settings)
 
-    return workspace_from_mapping(workspace)
+    return workspace_from_mapping({"id": workspace_id, "label": label, "path": path})
 
 
 def update_managed_workspace(
@@ -88,23 +92,26 @@ def update_managed_workspace(
     db_factory: DbFactory,
     settings_lock: threading.Lock,
 ) -> WebChatWorkspace:
-    path = str(normalize_workspace_path(request.path))
+    resolved_path = normalize_workspace_path(request.path)
+    path = str(resolved_path)
+    stored_path = portable_workspace_path(resolved_path)
     label = request.label.strip()
 
     with settings_lock:
         settings = load_project_settings(db_factory)
         entries = workspace_entries(settings)
+        stored_entries = settings_workspace_entries(settings)
         existing = next((entry for entry in entries if entry["id"] == workspace_id), None)
         if existing is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
         if any(entry["id"] != workspace_id and entry["path"] == path for entry in entries):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace path already exists")
 
-        updated = {"id": workspace_id, "label": label, "path": path}
-        settings["workspaces"] = [updated if entry["id"] == workspace_id else entry for entry in entries]
+        updated = {"id": workspace_id, "label": label, "path": stored_path}
+        settings["workspaces"] = [updated if entry["id"] == workspace_id else entry for entry in stored_entries]
         write_project_settings(settings)
 
-    return workspace_from_mapping(updated)
+    return workspace_from_mapping({"id": workspace_id, "label": label, "path": path})
 
 
 def workspace_label(path: Path) -> str:

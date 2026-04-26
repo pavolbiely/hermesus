@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 from pathlib import Path
 from typing import Any, Callable
 
@@ -44,11 +45,41 @@ def workspace_from_mapping(value: Any) -> WebChatWorkspace:
     )
 
 
+def user_home() -> Path:
+    home = Path.home()
+    if ".hermes" in home.parts and "profiles" in home.parts:
+        try:
+            return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+        except Exception:
+            return home.resolve()
+    return home.resolve()
+
+
+def expand_workspace_path(path: str) -> Path:
+    if path == "~":
+        return user_home()
+    if path.startswith("~/"):
+        return user_home() / path[2:]
+    return Path(path).expanduser()
+
+
 def normalize_workspace_path(path: str) -> Path:
-    candidate = Path(path).expanduser()
+    candidate = expand_workspace_path(path)
     if not candidate.is_dir():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Directory does not exist")
     return candidate.resolve()
+
+
+def portable_workspace_path(path: Path) -> str:
+    resolved = path.expanduser().resolve()
+    home = user_home()
+    try:
+        relative = resolved.relative_to(home)
+    except ValueError:
+        return str(resolved)
+    if not relative.parts:
+        return "~"
+    return f"~/{relative.as_posix()}"
 
 
 def project_root() -> Path:
@@ -119,19 +150,26 @@ def write_project_settings(settings: dict[str, Any]) -> None:
     tmp_path.replace(path)
 
 
-def workspace_entries(settings: dict[str, Any]) -> list[dict[str, str]]:
+def settings_workspace_entries(settings: dict[str, Any]) -> list[dict[str, str]]:
     entries: list[dict[str, str]] = []
     for item in settings.get("workspaces", []):
         if not isinstance(item, dict):
             continue
         try:
-            entries.append({
-                "id": str(item["id"]),
-                "label": str(item["label"]),
-                "path": str(Path(str(item["path"])).expanduser().resolve()),
-            })
+            entries.append({"id": str(item["id"]), "label": str(item["label"]), "path": str(item["path"])})
         except KeyError:
             continue
+    return entries
+
+
+def workspace_entries(settings: dict[str, Any]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for item in settings_workspace_entries(settings):
+        entries.append({
+            "id": item["id"],
+            "label": item["label"],
+            "path": str(expand_workspace_path(item["path"]).resolve()),
+        })
     return entries
 
 

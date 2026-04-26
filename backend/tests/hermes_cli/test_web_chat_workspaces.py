@@ -175,9 +175,11 @@ def test_manages_workspaces_for_composer(client, tmp_path):
 
 def test_managed_workspaces_are_stored_in_project_hermes_settings(client, tmp_path, monkeypatch):
     project = tmp_path / "settings-project"
-    workspace = tmp_path / "workspace"
+    home = tmp_path / "home"
+    workspace = home / "workspace"
     project.mkdir()
-    workspace.mkdir()
+    workspace.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("HERMES_WEB_CHAT_PROJECT_ROOT", str(project))
 
     response = client.post("/api/web-chat/workspaces", json={"label": "Workspace", "path": str(workspace)})
@@ -192,7 +194,7 @@ def test_managed_workspaces_are_stored_in_project_hermes_settings(client, tmp_pa
             {
                 "id": workspace_id,
                 "label": "Workspace",
-                "path": str(workspace.resolve()),
+                "path": "~/workspace",
             }
         ],
     }
