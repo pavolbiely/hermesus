@@ -175,9 +175,11 @@ def test_agent_executor_forwards_runtime_status_events(monkeypatch):
     from hermes_cli.web_chat_modules.run_manager import RunContext
 
     events = []
+    agent_kwargs = {}
 
     class FakeAgent:
         def __init__(self, **kwargs):
+            agent_kwargs.update(kwargs)
             self.status_callback = kwargs.get("status_callback")
 
         def run_conversation(self, prompt, *, conversation_history, task_id):
@@ -201,6 +203,8 @@ def test_agent_executor_forwards_runtime_status_events(monkeypatch):
     )
 
     assert agent_executor(context, events.append, conversation_history=lambda _: []) == "done"
+    assert "persist_session" not in agent_kwargs
+    assert agent_kwargs["session_db"] is None
     assert events == [{
         "type": "agent.status",
         "kind": "warn",

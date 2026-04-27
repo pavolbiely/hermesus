@@ -251,7 +251,6 @@ def agent_executor(
             platform=WEB_CHAT_SOURCE,
             session_id=context.session_id,
             session_db=None,
-            persist_session=False,
             fallback_model=cfg.get("fallback_providers") or cfg.get("fallback_model") or None,
             providers_allowed=provider_routing.get("only"),
             providers_ignored=provider_routing.get("ignore"),
