@@ -96,6 +96,8 @@ Useful environment overrides:
 PORT=9120 WEB_DEV_PORT=3020 ./run-local.sh --dev
 ```
 
+If a previous dev run left listeners behind on the configured ports, the runner waits briefly for them to exit and then force-stops only the stale port listeners. Adjust `PORT_STOP_TIMEOUT` if a local machine needs a longer shutdown grace period.
+
 Important behavior:
 
 - Frontend changes should not trigger `pnpm build`.

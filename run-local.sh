@@ -14,6 +14,9 @@ WATCH_INTERVAL="${WATCH_INTERVAL:-1}"
 HERMES_SESSION_TOKEN_OVERRIDE="${HERMES_DEV_SESSION_TOKEN:-}"
 WEB_DEV_PID=""
 OPEN_BROWSER="${OPEN_BROWSER:-1}"
+PORT_STOP_TIMEOUT="${PORT_STOP_TIMEOUT:-5}"
+DASHBOARD_STARTED=0
+WEB_DEV_STARTED=0
 
 usage() {
   cat <<EOF
@@ -29,6 +32,7 @@ Environment:
   PORT                    Dashboard port. Default: 9119.
   WEB_DEV_PORT            Nuxt dev server port for --dev. Default: 3019.
   WATCH_INTERVAL          Poll interval in seconds in watch mode. Default: 1.
+  PORT_STOP_TIMEOUT       Seconds to wait before force-stopping stale listeners. Default: 5.
   OPEN_BROWSER            Open the UI once on initial startup. Default: 1. Set 0 to disable.
 EOF
 }
@@ -298,17 +302,23 @@ start_dashboard() {
     if [[ -n "${HERMES_SESSION_TOKEN_OVERRIDE:-}" ]]; then
       env_args+=("HERMES_SESSION_TOKEN=$HERMES_SESSION_TOKEN_OVERRIDE")
     fi
-    env "${env_args[@]}" "$PYTHON" -m hermes_cli.main dashboard --port "$PORT" --no-open
+    exec env "${env_args[@]}" "$PYTHON" -m hermes_cli.main dashboard --port "$PORT" --no-open
   ) &
   CHILD_PID=$!
+  DASHBOARD_STARTED=1
 }
 
 stop_dashboard() {
+  local should_cleanup_port="$DASHBOARD_STARTED"
   if [[ -n "${CHILD_PID:-}" ]] && kill -0 "$CHILD_PID" 2>/dev/null; then
     kill "$CHILD_PID" 2>/dev/null || true
     wait "$CHILD_PID" 2>/dev/null || true
   fi
   CHILD_PID=""
+  DASHBOARD_STARTED=0
+  if [[ "$should_cleanup_port" == "1" ]]; then
+    kill_existing_port_processes "$PORT"
+  fi
 }
 
 open_browser_once() {
@@ -344,6 +354,40 @@ kill_existing_port_processes() {
     [[ -n "$pid" ]] || continue
     kill "$pid" 2>/dev/null || true
   done <<< "$pids"
+
+  local deadline=$((SECONDS + PORT_STOP_TIMEOUT))
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    pids="$(lsof -tiTCP:"$target_port" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -z "$pids" ]]; then
+      return
+    fi
+    sleep 0.2
+  done
+
+  pids="$(lsof -tiTCP:"$target_port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return
+  fi
+
+  echo "Force-stopping stubborn process(es) on port $target_port: $pids"
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill -KILL "$pid" 2>/dev/null || true
+  done <<< "$pids"
+
+  deadline=$((SECONDS + PORT_STOP_TIMEOUT))
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    pids="$(lsof -tiTCP:"$target_port" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -z "$pids" ]]; then
+      return
+    fi
+    sleep 0.2
+  done
+
+  pids="$(lsof -tiTCP:"$target_port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -n "$pids" ]]; then
+    echo "Warning: port $target_port is still in use by: $pids" >&2
+  fi
 }
 
 start_nuxt_dev() {
@@ -353,22 +397,33 @@ start_nuxt_dev() {
     cd "$WEB"
     HERMES_API_ORIGIN="http://127.0.0.1:$PORT" \
       NUXT_PUBLIC_HERMES_SESSION_TOKEN="$HERMES_SESSION_TOKEN_OVERRIDE" \
-      pnpm dev --host 127.0.0.1 --port "$WEB_DEV_PORT"
+      exec pnpm dev --host 127.0.0.1 --port "$WEB_DEV_PORT"
   ) &
   WEB_DEV_PID=$!
+  WEB_DEV_STARTED=1
 }
 
 stop_nuxt_dev() {
+  local should_cleanup_port="$WEB_DEV_STARTED"
   if [[ -n "${WEB_DEV_PID:-}" ]] && kill -0 "$WEB_DEV_PID" 2>/dev/null; then
     kill "$WEB_DEV_PID" 2>/dev/null || true
     wait "$WEB_DEV_PID" 2>/dev/null || true
   fi
   WEB_DEV_PID=""
+  WEB_DEV_STARTED=0
+  if [[ "$should_cleanup_port" == "1" ]]; then
+    kill_existing_port_processes "$WEB_DEV_PORT"
+  fi
 }
 
 cleanup() {
   stop_nuxt_dev
   stop_dashboard
+}
+
+cleanup_and_exit() {
+  cleanup
+  exit 130
 }
 
 run_once() {
@@ -387,7 +442,8 @@ run_once() {
 }
 
 run_watch() {
-  trap cleanup EXIT INT TERM
+  trap cleanup EXIT
+  trap cleanup_and_exit INT TERM TSTP
 
   prepare_runtime
   ensure_web_build
@@ -425,7 +481,8 @@ run_watch() {
 }
 
 run_dev() {
-  trap cleanup EXIT INT TERM
+  trap cleanup EXIT
+  trap cleanup_and_exit INT TERM TSTP
 
   HERMES_SESSION_TOKEN_OVERRIDE="${HERMES_DEV_SESSION_TOKEN:-$(generate_session_token)}"
 
