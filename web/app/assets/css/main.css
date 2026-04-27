@@ -15,6 +15,27 @@ html.dark .shiki span {
   text-decoration: var(--shiki-dark-text-decoration) !important;
 }
 
+.chat-message-markdown :where(h1, h2, h3, h4, h5, h6) {
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: 600;
+}
+
+.chat-message-markdown :where(p, ul, ol, pre, blockquote) {
+  margin-block: 0.75rem;
+}
+
+.chat-message-markdown :where(code) {
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+  font-weight: 400;
+}
+
+.chat-message-markdown :where(pre) {
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
 .tool-call-shimmer {
   background: linear-gradient(90deg, currentColor 0%, color-mix(in oklab, currentColor 35%, transparent) 35%, currentColor 70%);
   background-size: 220% 100%;

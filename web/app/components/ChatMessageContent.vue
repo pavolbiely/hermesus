@@ -75,7 +75,7 @@ const emit = defineEmits<{
           v-if="message.role === 'assistant'"
           :markdown="partText(group.part)"
           :plugins="[highlight()]"
-          class="*:first:mt-0 *:last:mb-0"
+          class="chat-message-markdown *:first:mt-0 *:last:mb-0"
         />
         <div v-else-if="editingMessageId === message.id" :ref="setEditingMessageContainer" class="w-full">
           <UChatPrompt
