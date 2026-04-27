@@ -78,12 +78,13 @@ const emit = defineEmits<{
             :rows="3"
             :autofocus="true"
             :autoresize="true"
+            :ui="{ footer: 'justify-end' }"
             class="w-full min-w-72"
             @submit="emit('saveEdit', message)"
             @keydown.esc.prevent="emit('cancelEdit')"
           >
             <template #footer>
-              <div class="flex justify-end gap-2">
+              <div class="flex w-full justify-end gap-2">
                 <UButton
                   size="xs"
                   color="neutral"
