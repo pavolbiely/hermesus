@@ -32,10 +32,6 @@ export function exactSlashCommandMatch<T extends SlashCommandLike>(commands: T[]
   return commands.find(command => command.name.toLowerCase() === normalized) || null
 }
 
-export function requiresWorkspaceBeforeSubmit(_input: string, selectedWorkspace: string | null | undefined): boolean {
-  return !selectedWorkspace
-}
-
 export function nextSlashCommandDismissedState(
   previousInput: string | null | undefined,
   currentInput: string,

@@ -71,26 +71,14 @@ const {
 })
 const error = computed(() => streamError.value)
 const {
-  shouldBlockForMissingWorkspace,
-  submitSlashCommandIfNeeded,
   selectSlashCommand,
   onPromptArrowDown,
   onPromptArrowUp,
   onPromptEscape,
   onPromptEnter
-} = useChatSlashCommandSubmission({
-  api,
+} = useChatSlashCommandAutocomplete({
   input,
-  messages,
-  sessionId,
-  selectedWorkspace: context.selectedWorkspace,
-  selectedModel: composer.selectedModel,
-  selectedReasoningEffort: composer.selectedReasoningEffort,
-  streamError,
-  workspaceInvalidSignal,
-  slashCommands,
-  toast,
-  submitStatus
+  slashCommands
 })
 const {
   editingMessageId,
@@ -263,8 +251,10 @@ async function sendMessageNow(message: string) {
 async function onSubmit() {
   const message = input.value.trim()
   if (!message) return
-  if (shouldBlockForMissingWorkspace(message)) return
-  if (await submitSlashCommandIfNeeded(message)) return
+  if (!context.selectedWorkspace.value) {
+    workspaceInvalidSignal.value += 1
+    return
+  }
 
   if (activeChatRuns.isRunning(sessionId.value) || submitStatus.value === 'submitted') {
     enqueueMessage(message)

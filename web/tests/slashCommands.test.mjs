@@ -3,17 +3,16 @@ import { test } from 'node:test'
 import {
   exactSlashCommandMatch,
   filterSlashCommands,
-  nextSlashCommandDismissedState,
-  requiresWorkspaceBeforeSubmit
+  nextSlashCommandDismissedState
 } from '../app/utils/slashCommands.ts'
 
 const commands = [
-  { id: 'help', name: '/help', description: 'Show commands' },
-  { id: 'status', name: '/status', description: 'Show status' },
-  { id: 'changes', name: '/changes', description: 'Show workspace changes' }
+  { id: 'help', name: '/help', description: 'Show commands', requiresWorkspace: false },
+  { id: 'status', name: '/status', description: 'Show status', requiresWorkspace: false },
+  { id: 'changes', name: '/changes', description: 'Show workspace changes', requiresWorkspace: true }
 ]
 
-test('only exact known slash commands are intercepted for command execution', () => {
+test('only exact known slash commands are recognized for autocomplete matching', () => {
   assert.equal(exactSlashCommandMatch(commands, '/help')?.name, '/help')
   assert.equal(exactSlashCommandMatch(commands, '/help   ')?.name, '/help')
   assert.equal(exactSlashCommandMatch(commands, '/help now'), null)
@@ -31,11 +30,9 @@ test('slash command autocomplete includes all known commands for leading slash',
   assert.deepEqual(filterSlashCommands(commands, 'hello /').map(command => command.name), [])
 })
 
-test('slash command submissions still require a selected workspace', () => {
-  assert.equal(requiresWorkspaceBeforeSubmit('/help', null), true)
-  assert.equal(requiresWorkspaceBeforeSubmit('/help', ''), true)
-  assert.equal(requiresWorkspaceBeforeSubmit('/help', '/repo/alpha'), false)
-  assert.equal(requiresWorkspaceBeforeSubmit('regular message', null), true)
+test('exact slash commands remain plain input after autocomplete selection', () => {
+  assert.equal(exactSlashCommandMatch(commands, '/help')?.name, '/help')
+  assert.equal(filterSlashCommands(commands, '/he')[0]?.name, '/help')
 })
 
 test('escape dismissal stays closed until leaving slash command input', () => {

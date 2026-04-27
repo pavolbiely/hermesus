@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { requiresWorkspaceBeforeSubmit } from '../utils/slashCommands'
 import { prepareNotificationSound } from '../utils/notificationSound'
-import type { WebChatCommand } from '~/types/web-chat'
 
 const input = ref('')
 const loading = ref(false)
@@ -40,89 +38,24 @@ function showVoiceError(message: string) {
   showError(new Error(message), 'Voice input failed')
 }
 
-function showCommandError(err: unknown, commandText: string) {
-  const message = getHermesErrorMessage(err, 'Command failed')
-  toast.add({ color: 'warning', title: commandText, description: message })
-}
-
-function shouldBlockForMissingWorkspace(message: string) {
-  if (!requiresWorkspaceBeforeSubmit(message, context.selectedWorkspace.value)) return false
-  workspaceInvalidSignal.value += 1
-  return true
-}
-
-async function executeSlashCommand(commandText: string) {
-  if (shouldBlockForMissingWorkspace(commandText)) return false
-
-  error.value = undefined
-  try {
-    const response = await api.executeCommand({
-      command: commandText,
-      workspace: context.selectedWorkspace.value,
-      model: composer.selectedModel.value,
-      reasoningEffort: composer.selectedReasoningEffort.value
-    })
-    if (response.sessionId) {
-      await refreshSessions?.()
-      await router.push({ path: `/chat/${response.sessionId}` })
-      return true
-    }
-    const text = response.message?.parts.find(part => part.type === 'text')?.text || 'Command completed.'
-    toast.add({ title: commandText, description: text })
-  } catch (err) {
-    showCommandError(err, commandText)
-  }
-  return true
-}
-
-async function submitSlashCommandIfNeeded(message: string) {
-  if (!message.startsWith('/')) return false
-  await slashCommands.loadCommands()
-  const command = slashCommands.exactCommand(message)
-  if (!command) return false
-  const executed = await executeSlashCommand(command.name)
-  if (executed) input.value = ''
-  return true
-}
-
-async function selectSlashCommand(command: WebChatCommand) {
-  input.value = command.name
-  const executed = await executeSlashCommand(command.name)
-  if (executed) input.value = ''
-}
-
-function onPromptArrowDown(event: KeyboardEvent) {
-  if (!slashCommands.isOpen.value) return
-  event.preventDefault()
-  slashCommands.moveHighlight(1)
-}
-
-function onPromptArrowUp(event: KeyboardEvent) {
-  if (!slashCommands.isOpen.value) return
-  event.preventDefault()
-  slashCommands.moveHighlight(-1)
-}
-
-function onPromptEscape(event: KeyboardEvent) {
-  if (!slashCommands.isOpen.value) return
-  event.preventDefault()
-  event.stopPropagation()
-  slashCommands.close()
-}
-
-function onPromptEnter(event: KeyboardEvent) {
-  if (!slashCommands.isOpen.value) return
-  const command = slashCommands.highlightedCommand()
-  if (!command) return
-  event.preventDefault()
-  selectSlashCommand(command)
-}
+const {
+  selectSlashCommand,
+  onPromptArrowDown,
+  onPromptArrowUp,
+  onPromptEscape,
+  onPromptEnter
+} = useChatSlashCommandAutocomplete({
+  input,
+  slashCommands
+})
 
 async function onSubmit() {
   const message = input.value.trim()
   if (!message || loading.value) return
-  if (shouldBlockForMissingWorkspace(message)) return
-  if (await submitSlashCommandIfNeeded(message)) return
+  if (!context.selectedWorkspace.value) {
+    workspaceInvalidSignal.value += 1
+    return
+  }
 
   loading.value = true
   error.value = undefined
