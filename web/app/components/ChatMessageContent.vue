@@ -24,20 +24,14 @@ const emit = defineEmits<{
 
 <template>
   <template v-for="(group, index) in groupMessageParts(message.parts)" :key="`${message.id}-${group.type}-${index}`">
-    <div v-if="group.type === 'tools'" class="space-y-0.5">
-      <ToolCallItem
-        v-for="(toolPart, toolIndex) in group.parts"
-        :key="`${message.id}-tool-${index}-${toolIndex}`"
-        :part="toolPart"
-      />
-    </div>
+    <RunDetailsGroup
+      v-if="group.type === 'process'"
+      :parts="group.parts"
+      :expanded-default="isRunning"
+    />
 
     <template v-else>
-      <UChatReasoning v-if="group.part.type === 'reasoning'" :text="partText(group.part)">
-        <Comark :markdown="partText(group.part)" :plugins="[highlight()]" class="*:first:mt-0 *:last:mb-0" />
-      </UChatReasoning>
-
-      <div v-else-if="group.part.type === 'media' && group.part.attachments?.length" class="mb-2 flex flex-wrap gap-2">
+      <div v-if="group.part.type === 'media' && group.part.attachments?.length" class="mb-2 flex flex-wrap gap-2">
         <ChatAttachmentPreview
           v-for="attachment in group.part.attachments"
           :key="attachment.id"
