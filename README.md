@@ -2,6 +2,13 @@
 
 This directory contains the project-local prototype for a native Nuxt UI chat interface for Hermes Agent.
 
+## Preview
+
+<p>
+  <img src="docs/assets/agent1.png" alt="Hermes Agent chat preview" width="49%">
+  <img src="docs/assets/agent2.png" alt="Hermes Agent workspace changes preview" width="49%">
+</p>
+
 Do **not** edit `$HOME/.hermes/hermes-agent` directly during prototype work. Treat this repository as the source of truth and move changes with normal git workflow.
 
 ## Layout
