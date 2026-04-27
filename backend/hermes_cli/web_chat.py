@@ -72,6 +72,7 @@ from .web_chat_modules.git_changes import (
     session_git_changes_by_message as _session_git_changes_by_message_impl,
     status_paths as _status_paths_impl,
     untracked_file_patch as _untracked_file_patch_impl,
+    workspace_change_fingerprint as _workspace_change_fingerprint_impl,
     workspace_changes as _workspace_changes_impl,
     workspace_changes_since as _workspace_changes_since_impl,
     workspace_patch as _workspace_patch_impl,
@@ -322,13 +323,26 @@ def _validate_edited_message_continuation(db: SessionDB, session_id: str, messag
 def _persist_run_workspace_changes(context: RunContext, message_id: int | None) -> WebChatWorkspaceChanges | None:
     if not context.workspace:
         return None
-    final_status = _git_status_porcelain(context.workspace)
-    if final_status is None or final_status == (context.baseline_git_status or ""):
+    final_fingerprint = _workspace_change_fingerprint(context.workspace)
+    if final_fingerprint is None or final_fingerprint == context.baseline_change_fingerprint:
         return None
 
-    changes = _workspace_changes_since(context.workspace, context.baseline_git_status or "", context.run_id)
+    final_status = _git_status_porcelain(context.workspace)
+    if final_status is None:
+        return None
+
+    changes = _workspace_changes(context.workspace)
+    changes.files = sorted(changes.files, key=lambda file: file.path)
+    changes.totalFiles = len(changes.files)
+    changes.totalAdditions = sum(file.additions for file in changes.files)
+    changes.totalDeletions = sum(file.deletions for file in changes.files)
+    changes.workspace = str(_workspace_root(context.workspace) or context.workspace)
+    changes.runId = context.run_id
     if not changes.files:
         return None
+    patch, patch_truncated = _workspace_patch(Path(changes.workspace), changes.files)
+    changes.patch = patch
+    changes.patchTruncated = patch_truncated
     _record_session_git_changes(
         _db(),
         session_id=context.session_id,
@@ -344,6 +358,10 @@ def _persist_run_workspace_changes(context: RunContext, message_id: int | None) 
 
 def _git_status_porcelain(workspace: str | None) -> str | None:
     return _git_status_porcelain_impl(workspace, workspace_root_func=_workspace_root)
+
+
+def _workspace_change_fingerprint(workspace: str | None) -> str | None:
+    return _workspace_change_fingerprint_impl(workspace, workspace_root_func=_workspace_root)
 
 
 def _status_paths(status_text: str) -> set[str]:
@@ -729,6 +747,7 @@ def _run_manager_services() -> RunManagerServices:
         set_session_title_safely=_set_session_title_safely,
         title_from_message=_title_from_message,
         git_status_porcelain=_git_status_porcelain,
+        workspace_change_fingerprint=_workspace_change_fingerprint,
         persist_run_workspace_changes=_persist_run_workspace_changes,
         agent_executor=_agent_executor,
     )

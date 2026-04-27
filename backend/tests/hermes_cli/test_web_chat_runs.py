@@ -190,6 +190,59 @@ def test_start_run_persists_workspace_changes_with_patch(client, monkeypatch, tm
     assert "+new" in patch_by_path["created.txt"]
 
 
+def test_start_run_reports_later_edits_when_git_status_is_already_dirty(client, monkeypatch, tmp_path):
+    import hermes_cli.web_chat as web_chat
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+    (repo / "tracked.txt").write_text("one\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial"],
+        check=True,
+        capture_output=True,
+    )
+
+    def first_executor(context, emit):
+        (repo / "tracked.txt").write_text("one\ntwo\n", encoding="utf-8")
+        return "First done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(first_executor))
+    first = client.post("/api/web-chat/runs", json={"input": "Change file", "workspace": str(repo)})
+    assert first.status_code == 202
+    with client.stream("GET", f"/api/web-chat/runs/{first.json()['runId']}/events") as stream:
+        stream.read()
+
+    def second_executor(context, emit):
+        (repo / "tracked.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+        return "Second done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(second_executor))
+    second = client.post(
+        "/api/web-chat/runs",
+        json={"input": "Change it again", "workspace": str(repo), "sessionId": first.json()["sessionId"]},
+    )
+    assert second.status_code == 202
+    with client.stream("GET", f"/api/web-chat/runs/{second.json()['runId']}/events") as stream:
+        body = stream.read().decode()
+
+    assert "event: message.completed" in body
+    assert '"changes"' in body
+    assert "tracked.txt" in body
+    assert "+three" in body
+
+    detail = client.get(f"/api/web-chat/sessions/{first.json()['sessionId']}?includeWorkspaceChanges=true")
+    messages = detail.json()["messages"]
+    assert [part["type"] for part in messages[3]["parts"]] == ["text", "changes"]
+    second_changes = messages[3]["parts"][1]["changes"]
+    assert second_changes["runId"] == second.json()["runId"]
+    assert second_changes["files"] == [
+        {"path": "tracked.txt", "status": "edited", "additions": 2, "deletions": 0},
+    ]
+    assert "+three" in second_changes["patch"]["files"][0]["patch"]
+
+
 def test_start_run_is_idempotent_for_retried_client_message_id(client, monkeypatch, tmp_path):
     import hermes_cli.web_chat as web_chat
 

@@ -42,6 +42,7 @@ class RunContext:
     provider: str | None = None
     enabled_toolsets: list[str] | None = None
     baseline_git_status: str | None = None
+    baseline_change_fingerprint: str | None = None
     stop_requested: threading.Event = field(default_factory=threading.Event)
     interrupt_agent: Callable[[str | None], None] | None = None
     steer_agent: Callable[[str], None] | None = None
@@ -79,6 +80,7 @@ class RunManagerServices:
     set_session_title_safely: Callable[[Any, str, str], None]
     title_from_message: Callable[[str], str]
     git_status_porcelain: Callable[[str | None], str]
+    workspace_change_fingerprint: Callable[[str | None], str | None]
     persist_run_workspace_changes: Callable[[RunContext, int | None], WebChatWorkspaceChanges | None]
     agent_executor: RunExecutor
 
@@ -180,6 +182,7 @@ class RunManager:
             )
 
         baseline_git_status = self._services.git_status_porcelain(workspace_path) if workspace_path else None
+        baseline_change_fingerprint = self._services.workspace_change_fingerprint(workspace_path) if workspace_path else None
 
         run_id = uuid4().hex
         context = RunContext(
@@ -194,6 +197,7 @@ class RunManager:
             provider=request.provider,
             enabled_toolsets=request.enabledToolsets,
             baseline_git_status=baseline_git_status,
+            baseline_change_fingerprint=baseline_change_fingerprint,
         )
         active = ActiveRun(
             context=context,

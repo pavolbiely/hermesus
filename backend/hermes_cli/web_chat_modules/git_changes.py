@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
 
@@ -53,6 +54,47 @@ def git_status_porcelain(workspace: str | None, *, workspace_root_func: Callable
         ).stdout
     except Exception:
         return None
+
+
+def workspace_change_fingerprint(
+    workspace: str | None,
+    *,
+    workspace_root_func: Callable[[str | None], Path | None] = workspace_root,
+) -> str | None:
+    root = workspace_root_func(workspace)
+    if not root:
+        return None
+
+    try:
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain=v1"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout
+        diff = subprocess.run(
+            ["git", "-C", str(root), "diff", "--binary", "HEAD", "--"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout
+    except Exception:
+        return None
+
+    digest = sha256()
+    digest.update(status.encode("utf-8", errors="surrogateescape"))
+    digest.update(b"\0")
+    digest.update(diff.encode("utf-8", errors="surrogateescape"))
+    for path in git_untracked_files(root):
+        digest.update(b"\0untracked\0")
+        digest.update(path.encode("utf-8", errors="surrogateescape"))
+        try:
+            digest.update((root / path).read_bytes())
+        except Exception:
+            continue
+    return digest.hexdigest()
 
 
 def status_paths(status_text: str) -> set[str]:
