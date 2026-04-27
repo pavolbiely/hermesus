@@ -6,7 +6,7 @@ import type { WebChatMessage } from '~/types/web-chat'
 import type { QueuedMessage } from '~/utils/queuedMessages'
 import { messageText } from '~/utils/chatMessages'
 import { writeClipboardText } from '~/utils/clipboard'
-import { shouldHideChatUntilInitialScroll, scrollElementTreeToBottom } from '~/utils/chatInitialScroll'
+import { shouldHideChatUntilInitialScroll, scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender } from '~/utils/chatInitialScroll'
 import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
 
 const route = useRoute()
@@ -217,6 +217,18 @@ function enqueueMessage(message: string) {
   if (queued) input.value = ''
 }
 
+function waitForAnimationFrame() {
+  if (typeof requestAnimationFrame !== 'function') return Promise.resolve()
+  return new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+}
+
+async function scrollChatToBottomAfterRender() {
+  await scrollElementTreeToBottomAfterRender(chatContainer.value, {
+    waitForDomUpdate: nextTick,
+    waitForFrame: waitForAnimationFrame
+  })
+}
+
 async function sendMessageNow(message: string) {
   const pendingAttachments = [...context.attachments.value]
   void prepareNotificationSound()
@@ -225,6 +237,7 @@ async function sendMessageNow(message: string) {
   const userMessage = createLocalMessage('user', message)
   if (pendingAttachments.length) userMessage.parts.unshift({ type: 'media', attachments: pendingAttachments })
   messages.value.push(userMessage)
+  void scrollChatToBottomAfterRender()
 
   try {
     const run = await api.startRun(message, {

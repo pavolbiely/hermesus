@@ -13,6 +13,11 @@ export function shouldHideChatUntilInitialScroll(state: InitialScrollState) {
   return state.settledSessionId !== state.currentSessionId
 }
 
+type BottomScrollOptions = {
+  waitForDomUpdate?: () => Promise<void> | void
+  waitForFrame?: () => Promise<void> | void
+}
+
 export function scrollElementTreeToBottom(element?: HTMLElement | null) {
   const scrolled = new Set<Element>()
   let current: HTMLElement | null = element ?? null
@@ -32,4 +37,13 @@ export function scrollElementTreeToBottom(element?: HTMLElement | null) {
   }
 
   return scrolled.size
+}
+
+export async function scrollElementTreeToBottomAfterRender(
+  element?: HTMLElement | null,
+  options: BottomScrollOptions = {}
+) {
+  await options.waitForDomUpdate?.()
+  await options.waitForFrame?.()
+  return scrollElementTreeToBottom(element)
 }
