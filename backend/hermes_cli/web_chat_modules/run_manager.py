@@ -135,16 +135,20 @@ class RunManager:
             )
             self._services.set_session_title_safely(db, session_id, self._services.title_from_message(request.input))
 
+        user_message_id = None
         if not request.editedMessageId:
-            attachment_items = [
+            message_items = []
+            if request.clientMessageId:
+                message_items.append({"type": "web_chat_client_message", "clientMessageId": request.clientMessageId})
+            message_items.extend(
                 {"type": "web_chat_attachment", "attachment": attachment.model_dump()}
                 for attachment in attachments
-            ]
-            db.append_message(
+            )
+            user_message_id = db.append_message(
                 session_id,
                 "user",
                 request.input,
-                codex_message_items=attachment_items or None,
+                codex_message_items=message_items or None,
             )
 
         baseline_git_status = self._services.git_status_porcelain(workspace_path) if workspace_path else None
@@ -168,7 +172,7 @@ class RunManager:
         with self._lock:
             self._runs[run_id] = active
         active.thread.start()
-        return StartRunResponse(sessionId=session_id, runId=run_id)
+        return StartRunResponse(sessionId=session_id, runId=run_id, userMessageId=str(user_message_id) if user_message_id else None)
 
     def events(self, run_id: str, after: int | None = None):
         active = self._get(run_id)

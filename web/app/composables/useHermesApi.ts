@@ -113,11 +113,13 @@ export function useHermesApi() {
         profile?: string | null
         attachments?: string[]
         editedMessageId?: string
+        clientMessageId?: string
       } = {}
     ) => request<StartRunResponse>('/api/web-chat/runs', {
       method: 'POST',
       body: {
         input,
+        clientMessageId: options.clientMessageId,
         sessionId: options.sessionId,
         model: options.model,
         reasoningEffort: options.reasoningEffort,

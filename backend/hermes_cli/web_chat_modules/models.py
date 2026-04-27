@@ -75,6 +75,7 @@ class WebChatMessage(BaseModel):
     role: Literal["user", "assistant", "system", "tool"]
     parts: list[WebChatPart]
     createdAt: str
+    clientMessageId: str | None = None
     reasoning: str | None = None
     toolName: str | None = None
     toolCalls: Any | None = None
@@ -243,6 +244,7 @@ class DeleteSessionResponse(BaseModel):
 class StartRunRequest(BaseModel):
     sessionId: str | None = None
     input: str = Field(min_length=1, max_length=65536)
+    clientMessageId: str | None = Field(default=None, max_length=120)
     workspace: str | None = None
     profile: str | None = None
     attachments: list[str] | None = None
@@ -256,6 +258,7 @@ class StartRunRequest(BaseModel):
 class StartRunResponse(BaseModel):
     sessionId: str
     runId: str
+    userMessageId: str | None = None
 
 
 class StopRunResponse(BaseModel):

@@ -31,11 +31,13 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
         "model": "gpt-5.3-codex",
         "reasoningEffort": "high",
         "workspace": str(repo),
+        "clientMessageId": "client-message-1",
     })
     assert response.status_code == 202
     data = response.json()
     assert data["sessionId"]
     assert data["runId"]
+    assert data["userMessageId"]
     assert seen == {"model": "gpt-5.3-codex", "reasoningEffort": "high", "workspace": str(repo)}
 
     with client.stream("GET", f"/api/web-chat/runs/{data['runId']}/events") as stream:
@@ -48,6 +50,8 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
 
     detail = client.get(f"/api/web-chat/sessions/{data['sessionId']}")
     assert [message["role"] for message in detail.json()["messages"]] == ["user", "assistant"]
+    assert detail.json()["messages"][0]["id"] == data["userMessageId"]
+    assert detail.json()["messages"][0]["clientMessageId"] == "client-message-1"
     assert detail.json()["messages"][1]["parts"][0]["text"] == "Done"
     assert detail.json()["session"]["model"] == "gpt-5.3-codex"
     assert detail.json()["session"]["reasoningEffort"] == "high"

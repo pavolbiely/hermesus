@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { syncInitialReadMessageCounts } from '~/utils/chatReadReceipts'
 import type { SessionGroup } from '~/utils/sessionGroups'
 import type { WebChatProfile, WebChatSession, WebChatWorkspace } from '~/types/web-chat'
 import { buildSessionGroups } from '~/utils/sessionGroups'
@@ -299,36 +300,20 @@ function saveReadMessageCounts() {
   localStorage.setItem(READ_MESSAGE_COUNTS_KEY, JSON.stringify(readMessageCounts.value))
 }
 
-function markSessionRead(session: WebChatSession) {
+function markSessionRead(sessionId: string, messageCount: number) {
   if (!readMessageCountsLoaded.value) return
-  const currentCount = Math.max(0, session.messageCount || 0)
-  if (readMessageCounts.value[session.id] === currentCount) return
-  readMessageCounts.value = { ...readMessageCounts.value, [session.id]: currentCount }
+  const currentCount = Math.max(0, messageCount || 0)
+  if (readMessageCounts.value[sessionId] === currentCount) return
+  readMessageCounts.value = { ...readMessageCounts.value, [sessionId]: currentCount }
   saveReadMessageCounts()
 }
 
 function syncReadMessageCounts() {
   if (!readMessageCountsLoaded.value) return
 
-  let changed = false
-  const next = { ...readMessageCounts.value }
-  const sessionIds = new Set(sessions.value.map(session => session.id))
+  const next = syncInitialReadMessageCounts(sessions.value, readMessageCounts.value)
+  if (next === readMessageCounts.value) return
 
-  for (const session of sessions.value) {
-    if (isActiveSession(session) || next[session.id] === undefined) {
-      next[session.id] = Math.max(0, session.messageCount || 0)
-      changed = true
-    }
-  }
-
-  for (const id of Object.keys(next)) {
-    if (!sessionIds.has(id)) {
-      delete next[id]
-      changed = true
-    }
-  }
-
-  if (!changed) return
   readMessageCounts.value = next
   saveReadMessageCounts()
 }
@@ -437,8 +422,6 @@ async function deleteSession(session: WebChatSession) {
 }
 
 function openSession(session: WebChatSession) {
-  markSessionRead(session)
-  activeChatRuns.clearPromptUnread(session.id)
   void router.push(`/chat/${session.id}`)
 }
 
@@ -463,6 +446,7 @@ onBeforeUnmount(() => {
 })
 
 provide('refreshSessions', refresh)
+provide('markSessionRead', markSessionRead)
 </script>
 
 <template>

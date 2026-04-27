@@ -67,6 +67,7 @@ export type WebChatPart = {
 
 export type WebChatMessage = {
   id: string
+  clientMessageId?: string | null
   role: 'user' | 'assistant' | 'system' | 'tool'
   parts: WebChatPart[]
   createdAt: string
@@ -237,6 +238,7 @@ export type ExecuteCommandResponse = {
 export type StartRunResponse = {
   sessionId: string
   runId: string
+  userMessageId?: string | null
 }
 
 export type DeleteSessionResponse = {

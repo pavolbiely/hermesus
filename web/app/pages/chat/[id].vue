@@ -6,7 +6,8 @@ import type { WebChatMessage } from '~/types/web-chat'
 import type { QueuedMessage } from '~/utils/queuedMessages'
 import { messageText } from '~/utils/chatMessages'
 import { writeClipboardText } from '~/utils/clipboard'
-import { shouldHideChatUntilInitialScroll, scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender } from '~/utils/chatInitialScroll'
+import { mergeOptimisticUserMessages } from '~/utils/optimisticChatMessages'
+import { shouldHideChatUntilInitialScroll, scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender, nearestScrollableAncestor, isElementVisibleInRoot } from '~/utils/chatInitialScroll'
 import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
 
 const route = useRoute()
@@ -17,6 +18,7 @@ const context = useChatComposerContext()
 const toast = useToast()
 const input = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
+const bottomReadSentinel = ref<HTMLElement | null>(null)
 const initialScrollSettledSessionId = ref<string | null>(null)
 const lastRenderedMessageCount = ref(0)
 const loadingSkeletonCount = computed(() => loadingChatSkeletonCount(lastRenderedMessageCount.value))
@@ -25,6 +27,12 @@ const copiedMessageId = ref<string | null>(null)
 const workspaceInvalidSignal = ref(0)
 let copiedMessageTimer: ReturnType<typeof setTimeout> | undefined
 const refreshSessions = inject<() => Promise<void> | void>('refreshSessions')
+const markSessionRead = inject<(sessionId: string, messageCount: number) => void>('markSessionRead')
+let optimisticUserMessageIds = new Set<string>()
+let bottomReadObserver: IntersectionObserver | undefined
+let readScrollRoot: Element | null = null
+let readScrollAnimationFrame: number | undefined
+let previousScrollRestoration: ScrollRestoration | undefined
 
 const sessionId = computed(() => String(route.params.id))
 const queuedMessages = useQueuedMessages()
@@ -70,6 +78,8 @@ const {
   activeChatRuns
 })
 const error = computed(() => streamError.value)
+const chatMessagesStatus = computed(() => chatStatus.value === 'submitted' ? 'streaming' : chatStatus.value)
+const showSubmittedIndicator = computed(() => chatStatus.value === 'submitted')
 const {
   selectSlashCommand,
   onPromptArrowDown,
@@ -104,16 +114,26 @@ const {
   showError
 })
 
-watchEffect(() => {
-  activeChatRuns.clearPromptUnread(sessionId.value)
-  if (data.value?.session.id !== sessionId.value) {
-    messages.value = []
-    return
-  }
+watch(
+  [sessionId, () => data.value?.session.id, () => data.value?.messages],
+  ([currentSessionId, loadedSessionId, persistedMessages]) => {
+    if (loadedSessionId !== currentSessionId) {
+      messages.value = []
+      optimisticUserMessageIds = new Set()
+      return
+    }
 
-  messages.value = data.value.messages ? [...data.value.messages] : []
-  lastRenderedMessageCount.value = messages.value.length
-})
+    const merged = mergeOptimisticUserMessages(
+      persistedMessages ? [...persistedMessages] : [],
+      messages.value,
+      optimisticUserMessageIds
+    )
+    messages.value = merged.messages
+    optimisticUserMessageIds = merged.optimisticMessageIds
+    lastRenderedMessageCount.value = messages.value.length
+  },
+  { immediate: true }
+)
 
 watch(sessionId, () => {
   initialScrollSettledSessionId.value = null
@@ -130,9 +150,8 @@ watch(
       return
     }
 
-    await nextTick()
-    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
-    scrollElementTreeToBottom(chatContainer.value)
+    await scrollChatToBottomAfterRender()
+    attachReadScrollListener()
     initialScrollSettledSessionId.value = loadedSessionId
   },
   { immediate: true, flush: 'post' }
@@ -217,6 +236,55 @@ function enqueueMessage(message: string) {
   if (queued) input.value = ''
 }
 
+function visibleMessageCount() {
+  return Math.max(data.value?.session.messageCount || 0, messages.value.length)
+}
+
+function latestMessageElement() {
+  return chatContainer.value?.querySelector('article:last-of-type') ?? null
+}
+
+function readVisibilityRoot() {
+  return nearestScrollableAncestor(chatContainer.value)
+}
+
+function isBottomReadSentinelVisible() {
+  return isElementVisibleInRoot(bottomReadSentinel.value, readVisibilityRoot())
+}
+
+function isLatestMessageVisible() {
+  return isElementVisibleInRoot(latestMessageElement(), readVisibilityRoot())
+}
+
+function markCurrentSessionReadIfVisible() {
+  if (!markSessionRead || data.value?.session.id !== sessionId.value) return
+  if (!isBottomReadSentinelVisible() && !isLatestMessageVisible()) return
+
+  markSessionRead(sessionId.value, visibleMessageCount())
+  activeChatRuns.clearPromptUnread(sessionId.value)
+}
+
+function scheduleReadVisibilityCheck() {
+  if (typeof requestAnimationFrame !== 'function') {
+    markCurrentSessionReadIfVisible()
+    return
+  }
+
+  if (readScrollAnimationFrame !== undefined) return
+  readScrollAnimationFrame = requestAnimationFrame(() => {
+    readScrollAnimationFrame = undefined
+    markCurrentSessionReadIfVisible()
+  })
+}
+
+function attachReadScrollListener() {
+  const nextRoot = readVisibilityRoot()
+  if (nextRoot === readScrollRoot) return
+  readScrollRoot?.removeEventListener('scroll', scheduleReadVisibilityCheck)
+  readScrollRoot = nextRoot
+  readScrollRoot?.addEventListener('scroll', scheduleReadVisibilityCheck, { passive: true })
+}
+
 function waitForAnimationFrame() {
   if (typeof requestAnimationFrame !== 'function') return Promise.resolve()
   return new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
@@ -225,8 +293,12 @@ function waitForAnimationFrame() {
 async function scrollChatToBottomAfterRender() {
   await scrollElementTreeToBottomAfterRender(chatContainer.value, {
     waitForDomUpdate: nextTick,
-    waitForFrame: waitForAnimationFrame
+    waitForFrame: waitForAnimationFrame,
+    frameCount: 3
   })
+  await new Promise<void>(resolve => setTimeout(resolve, 0))
+  scrollElementTreeToBottom(chatContainer.value)
+  markCurrentSessionReadIfVisible()
 }
 
 async function sendMessageNow(message: string) {
@@ -234,7 +306,10 @@ async function sendMessageNow(message: string) {
   void prepareNotificationSound()
   input.value = ''
   submitStatus.value = 'submitted'
+  const clientMessageId = crypto.randomUUID()
   const userMessage = createLocalMessage('user', message)
+  userMessage.clientMessageId = clientMessageId
+  optimisticUserMessageIds.add(userMessage.id)
   if (pendingAttachments.length) userMessage.parts.unshift({ type: 'media', attachments: pendingAttachments })
   messages.value.push(userMessage)
   void scrollChatToBottomAfterRender()
@@ -245,12 +320,20 @@ async function sendMessageNow(message: string) {
       model: composer.selectedModel.value,
       reasoningEffort: composer.selectedReasoningEffort.value,
       workspace: context.selectedWorkspace.value,
-      attachments: context.attachments.value.map(attachment => attachment.id)
+      attachments: context.attachments.value.map(attachment => attachment.id),
+      clientMessageId
     })
+    if (run.userMessageId && userMessage.id !== run.userMessageId) {
+      optimisticUserMessageIds.delete(userMessage.id)
+      userMessage.id = run.userMessageId
+      optimisticUserMessageIds.add(userMessage.id)
+    }
     composer.rememberLastUsedSelection()
     context.clearAttachments()
     connectRun(run.runId, sessionId.value)
+    void scrollChatToBottomAfterRender()
   } catch (err) {
+    optimisticUserMessageIds.delete(userMessage.id)
     messages.value = messages.value.filter(message => message.id !== userMessage.id)
     input.value = message
     context.attachments.value = pendingAttachments
@@ -388,6 +471,26 @@ watch(
 )
 
 watch(
+  () => [sessionId.value, messages.value.length] as const,
+  async () => {
+    await nextTick()
+    attachReadScrollListener()
+    markCurrentSessionReadIfVisible()
+  },
+  { flush: 'post' }
+)
+
+watch(
+  bottomReadSentinel,
+  (sentinel, previous) => {
+    if (!bottomReadObserver) return
+    if (previous) bottomReadObserver.unobserve(previous)
+    if (sentinel) bottomReadObserver.observe(sentinel)
+  },
+  { flush: 'post' }
+)
+
+watch(
   [sessionId, () => route.query.run],
   ([currentSessionId, queryRun]) => {
     connectRouteRun({
@@ -401,6 +504,21 @@ watch(
 )
 
 onMounted(() => {
+  if (history.scrollRestoration) {
+    previousScrollRestoration = history.scrollRestoration
+    history.scrollRestoration = 'manual'
+  }
+
+  if (typeof IntersectionObserver === 'function') {
+    bottomReadObserver = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) markCurrentSessionReadIfVisible()
+    }, { root: readVisibilityRoot(), threshold: 0 })
+
+    if (bottomReadSentinel.value) bottomReadObserver.observe(bottomReadSentinel.value)
+  }
+
+  attachReadScrollListener()
+
   stopQueuedAutoSend = activeChatRuns.onFinished(async (finishedSessionId) => {
     if (finishedSessionId !== sessionId.value) return
     await sendNextQueuedMessage()
@@ -409,6 +527,11 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (copiedMessageTimer) clearTimeout(copiedMessageTimer)
+  if (previousScrollRestoration) history.scrollRestoration = previousScrollRestoration
+  bottomReadObserver?.disconnect()
+  readScrollRoot?.removeEventListener('scroll', scheduleReadVisibilityCheck)
+  readScrollRoot = null
+  if (readScrollAnimationFrame !== undefined) cancelAnimationFrame(readScrollAnimationFrame)
   stopQueuedAutoSend?.()
   cleanupRunMessages()
 })
@@ -454,11 +577,14 @@ onBeforeUnmount(() => {
         <template v-else>
           <UChatMessages
             :messages="messages"
-            :status="chatStatus"
+            :status="chatMessagesStatus"
             :shouldAutoScroll="true"
             :shouldScrollToBottom="true"
             :autoScroll="true"
-            :class="shouldHideChatContent ? 'invisible' : undefined"
+            :class="[
+              '[--last-message-height:0px]',
+              shouldHideChatContent ? 'invisible' : undefined
+            ]"
             :aria-hidden="shouldHideChatContent"
           >
             <template #indicator>
@@ -484,6 +610,21 @@ onBeforeUnmount(() => {
               />
             </template>
           </UChatMessages>
+          <UChatMessage
+            v-if="showSubmittedIndicator"
+            id="submitted-indicator"
+            role="assistant"
+            variant="naked"
+            class="px-2.5"
+          >
+            <template #content>
+              <div class="flex items-center gap-2 overflow-hidden text-muted">
+                <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin" />
+                <UChatShimmer text="Thinking…" class="rainbow-chat-shimmer text-sm" />
+              </div>
+            </template>
+          </UChatMessage>
+          <div ref="bottomReadSentinel" class="h-px w-full" aria-hidden="true" />
         </template>
         </div>
       </UContainer>

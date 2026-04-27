@@ -2,6 +2,7 @@
 import type { DropdownMenuItem } from '@nuxt/ui'
 import type { SessionGroup } from '~/utils/sessionGroups'
 import type { WebChatSession, WebChatWorkspace } from '~/types/web-chat'
+import { isSessionUnread } from '~/utils/chatReadReceipts'
 
 const props = defineProps<{
   groups: SessionGroup[]
@@ -44,10 +45,12 @@ function isActiveSession(session: WebChatSession) {
 }
 
 function isUnreadSession(session: WebChatSession) {
-  if (isActiveSession(session)) return false
-  if (props.hasPromptUnread?.(session)) return true
-  if (!props.readMessageCountsLoaded) return false
-  return (session.messageCount || 0) > (props.readMessageCounts[session.id] || 0)
+  return isSessionUnread(
+    session,
+    props.readMessageCounts,
+    props.readMessageCountsLoaded,
+    props.hasPromptUnread?.(session) || false
+  )
 }
 
 function openSessionMenu(session: WebChatSession) {

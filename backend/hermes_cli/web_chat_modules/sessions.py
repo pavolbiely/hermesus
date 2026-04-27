@@ -87,6 +87,20 @@ def serialize_session(session: dict[str, Any]) -> WebChatSession:
     )
 
 
+def message_client_id(message: dict[str, Any]) -> str | None:
+    items = parse_jsonish(message.get("codex_message_items"))
+    if not isinstance(items, list):
+        return None
+
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "web_chat_client_message":
+            continue
+        value = item.get("clientMessageId")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def message_attachments(message: dict[str, Any]) -> list[WebChatAttachment]:
     items = parse_jsonish(message.get("codex_message_items"))
     if not isinstance(items, list):
@@ -171,6 +185,7 @@ def serialize_message(message: dict[str, Any]) -> WebChatMessage:
         role=message.get("role"),
         parts=message_parts(message),
         createdAt=iso_from_epoch(message.get("timestamp")),
+        clientMessageId=message_client_id(message),
         reasoning=message.get("reasoning") or message.get("reasoning_content"),
         toolName=message.get("tool_name"),
         toolCalls=message.get("tool_calls"),
