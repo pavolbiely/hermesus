@@ -14,8 +14,7 @@ export function formatCompactRelativeTime(value: string | Date, now = new Date()
 
   const diff = Math.max(0, now.getTime() - timestamp)
 
-  if (diff < MINUTE) return 'now'
-  if (diff < HOUR) return `${Math.floor(diff / MINUTE)}m`
+  if (diff < HOUR) return `${Math.max(1, Math.floor(diff / MINUTE))}m`
   if (diff < DAY) return `${Math.floor(diff / HOUR)}h`
   if (diff < WEEK) return `${Math.floor(diff / DAY)}d`
   if (diff < MONTH) return `${Math.floor(diff / WEEK)}w`

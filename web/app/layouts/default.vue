@@ -438,7 +438,7 @@ onMounted(() => {
   syncReadMessageCounts()
   timer = setInterval(() => {
     now.value = new Date()
-  }, 60_000)
+  }, 15_000)
   unsubscribeRunFinished = activeChatRuns.onFinished(() => refresh())
 })
 
