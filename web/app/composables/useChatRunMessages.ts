@@ -1,5 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
-import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart } from '~/types/web-chat'
+import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatWorkspaceChanges } from '~/types/web-chat'
 import { toolDisplayName } from '~/utils/toolCalls'
 import { createLocalMessage } from './useHermesRunStream'
 
@@ -60,8 +60,20 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
 
   }
 
-  function replaceAssistantMessage(content?: string) {
-    if (!content) return
+  function appendCompletedChanges(changes?: WebChatWorkspaceChanges | null) {
+    if (!changes?.files?.length) return
+
+    const assistant = assistantMessage()
+    const existing = assistant.parts.find(part => part.type === 'changes')
+    if (existing) {
+      existing.changes = changes
+    } else {
+      assistant.parts.push({ type: 'changes', changes })
+    }
+  }
+
+  function replaceAssistantMessage(content?: string, changes?: WebChatWorkspaceChanges | null) {
+    if (!content && !changes?.files?.length) return
 
     hasAssistantResponseStarted.value = true
     const assistant = assistantMessage()
@@ -70,13 +82,16 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       if (part.type === 'reasoning' && part.status === 'streaming') part.status = null
       if (part.type === 'tool' && part.status === 'running') part.status = 'completed'
     }
-    const textPart = assistant.parts.find(part => part.type === 'text')
-    if (textPart) {
-      textPart.text = content
-      textPart.status = null
-    } else {
-      assistant.parts.push({ type: 'text', text: content, status: null })
+    if (content) {
+      const textPart = assistant.parts.find(part => part.type === 'text')
+      if (textPart) {
+        textPart.text = content
+        textPart.status = null
+      } else {
+        assistant.parts.push({ type: 'text', text: content, status: null })
+      }
     }
+    appendCompletedChanges(changes)
   }
 
   function appendReasoningDelta(content: string) {
@@ -174,8 +189,8 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       onReasoningDelta: (content) => {
         if (targetSessionId === options.sessionId.value) appendReasoningDelta(content)
       },
-      onCompleted: (content) => {
-        if (targetSessionId === options.sessionId.value) replaceAssistantMessage(content)
+      onCompleted: (payload) => {
+        if (targetSessionId === options.sessionId.value) replaceAssistantMessage(payload.content, payload.changes)
       },
       onToolStarted: (payload) => {
         if (targetSessionId === options.sessionId.value) appendToolStarted(payload)

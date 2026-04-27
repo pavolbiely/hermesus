@@ -13,7 +13,18 @@ from uuid import uuid4
 
 from fastapi import HTTPException, status
 
-from .models import ActiveRunSummary, RespondRunPromptRequest, RespondRunPromptResponse, StartRunRequest, StartRunResponse, SteerRunRequest, SteerRunResponse, StopRunResponse, WebChatPrompt
+from .models import (
+    ActiveRunSummary,
+    RespondRunPromptRequest,
+    RespondRunPromptResponse,
+    StartRunRequest,
+    StartRunResponse,
+    SteerRunRequest,
+    SteerRunResponse,
+    StopRunResponse,
+    WebChatPrompt,
+    WebChatWorkspaceChanges,
+)
 
 RunExecutor = Callable[["RunContext", Callable[[dict[str, Any]], None]], str]
 
@@ -68,7 +79,7 @@ class RunManagerServices:
     set_session_title_safely: Callable[[Any, str, str], None]
     title_from_message: Callable[[str], str]
     git_status_porcelain: Callable[[str | None], str]
-    persist_run_workspace_changes: Callable[[RunContext, int | None], None]
+    persist_run_workspace_changes: Callable[[RunContext, int | None], WebChatWorkspaceChanges | None]
     agent_executor: RunExecutor
 
 
@@ -415,8 +426,15 @@ class RunManager:
                     interrupted_text,
                     codex_message_items=self._prompt_items(active),
                 )
-                self._services.persist_run_workspace_changes(active.context, assistant_message_id)
-                self._emit(active, {"type": "message.completed", "content": interrupted_text})
+                changes = self._services.persist_run_workspace_changes(active.context, assistant_message_id)
+                self._emit(
+                    active,
+                    {
+                        "type": "message.completed",
+                        "content": interrupted_text,
+                        "changes": changes.model_dump() if changes else None,
+                    },
+                )
                 self._emit(active, {"type": "run.stopped"})
                 self._finish(active, "stopped")
                 return
@@ -427,8 +445,15 @@ class RunManager:
                     final_text,
                     codex_message_items=self._prompt_items(active),
                 )
-                self._services.persist_run_workspace_changes(active.context, assistant_message_id)
-                self._emit(active, {"type": "message.completed", "content": final_text})
+                changes = self._services.persist_run_workspace_changes(active.context, assistant_message_id)
+                self._emit(
+                    active,
+                    {
+                        "type": "message.completed",
+                        "content": final_text,
+                        "changes": changes.model_dump() if changes else None,
+                    },
+                )
             self._emit(active, {"type": "run.completed"})
             self._finish(active, "completed")
         except Exception as exc:

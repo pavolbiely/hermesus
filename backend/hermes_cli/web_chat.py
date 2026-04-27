@@ -319,16 +319,16 @@ def _validate_edited_message_continuation(db: SessionDB, session_id: str, messag
     _validate_edited_message_continuation_impl(db, session_id, message_id)
 
 
-def _persist_run_workspace_changes(context: RunContext, message_id: int | None) -> None:
+def _persist_run_workspace_changes(context: RunContext, message_id: int | None) -> WebChatWorkspaceChanges | None:
     if not context.workspace:
-        return
+        return None
     final_status = _git_status_porcelain(context.workspace)
     if final_status is None or final_status == (context.baseline_git_status or ""):
-        return
+        return None
 
     changes = _workspace_changes_since(context.workspace, context.baseline_git_status or "", context.run_id)
     if not changes.files:
-        return
+        return None
     _record_session_git_changes(
         _db(),
         session_id=context.session_id,
@@ -339,6 +339,7 @@ def _persist_run_workspace_changes(context: RunContext, message_id: int | None) 
         final_status=final_status,
         changes=changes,
     )
+    return changes
 
 
 def _git_status_porcelain(workspace: str | None) -> str | None:

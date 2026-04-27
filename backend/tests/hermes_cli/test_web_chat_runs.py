@@ -163,7 +163,11 @@ def test_start_run_persists_workspace_changes_with_patch(client, monkeypatch, tm
     run = response.json()
 
     with client.stream("GET", f"/api/web-chat/runs/{run['runId']}/events") as stream:
-        stream.read()
+        body = stream.read().decode()
+
+    assert "event: message.completed" in body
+    assert '"changes"' in body
+    assert "created.txt" in body
 
     detail = client.get(f"/api/web-chat/sessions/{run['sessionId']}?includeWorkspaceChanges=true")
 

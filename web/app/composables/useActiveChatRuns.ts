@@ -1,4 +1,4 @@
-import type { AgentStatusEvent, InteractivePrompt } from '~/types/web-chat'
+import type { AgentStatusEvent, InteractivePrompt, WebChatWorkspaceChanges } from '~/types/web-chat'
 import { notificationSoundVariant, playNotificationSound } from '../utils/notificationSound'
 import { createRunEventReplay } from '../utils/runEventReplay'
 
@@ -6,10 +6,12 @@ type RunEventPayload = Record<string, unknown>
 
 type ToolRunPayload = { name?: string, preview?: string, input?: unknown }
 
+type CompletedRunPayload = { content?: string, changes?: WebChatWorkspaceChanges | null }
+
 type ActiveRunHandlers = {
   onDelta?: (content: string) => void
   onReasoningDelta?: (content: string) => void
-  onCompleted?: (content?: string) => void
+  onCompleted?: (payload: CompletedRunPayload) => void
   onToolStarted?: (payload: ToolRunPayload) => void
   onToolCompleted?: (payload: ToolRunPayload) => void
   onStatus?: (payload: AgentStatusEvent) => void
@@ -178,7 +180,10 @@ export function useActiveChatRuns() {
     source.addEventListener('message.completed', (event) => {
       const payload = parsePayload(event)
       playNotificationSound(runNotificationVariant(run.sessionId))
-      recordAndNotify(run, 'onCompleted', typeof payload.content === 'string' ? payload.content : undefined)
+      recordAndNotify(run, 'onCompleted', {
+        content: typeof payload.content === 'string' ? payload.content : undefined,
+        changes: payload.changes && typeof payload.changes === 'object' ? payload.changes as WebChatWorkspaceChanges : null
+      })
     })
 
     source.addEventListener('tool.started', (event) => {
