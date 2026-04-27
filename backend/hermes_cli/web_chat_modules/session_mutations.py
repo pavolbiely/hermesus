@@ -135,7 +135,7 @@ def list_non_empty_sessions(
     db_offset = 0
     batch_size = max_session_limit
 
-    while len(sessions) < offset + limit:
+    while len(sessions) < max_session_limit:
         batch = db.list_sessions_rich(limit=batch_size, offset=db_offset)
         if not batch:
             break
@@ -143,6 +143,21 @@ def list_non_empty_sessions(
             if session.get("message_count", 0) <= 0:
                 continue
             sessions.append(session_with_tip_config(db, session))
+            if len(sessions) >= max_session_limit:
+                break
         db_offset += len(batch)
 
+    sessions.sort(key=_session_last_active_sort_key)
     return sessions[offset:offset + limit]
+
+
+def _session_last_active_sort_key(session: dict[str, Any]) -> tuple[float, float, str]:
+    return (
+        -_numeric_timestamp(session.get("last_active")),
+        -_numeric_timestamp(session.get("started_at")),
+        str(session.get("id") or ""),
+    )
+
+
+def _numeric_timestamp(value: Any) -> float:
+    return value if isinstance(value, (int, float)) else 0.0

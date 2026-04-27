@@ -11,8 +11,8 @@ const session = (overrides) => ({
   reasoningEffort: null,
   workspace: overrides.workspace ?? null,
   messageCount: 0,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z'
+  createdAt: overrides.createdAt ?? '2026-01-01T00:00:00Z',
+  updatedAt: overrides.updatedAt ?? '2026-01-01T00:00:00Z'
 })
 
 const workspace = (overrides) => ({
@@ -46,4 +46,26 @@ test('keeps other chats after managed workspace groups', () => {
   })
 
   assert.deepEqual(groups.map(group => group.label), ['Alpha', 'Other chats'])
+})
+
+test('sorts chats within workspace groups by last message time', () => {
+  const groups = buildSessionGroups({
+    sessions: [
+      session({ id: 'older-start-newer-message', workspace: '/repo/alpha', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-03T00:00:00Z' }),
+      session({ id: 'newer-start-older-message', workspace: '/repo/alpha', createdAt: '2026-01-02T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z' }),
+      session({ id: 'other-newer-message', workspace: null, updatedAt: '2026-01-04T00:00:00Z' }),
+      session({ id: 'other-older-message', workspace: '/unknown', updatedAt: '2026-01-01T00:00:00Z' })
+    ],
+    workspaces: [workspace({ id: 'alpha', label: 'Alpha', path: '/repo/alpha' })],
+    selectedWorkspace: null
+  })
+
+  assert.deepEqual(groups[0].sessions.map(s => s.id), [
+    'older-start-newer-message',
+    'newer-start-older-message'
+  ])
+  assert.deepEqual(groups[1].sessions.map(s => s.id), [
+    'other-newer-message',
+    'other-older-message'
+  ])
 })

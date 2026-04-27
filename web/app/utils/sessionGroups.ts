@@ -36,14 +36,14 @@ export function buildSessionGroups(options: BuildSessionGroupsOptions): SessionG
         id: key,
         label: workspace.label,
         path: workspace.path,
-        sessions: sessionsByWorkspace.get(key) || [],
+        sessions: sortedSessions(sessionsByWorkspace.get(key) || []),
         active: workspace.active || options.selectedWorkspace === workspace.path,
         workspace
       }
     })
 
   const knownKeys = new Set(groups.map(group => group.id))
-  const otherSessions = [...sessionsByWorkspace.entries()]
+  const otherSessions = Array.from(sessionsByWorkspace.entries())
     .filter(([key]) => key === OTHER_WORKSPACE_KEY || !knownKeys.has(key))
     .flatMap(([, workspaceSessions]) => workspaceSessions)
 
@@ -52,7 +52,7 @@ export function buildSessionGroups(options: BuildSessionGroupsOptions): SessionG
       id: OTHER_WORKSPACE_KEY,
       label: 'Other chats',
       path: null,
-      sessions: otherSessions,
+      sessions: sortedSessions(otherSessions),
       active: false
     })
   }
@@ -64,4 +64,19 @@ function compareWorkspaces(a: WebChatWorkspace, b: WebChatWorkspace): number {
   return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
     || a.label.localeCompare(b.label)
     || a.path.localeCompare(b.path)
+}
+
+function sortedSessions(sessions: WebChatSession[]): WebChatSession[] {
+  return [...sessions].sort(compareSessionsByLastMessage)
+}
+
+function compareSessionsByLastMessage(a: WebChatSession, b: WebChatSession): number {
+  return timestampValue(b.updatedAt) - timestampValue(a.updatedAt)
+    || timestampValue(b.createdAt) - timestampValue(a.createdAt)
+    || a.id.localeCompare(b.id)
+}
+
+function timestampValue(value: string): number {
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
 }

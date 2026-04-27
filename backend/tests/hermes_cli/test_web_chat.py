@@ -53,6 +53,32 @@ def test_omits_empty_sessions_from_chat_sidebar(client):
     assert "empty-session" not in session_ids
 
 
+def test_lists_sidebar_sessions_by_last_message_timestamp(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("newer-session", source="web-chat")
+    db.create_session("older-session-with-newer-message", source="web-chat")
+    db.append_message("newer-session", "user", "Started later")
+    db.append_message("older-session-with-newer-message", "user", "Updated later")
+
+    def set_timestamps(conn):
+        conn.execute("UPDATE sessions SET started_at = ? WHERE id = ?", (200.0, "newer-session"))
+        conn.execute("UPDATE sessions SET started_at = ? WHERE id = ?", (100.0, "older-session-with-newer-message"))
+        conn.execute("UPDATE messages SET timestamp = ? WHERE session_id = ?", (250.0, "newer-session"))
+        conn.execute("UPDATE messages SET timestamp = ? WHERE session_id = ?", (300.0, "older-session-with-newer-message"))
+
+    db._execute_write(set_timestamps)
+
+    response = client.get("/api/web-chat/sessions")
+
+    assert response.status_code == 200
+    assert [session["id"] for session in response.json()["sessions"]] == [
+        "older-session-with-newer-message",
+        "newer-session",
+    ]
+
+
 def test_compressed_sidebar_session_uses_tip_workspace(client, tmp_path):
     from hermes_state import SessionDB
 
