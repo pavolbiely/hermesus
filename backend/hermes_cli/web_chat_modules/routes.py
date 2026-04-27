@@ -77,8 +77,10 @@ class WebChatRouteServices:
     get_session_or_404: Callable[[SessionDB, str], dict[str, Any]]
     edit_user_message: Callable[[SessionDB, str, str, str], None]
     delete_session_git_changes: Callable[[SessionDB, str], None]
+    remove_session_worktree: Callable[[SessionDB, str], None]
     duplicate_session: Callable[[SessionDB, str], SessionDetailResponse]
     session_git_changes_by_message: Callable[[SessionDB, str], dict[str, WebChatWorkspaceChanges]]
+    isolated_worktree_for_session: Callable[[SessionDB, str], Any | None]
 
 
 def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) -> None:
@@ -208,6 +210,7 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
             services.db(),
             session_id=session_id,
             delete_session_git_changes=services.delete_session_git_changes,
+            remove_session_worktree=services.remove_session_worktree,
         )
 
     @router.post("/sessions/{session_id}/duplicate", status_code=status.HTTP_201_CREATED, response_model=SessionDetailResponse)
@@ -225,6 +228,7 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
             serialize_session=services.serialize_session,
             serialize_messages=services.serialize_messages,
             active_run_for_session=services.run_manager().active_run_for_session,
+            isolated_worktree_for_session=services.isolated_worktree_for_session,
         )
 
     @router.post("/runs", status_code=status.HTTP_202_ACCEPTED, response_model=StartRunResponse)

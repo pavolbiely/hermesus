@@ -156,6 +156,17 @@ class WebChatWorkspaceChanges(BaseModel):
     patchTruncated: bool | None = None
 
 
+class WebChatIsolatedWorkspace(BaseModel):
+    sessionId: str
+    sourceWorkspace: str
+    sourceGitRoot: str
+    worktreePath: str
+    branchName: str
+    baseRef: str
+    status: Literal["active", "applied", "deleted", "missing", "cleaned"] = "active"
+    dirty: bool = False
+
+
 class WebChatProfile(BaseModel):
     id: str
     label: str
@@ -223,6 +234,7 @@ class SessionDetailResponse(BaseModel):
     session: WebChatSession
     messages: list[WebChatMessage]
     activeRun: ActiveRunSummary | None = None
+    isolatedWorkspace: WebChatIsolatedWorkspace | None = None
 
 
 class CreateSessionRequest(BaseModel):

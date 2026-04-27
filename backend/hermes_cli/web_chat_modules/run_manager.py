@@ -35,6 +35,9 @@ class RunContext:
     session_id: str
     input: str
     workspace: str | None = None
+    source_workspace: str | None = None
+    source_git_root: str | None = None
+    isolated_workspace: str | None = None
     profile: str | None = None
     attachments: list[str] | None = None
     model: str | None = None
@@ -81,6 +84,7 @@ class RunManagerServices:
     title_from_message: Callable[[str], str]
     git_status_porcelain: Callable[[str | None], str]
     workspace_change_fingerprint: Callable[[str | None], str | None]
+    ensure_session_worktree: Callable[[Any, str, str | None, str | None], Any | None]
     persist_run_workspace_changes: Callable[[RunContext, int | None], WebChatWorkspaceChanges | None]
     agent_executor: RunExecutor
 
@@ -165,6 +169,9 @@ class RunManager:
             )
             self._services.set_session_title_safely(db, session_id, self._services.title_from_message(request.input))
 
+        isolated_workspace = self._services.ensure_session_worktree(db, session_id, workspace_path, profile)
+        execution_workspace_path = isolated_workspace.worktreePath if isolated_workspace else workspace_path
+
         user_message_id = None
         if not request.editedMessageId:
             message_items = []
@@ -181,15 +188,18 @@ class RunManager:
                 codex_message_items=message_items or None,
             )
 
-        baseline_git_status = self._services.git_status_porcelain(workspace_path) if workspace_path else None
-        baseline_change_fingerprint = self._services.workspace_change_fingerprint(workspace_path) if workspace_path else None
+        baseline_git_status = self._services.git_status_porcelain(execution_workspace_path) if execution_workspace_path else None
+        baseline_change_fingerprint = self._services.workspace_change_fingerprint(execution_workspace_path) if execution_workspace_path else None
 
         run_id = uuid4().hex
         context = RunContext(
             run_id=run_id,
             session_id=session_id,
             input=effective_input,
-            workspace=str(workspace) if workspace else None,
+            workspace=execution_workspace_path,
+            source_workspace=workspace_path,
+            source_git_root=isolated_workspace.sourceGitRoot if isolated_workspace else None,
+            isolated_workspace=isolated_workspace.worktreePath if isolated_workspace else None,
             profile=profile,
             attachments=[attachment.id for attachment in attachments] or None,
             model=effective_model,

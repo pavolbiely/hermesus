@@ -78,6 +78,13 @@ from .web_chat_modules.git_changes import (
     workspace_patch as _workspace_patch_impl,
     workspace_root as _workspace_root_impl,
 )
+from .web_chat_modules.isolated_worktrees import (
+    cleanup_old_isolated_worktrees as _cleanup_old_isolated_worktrees_impl,
+    ensure_isolated_worktree_schema as _ensure_isolated_worktree_schema_impl,
+    ensure_session_worktree as _ensure_session_worktree_impl,
+    isolated_worktree_for_session as _isolated_worktree_for_session_impl,
+    remove_session_worktree as _remove_session_worktree_impl,
+)
 from .web_chat_modules.commands import (
     execute_changes_command as _execute_changes_command_impl,
     execute_help_command as _execute_help_command_impl,
@@ -99,6 +106,7 @@ from .web_chat_modules.models import (
     WebChatAttachment,
     WebChatCommand,
     WebChatFileChange,
+    WebChatIsolatedWorkspace,
     WebChatMessage,
     WebChatModelCapability,
     WebChatPart,
@@ -302,6 +310,44 @@ def _delete_session_git_changes(db: SessionDB, session_id: str) -> None:
     _delete_session_git_changes_impl(db, session_id)
 
 
+def _ensure_isolated_worktree_schema(db: SessionDB) -> None:
+    _ensure_isolated_worktree_schema_impl(db)
+
+
+def _ensure_session_worktree(
+    db: SessionDB,
+    session_id: str,
+    source_workspace: str | None,
+    profile: str | None,
+) -> WebChatIsolatedWorkspace | None:
+    effective_profile = profile
+    if effective_profile is None:
+        try:
+            active_profile, *_ = _profile_dependencies()
+            effective_profile = active_profile()
+        except Exception:
+            effective_profile = None
+    return _ensure_session_worktree_impl(
+        db,
+        session_id=session_id,
+        source_workspace=source_workspace,
+        profile=effective_profile,
+        workspace_root_func=_workspace_root,
+    )
+
+
+def _isolated_worktree_for_session(db: SessionDB, session_id: str) -> WebChatIsolatedWorkspace | None:
+    return _isolated_worktree_for_session_impl(db, session_id)
+
+
+def _remove_session_worktree(db: SessionDB, session_id: str) -> None:
+    _remove_session_worktree_impl(db, session_id)
+
+
+def _cleanup_old_isolated_worktrees(db: SessionDB, older_than_days: int = 30):
+    return _cleanup_old_isolated_worktrees_impl(db, older_than_days=older_than_days)
+
+
 def _delete_session_git_changes_after_message(db: SessionDB, session_id: str, message_id: int) -> None:
     _delete_session_git_changes_after_message_impl(db, session_id, message_id)
 
@@ -323,24 +369,26 @@ def _validate_edited_message_continuation(db: SessionDB, session_id: str, messag
 def _persist_run_workspace_changes(context: RunContext, message_id: int | None) -> WebChatWorkspaceChanges | None:
     if not context.workspace:
         return None
-    final_fingerprint = _workspace_change_fingerprint(context.workspace)
+    execution_workspace = context.workspace
+    display_workspace = context.source_workspace or execution_workspace
+    final_fingerprint = _workspace_change_fingerprint(execution_workspace)
     if final_fingerprint is None or final_fingerprint == context.baseline_change_fingerprint:
         return None
 
-    final_status = _git_status_porcelain(context.workspace)
+    final_status = _git_status_porcelain(execution_workspace)
     if final_status is None:
         return None
 
-    changes = _workspace_changes(context.workspace)
+    changes = _workspace_changes(execution_workspace)
     changes.files = sorted(changes.files, key=lambda file: file.path)
     changes.totalFiles = len(changes.files)
     changes.totalAdditions = sum(file.additions for file in changes.files)
     changes.totalDeletions = sum(file.deletions for file in changes.files)
-    changes.workspace = str(_workspace_root(context.workspace) or context.workspace)
+    changes.workspace = str(_workspace_root(display_workspace) or display_workspace)
     changes.runId = context.run_id
     if not changes.files:
         return None
-    patch, patch_truncated = _workspace_patch(Path(changes.workspace), changes.files)
+    patch, patch_truncated = _workspace_patch(Path(_workspace_root(execution_workspace) or execution_workspace), changes.files)
     changes.patch = patch
     changes.patchTruncated = patch_truncated
     _record_session_git_changes(
@@ -348,7 +396,7 @@ def _persist_run_workspace_changes(context: RunContext, message_id: int | None) 
         session_id=context.session_id,
         run_id=context.run_id,
         message_id=message_id,
-        workspace=context.workspace,
+        workspace=display_workspace,
         baseline_status=context.baseline_git_status or "",
         final_status=final_status,
         changes=changes,
@@ -748,6 +796,7 @@ def _run_manager_services() -> RunManagerServices:
         title_from_message=_title_from_message,
         git_status_porcelain=_git_status_porcelain,
         workspace_change_fingerprint=_workspace_change_fingerprint,
+        ensure_session_worktree=_ensure_session_worktree,
         persist_run_workspace_changes=_persist_run_workspace_changes,
         agent_executor=_agent_executor,
     )
@@ -790,7 +839,9 @@ register_web_chat_routes(
         get_session_or_404=_get_session_or_404,
         edit_user_message=_edit_user_message,
         delete_session_git_changes=_delete_session_git_changes,
+        remove_session_worktree=_remove_session_worktree,
         duplicate_session=_duplicate_session,
         session_git_changes_by_message=_session_git_changes_by_message,
+        isolated_worktree_for_session=_isolated_worktree_for_session,
     ),
 )

@@ -183,6 +183,23 @@ const title = computed(() => {
   return data.value?.session.title || 'Chat'
 })
 
+function pathBaseName(path?: string | null) {
+  if (!path) return null
+  return path.split(/[\\/]+/).filter(Boolean).at(-1) || path
+}
+
+const workspaceStatus = computed(() => {
+  const workspace = data.value?.isolatedWorkspace
+  if (!workspace || workspace.status !== 'active') return null
+
+  const sourceName = pathBaseName(workspace.sourceWorkspace)
+  const branchName = workspace.branchName.split('/').at(-1)
+  return {
+    label: sourceName ? `${sourceName} · worktree` : 'Worktree',
+    detail: `${workspace.worktreePath}${branchName ? `\n${branchName}` : ''}`
+  }
+})
+
 async function copyUserMessage(message: WebChatMessage) {
   const text = messageText(message)
   if (!text) return
@@ -616,7 +633,7 @@ onBeforeUnmount(() => {
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar :title="title" />
+      <AppNavbar :title="title" :workspace-status="workspaceStatus" />
     </template>
 
     <template #body>

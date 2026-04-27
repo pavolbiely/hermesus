@@ -105,9 +105,11 @@ def delete_session_response(
     *,
     session_id: str,
     delete_session_git_changes: Callable[[SessionDB, str], None],
+    remove_session_worktree: Callable[[SessionDB, str], None],
 ) -> DeleteSessionResponse:
     if not db.delete_session(session_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    remove_session_worktree(db, session_id)
     delete_session_git_changes(db, session_id)
     return DeleteSessionResponse(ok=True)
 
@@ -122,6 +124,7 @@ def get_session_response(
     serialize_session: Callable[[dict[str, Any]], WebChatSession],
     serialize_messages: Callable[..., list[WebChatMessage]],
     active_run_for_session: Callable[[str], Any | None] | None = None,
+    isolated_worktree_for_session: Callable[[SessionDB, str], Any | None] | None = None,
 ) -> SessionDetailResponse:
     session = get_session_or_404(db, session_id)
     messages = db.get_messages(session_id)
@@ -130,4 +133,5 @@ def get_session_response(
         session=serialize_session(session),
         messages=serialize_messages(messages, changes_by_message=changes_by_message),
         activeRun=active_run_for_session(session_id) if active_run_for_session else None,
+        isolatedWorkspace=isolated_worktree_for_session(db, session_id) if isolated_worktree_for_session else None,
     )

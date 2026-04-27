@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
+from pathlib import Path
 
 from web_chat_test_helpers import git_repo
 
@@ -152,8 +153,9 @@ def test_start_run_persists_workspace_changes_with_patch(client, monkeypatch, tm
     )
 
     def fake_executor(context, emit):
-        (repo / "tracked.txt").write_text("one\ntwo\n", encoding="utf-8")
-        (repo / "created.txt").write_text("new\nfile\n", encoding="utf-8")
+        workspace = Path(context.workspace)
+        (workspace / "tracked.txt").write_text("one\ntwo\n", encoding="utf-8")
+        (workspace / "created.txt").write_text("new\nfile\n", encoding="utf-8")
         return "Done"
 
     monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
@@ -190,6 +192,92 @@ def test_start_run_persists_workspace_changes_with_patch(client, monkeypatch, tm
     assert "+new" in patch_by_path["created.txt"]
 
 
+def test_runs_use_isolated_worktrees_per_chat(client, monkeypatch, tmp_path):
+    import hermes_cli.web_chat as web_chat
+
+    monkeypatch.setenv("HERMES_WEB_CHAT_WORKTREE_ROOT", str(tmp_path / "worktrees"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+    (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial"],
+        check=True,
+        capture_output=True,
+    )
+    seen_workspaces = []
+
+    def fake_executor(context, emit):
+        workspace = Path(context.workspace)
+        seen_workspaces.append(workspace)
+        assert context.source_workspace == str(repo)
+        assert workspace != repo
+        (workspace / "tracked.txt").write_text(f"base\n{context.session_id}\n", encoding="utf-8")
+        return "Done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+    first = client.post("/api/web-chat/runs", json={"input": "First", "workspace": str(repo)})
+    second = client.post("/api/web-chat/runs", json={"input": "Second", "workspace": str(repo)})
+    assert first.status_code == 202
+    assert second.status_code == 202
+    with client.stream("GET", f"/api/web-chat/runs/{first.json()['runId']}/events") as stream:
+        stream.read()
+    with client.stream("GET", f"/api/web-chat/runs/{second.json()['runId']}/events") as stream:
+        stream.read()
+
+    assert len(seen_workspaces) == 2
+    assert seen_workspaces[0] != seen_workspaces[1]
+    assert seen_workspaces[0].is_dir()
+    assert seen_workspaces[1].is_dir()
+    assert (repo / "tracked.txt").read_text(encoding="utf-8") == "base\n"
+
+    first_detail = client.get(f"/api/web-chat/sessions/{first.json()['sessionId']}?includeWorkspaceChanges=true").json()
+    second_detail = client.get(f"/api/web-chat/sessions/{second.json()['sessionId']}?includeWorkspaceChanges=true").json()
+    first_changes = first_detail["messages"][1]["parts"][1]["changes"]
+    second_changes = second_detail["messages"][1]["parts"][1]["changes"]
+    assert first_changes["workspace"] == str(repo)
+    assert second_changes["workspace"] == str(repo)
+    assert first.json()["sessionId"] in first_changes["patch"]["files"][0]["patch"]
+    assert second.json()["sessionId"] in second_changes["patch"]["files"][0]["patch"]
+    assert first_detail["isolatedWorkspace"]["worktreePath"] == str(seen_workspaces[0])
+
+
+def test_delete_session_removes_isolated_worktree(client, monkeypatch, tmp_path):
+    import hermes_cli.web_chat as web_chat
+
+    monkeypatch.setenv("HERMES_WEB_CHAT_WORKTREE_ROOT", str(tmp_path / "worktrees"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+    (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial"],
+        check=True,
+        capture_output=True,
+    )
+    seen = {}
+
+    def fake_executor(context, emit):
+        workspace = Path(context.workspace)
+        seen["workspace"] = workspace
+        (workspace / "tracked.txt").write_text("base\ndirty\n", encoding="utf-8")
+        return "Done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+    start = client.post("/api/web-chat/runs", json={"input": "Change", "workspace": str(repo)}).json()
+    with client.stream("GET", f"/api/web-chat/runs/{start['runId']}/events") as stream:
+        stream.read()
+    assert seen["workspace"].is_dir()
+
+    response = client.delete(f"/api/web-chat/sessions/{start['sessionId']}")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert not seen["workspace"].exists()
+
+
 def test_start_run_reports_later_edits_when_git_status_is_already_dirty(client, monkeypatch, tmp_path):
     import hermes_cli.web_chat as web_chat
 
@@ -205,7 +293,8 @@ def test_start_run_reports_later_edits_when_git_status_is_already_dirty(client, 
     )
 
     def first_executor(context, emit):
-        (repo / "tracked.txt").write_text("one\ntwo\n", encoding="utf-8")
+        workspace = Path(context.workspace)
+        (workspace / "tracked.txt").write_text("one\ntwo\n", encoding="utf-8")
         return "First done"
 
     monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(first_executor))
@@ -215,7 +304,8 @@ def test_start_run_reports_later_edits_when_git_status_is_already_dirty(client, 
         stream.read()
 
     def second_executor(context, emit):
-        (repo / "tracked.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+        workspace = Path(context.workspace)
+        (workspace / "tracked.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
         return "Second done"
 
     monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(second_executor))

@@ -210,6 +210,17 @@ export type WebChatWorkspaceChanges = {
   patchTruncated?: boolean | null
 }
 
+export type WebChatIsolatedWorkspace = {
+  sessionId: string
+  sourceWorkspace: string
+  sourceGitRoot: string
+  worktreePath: string
+  branchName: string
+  baseRef: string
+  status: 'active' | 'applied' | 'deleted' | 'missing' | 'cleaned'
+  dirty: boolean
+}
+
 export type SessionListResponse = {
   sessions: WebChatSession[]
 }
@@ -225,6 +236,7 @@ export type SessionDetailResponse = {
   session: WebChatSession
   messages: WebChatMessage[]
   activeRun?: ActiveRunSummary | null
+  isolatedWorkspace?: WebChatIsolatedWorkspace | null
 }
 
 export type ExecuteCommandRequest = {
