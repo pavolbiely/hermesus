@@ -1,6 +1,6 @@
 import { nextTick, ref } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
-import { prepareNotificationSound } from '~/utils/notificationSound'
+import { playNotificationSound, prepareNotificationSound } from '~/utils/notificationSound'
 import type { SessionDetailResponse, WebChatMessage } from '~/types/web-chat'
 import { messageText } from '~/utils/chatMessages'
 
@@ -131,6 +131,7 @@ export function useChatMessageEditing(options: UseChatMessageEditingOptions) {
         editedMessageId: message.id
       })
       options.rememberLastUsedSelection()
+      playNotificationSound('sent')
       options.connectRun(run.runId, options.sessionId.value)
     } catch (err) {
       options.messages.value = previousMessages

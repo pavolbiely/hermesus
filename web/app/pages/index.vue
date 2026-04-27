@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { prepareNotificationSound } from '../utils/notificationSound'
+import { playNotificationSound, prepareNotificationSound } from '../utils/notificationSound'
 
 const input = ref('')
 const loading = ref(false)
@@ -69,6 +69,7 @@ async function onSubmit() {
     })
     composer.rememberLastUsedSelection()
     context.clearAttachments()
+    playNotificationSound('sent')
     activeChatRuns.trackRun(result.sessionId, result.runId)
     await router.push({ path: `/chat/${result.sessionId}`, query: { run: result.runId } })
     void refreshSessions?.()

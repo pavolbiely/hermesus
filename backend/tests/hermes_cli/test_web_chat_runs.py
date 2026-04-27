@@ -152,6 +152,44 @@ def test_start_run_persists_workspace_changes_with_patch(client, monkeypatch, tm
     assert "+new" in patch_by_path["created.txt"]
 
 
+def test_start_run_is_idempotent_for_retried_client_message_id(client, monkeypatch, tmp_path):
+    import hermes_cli.web_chat as web_chat
+
+    repo = git_repo(tmp_path)
+    release_executor = threading.Event()
+    executor_started = threading.Event()
+    seen_runs = []
+
+    def blocking_executor(context, emit):
+        seen_runs.append(context.run_id)
+        executor_started.set()
+        assert release_executor.wait(timeout=2)
+        emit({"type": "message.delta", "content": "Done"})
+        return "Done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(blocking_executor))
+
+    payload = {"input": "Say done", "workspace": str(repo), "clientMessageId": "client-message-retry"}
+    first = client.post("/api/web-chat/runs", json=payload)
+    assert first.status_code == 202
+    assert executor_started.wait(timeout=2)
+
+    retry = client.post("/api/web-chat/runs", json={**payload, "sessionId": first.json()["sessionId"]})
+    assert retry.status_code == 202
+    assert retry.json()["sessionId"] == first.json()["sessionId"]
+    assert retry.json()["runId"] == first.json()["runId"]
+    assert retry.json()["userMessageId"] == first.json()["userMessageId"]
+    assert seen_runs == [first.json()["runId"]]
+
+    release_executor.set()
+    with client.stream("GET", f"/api/web-chat/runs/{first.json()['runId']}/events") as stream:
+        stream.read()
+
+    detail = client.get(f"/api/web-chat/sessions/{first.json()['sessionId']}")
+    assert [message["role"] for message in detail.json()["messages"]] == ["user", "assistant"]
+    assert detail.json()["messages"][0]["clientMessageId"] == "client-message-retry"
+
+
 def test_start_run_allows_no_workspace(client, monkeypatch):
     import hermes_cli.web_chat as web_chat
 

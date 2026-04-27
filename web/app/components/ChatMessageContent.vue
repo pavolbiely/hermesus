@@ -19,6 +19,8 @@ const emit = defineEmits<{
   edit: [message: WebChatMessage]
   cancelEdit: []
   saveEdit: [message: WebChatMessage]
+  retryFailed: [message: WebChatMessage]
+  editFailed: [message: WebChatMessage]
 }>()
 </script>
 
@@ -105,6 +107,15 @@ const emit = defineEmits<{
   </template>
 
   <div
+    v-if="message.role === 'user' && message.localStatus === 'failed'"
+    class="mt-2 flex flex-wrap items-center justify-end gap-2 text-xs text-error"
+  >
+    <span>{{ message.localError || 'Not sent' }}</span>
+    <UButton size="xs" color="error" variant="soft" label="Retry" @click="emit('retryFailed', message)" />
+    <UButton size="xs" color="neutral" variant="ghost" label="Edit" @click="emit('editFailed', message)" />
+  </div>
+
+  <div
     v-if="message.role === 'user'"
     class="pointer-events-none absolute -bottom-6 right-0 flex w-max max-w-none flex-nowrap items-center justify-end gap-1 whitespace-nowrap text-xs leading-4 text-muted opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100"
   >
@@ -115,7 +126,7 @@ const emit = defineEmits<{
       type="button"
       class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50"
       aria-label="Edit message"
-      :disabled="isRunning || savingEditedMessageId === message.id"
+      :disabled="isRunning || savingEditedMessageId === message.id || message.localStatus === 'failed'"
       @click="emit('edit', message)"
     >
       <UIcon name="i-lucide-pencil" class="size-3" />

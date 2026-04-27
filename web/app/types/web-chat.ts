@@ -68,6 +68,8 @@ export type WebChatPart = {
 export type WebChatMessage = {
   id: string
   clientMessageId?: string | null
+  localStatus?: 'sending' | 'failed' | null
+  localError?: string | null
   role: 'user' | 'assistant' | 'system' | 'tool'
   parts: WebChatPart[]
   createdAt: string

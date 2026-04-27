@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { prepareNotificationSound } from '../../utils/notificationSound'
+import { playNotificationSound, prepareNotificationSound } from '../../utils/notificationSound'
 import { recoverActiveRun } from '../../utils/activeRunRecovery'
 import { connectRouteRun } from '../../utils/routeRunConnection'
-import type { WebChatMessage } from '~/types/web-chat'
+import type { WebChatAttachment, WebChatMessage } from '~/types/web-chat'
 import type { QueuedMessage } from '~/utils/queuedMessages'
 import { messageText } from '~/utils/chatMessages'
 import { writeClipboardText } from '~/utils/clipboard'
 import { mergeOptimisticUserMessages } from '~/utils/optimisticChatMessages'
+import { markLocalMessageFailed, markLocalMessageSending, removeLocalMessage } from '~/utils/failedChatMessages'
 import { shouldHideChatUntilInitialScroll, scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender, nearestScrollableAncestor, isElementVisibleInRoot } from '~/utils/chatInitialScroll'
 import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
 
@@ -301,6 +302,46 @@ async function scrollChatToBottomAfterRender() {
   markCurrentSessionReadIfVisible()
 }
 
+async function startRunForLocalMessage(
+  userMessage: WebChatMessage,
+  text: string,
+  clientMessageId: string,
+  attachmentIds: string[]
+) {
+  try {
+    const run = await api.startRun(text, {
+      sessionId: sessionId.value,
+      model: composer.selectedModel.value,
+      reasoningEffort: composer.selectedReasoningEffort.value,
+      workspace: context.selectedWorkspace.value,
+      attachments: attachmentIds,
+      clientMessageId
+    })
+    const canonicalId = run.userMessageId || userMessage.id
+    optimisticUserMessageIds.delete(userMessage.id)
+    optimisticUserMessageIds.add(canonicalId)
+    const sentMessage = {
+      ...userMessage,
+      id: canonicalId,
+      localStatus: undefined,
+      localError: undefined
+    }
+    Object.assign(userMessage, sentMessage)
+    messages.value = messages.value.map(message => message.id === userMessage.id || message.clientMessageId === clientMessageId ? sentMessage : message)
+    composer.rememberLastUsedSelection()
+    playNotificationSound('sent')
+    connectRun(run.runId, sessionId.value)
+    void scrollChatToBottomAfterRender()
+  } catch (err) {
+    const errorMessage = getHermesErrorMessage(err, 'Not sent')
+    messages.value = markLocalMessageFailed(messages.value, userMessage.id, errorMessage)
+    showError(err, 'Failed to send message')
+    submitStatus.value = 'error'
+    activeChatRuns.markFinished(sessionId.value)
+    throw err
+  }
+}
+
 async function sendMessageNow(message: string) {
   const pendingAttachments = [...context.attachments.value]
   void prepareNotificationSound()
@@ -309,39 +350,60 @@ async function sendMessageNow(message: string) {
   const clientMessageId = crypto.randomUUID()
   const userMessage = createLocalMessage('user', message)
   userMessage.clientMessageId = clientMessageId
+  userMessage.localStatus = 'sending'
   optimisticUserMessageIds.add(userMessage.id)
   if (pendingAttachments.length) userMessage.parts.unshift({ type: 'media', attachments: pendingAttachments })
   messages.value.push(userMessage)
+  context.clearAttachments()
   void scrollChatToBottomAfterRender()
 
-  try {
-    const run = await api.startRun(message, {
-      sessionId: sessionId.value,
-      model: composer.selectedModel.value,
-      reasoningEffort: composer.selectedReasoningEffort.value,
-      workspace: context.selectedWorkspace.value,
-      attachments: context.attachments.value.map(attachment => attachment.id),
-      clientMessageId
-    })
-    if (run.userMessageId && userMessage.id !== run.userMessageId) {
-      optimisticUserMessageIds.delete(userMessage.id)
-      userMessage.id = run.userMessageId
-      optimisticUserMessageIds.add(userMessage.id)
-    }
-    composer.rememberLastUsedSelection()
-    context.clearAttachments()
-    connectRun(run.runId, sessionId.value)
-    void scrollChatToBottomAfterRender()
-  } catch (err) {
-    optimisticUserMessageIds.delete(userMessage.id)
-    messages.value = messages.value.filter(message => message.id !== userMessage.id)
-    input.value = message
-    context.attachments.value = pendingAttachments
-    showError(err, 'Failed to send message')
-    submitStatus.value = 'error'
-    activeChatRuns.markFinished(sessionId.value)
-    throw err
+  await startRunForLocalMessage(
+    userMessage,
+    message,
+    clientMessageId,
+    pendingAttachments.map(attachment => attachment.id)
+  )
+}
+
+function attachmentsForMessage(message: WebChatMessage): WebChatAttachment[] {
+  return message.parts.flatMap(part => part.type === 'media' ? part.attachments || [] : [])
+}
+
+function attachmentIdsForMessage(message: WebChatMessage) {
+  return attachmentsForMessage(message).map(attachment => attachment.id)
+}
+
+async function retryFailedMessage(message: WebChatMessage) {
+  if (message.localStatus !== 'failed') return
+  const text = messageText(message).trim()
+  if (!text || !message.clientMessageId) return
+  if (activeChatRuns.isRunning(sessionId.value) || submitStatus.value === 'submitted') {
+    enqueueMessage(text)
+    messages.value = removeLocalMessage(messages.value, message.id)
+    optimisticUserMessageIds.delete(message.id)
+    return
   }
+
+  messages.value = markLocalMessageSending(messages.value, message.id)
+  const retryMessage = messages.value.find(item => item.id === message.id) || message
+  submitStatus.value = 'submitted'
+  try {
+    await startRunForLocalMessage(
+      retryMessage,
+      text,
+      message.clientMessageId,
+      attachmentIdsForMessage(message)
+    )
+  } catch {
+    // startRunForLocalMessage keeps the failed bubble visible and shows the toast.
+  }
+}
+
+function editFailedMessage(message: WebChatMessage) {
+  input.value = messageText(message)
+  context.attachments.value = attachmentsForMessage(message)
+  messages.value = removeLocalMessage(messages.value, message.id)
+  optimisticUserMessageIds.delete(message.id)
 }
 
 async function onSubmit() {
@@ -607,6 +669,8 @@ onBeforeUnmount(() => {
                 @edit="startEditingMessage"
                 @cancel-edit="cancelEditingMessage"
                 @save-edit="saveEditedMessage"
+                @retry-failed="retryFailedMessage"
+                @edit-failed="editFailedMessage"
               />
             </template>
           </UChatMessages>

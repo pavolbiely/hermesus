@@ -1,4 +1,4 @@
-export type NotificationSoundVariant = 'default' | 'attention'
+export type NotificationSoundVariant = 'default' | 'attention' | 'sent'
 
 type NotificationSoundState = {
   activeVisibleChat: boolean
@@ -11,12 +11,42 @@ type Tone = {
   duration: number
 }
 
+type AudioContextConstructor = typeof AudioContext
+
+type WindowWithAudioContext = Window & {
+  AudioContext?: AudioContextConstructor
+  webkitAudioContext?: AudioContextConstructor
+}
+
+export type NotificationSoundDebugState = {
+  supported: boolean
+  enabled: boolean
+  contextState: AudioContextState | 'missing' | 'unknown'
+  unlockInstalled: boolean
+  lastAttempt?: string
+  lastPlayedAt: number
+}
+
 let audioContext: AudioContext | undefined
 let enabled = false
+let unlockInstalled = false
 let lastPlayedAt = 0
+let lastAttempt: string | undefined
+
+function isClient() {
+  return typeof window !== 'undefined'
+}
+
+function audioContextConstructor() {
+  if (!isClient()) return undefined
+  const audioWindow = window as WindowWithAudioContext
+  return audioWindow.AudioContext || audioWindow.webkitAudioContext
+}
 
 function getAudioContext() {
-  audioContext ||= new AudioContext()
+  const AudioContextClass = audioContextConstructor()
+  if (!AudioContextClass) return undefined
+  audioContext ||= new AudioContextClass()
   return audioContext
 }
 
@@ -25,6 +55,13 @@ export function notificationSoundVariant(state: NotificationSoundState): Notific
 }
 
 function tonesForVariant(variant: NotificationSoundVariant): Tone[] {
+  if (variant === 'sent') {
+    return [
+      { offset: 0, frequency: 587, duration: 0.08 },
+      { offset: 0.07, frequency: 880, duration: 0.11 }
+    ]
+  }
+
   if (variant === 'attention') {
     return [
       { offset: 0, frequency: 740, duration: 0.16 },
@@ -39,29 +76,85 @@ function tonesForVariant(variant: NotificationSoundVariant): Tone[] {
   ]
 }
 
-export async function prepareNotificationSound() {
-  if (import.meta.server) return
-
-  enabled = true
-  const context = getAudioContext()
-  if (context.state === 'suspended') {
-    await context.resume().catch(() => undefined)
+export function notificationSoundDebugState(): NotificationSoundDebugState {
+  const context = audioContext
+  return {
+    supported: Boolean(audioContextConstructor()),
+    enabled,
+    contextState: context?.state || (audioContextConstructor() ? 'unknown' : 'missing'),
+    unlockInstalled,
+    lastAttempt,
+    lastPlayedAt
   }
 }
 
-export function playNotificationSound(variant: NotificationSoundVariant = 'default') {
-  if (import.meta.server || !enabled) return
+export async function prepareNotificationSound() {
+  if (!isClient()) return false
 
-  const now = Date.now()
-  if (now - lastPlayedAt < 750) return
-  lastPlayedAt = now
+  enabled = true
+  lastAttempt = 'prepare'
 
   const context = getAudioContext()
-  void context.resume().catch(() => undefined)
+  if (!context) {
+    lastAttempt = 'unsupported'
+    return false
+  }
 
-  const start = context.currentTime
+  if (context.state === 'suspended') {
+    await context.resume().catch(error => {
+      lastAttempt = `resume-failed:${String(error?.name || error?.message || error)}`
+    })
+  }
+
+  return context.state === 'running'
+}
+
+export function installNotificationSoundUnlock() {
+  if (!isClient() || unlockInstalled) return
+  unlockInstalled = true
+
+  const unlock = () => {
+    void prepareNotificationSound()
+  }
+
+  window.addEventListener('pointerdown', unlock, { passive: true })
+  window.addEventListener('keydown', unlock)
+  window.addEventListener('touchstart', unlock, { passive: true })
+  window.addEventListener('wheel', unlock, { passive: true })
+}
+
+async function scheduleNotificationSound(variant: NotificationSoundVariant) {
+  if (!isClient()) return false
+
+  enabled = true
+  lastAttempt = `play:${variant}`
+
+  const context = getAudioContext()
+  if (!context) {
+    lastAttempt = 'unsupported'
+    return false
+  }
+
+  if (context.state === 'suspended') {
+    await context.resume().catch(error => {
+      lastAttempt = `resume-failed:${String(error?.name || error?.message || error)}`
+    })
+  }
+  if (context.state !== 'running') {
+    lastAttempt = `not-running:${context.state}`
+    return false
+  }
+
+  const now = Date.now()
+  if (now - lastPlayedAt < 250) {
+    lastAttempt = `throttled:${variant}`
+    return false
+  }
+  lastPlayedAt = now
+
+  const start = context.currentTime + 0.01
   const tones = tonesForVariant(variant)
-  const volume = variant === 'attention' ? 0.11 : 0.06
+  const volume = variant === 'attention' ? 0.16 : variant === 'sent' ? 0.08 : 0.09
   const end = Math.max(...tones.map(tone => tone.offset + tone.duration))
   const gain = context.createGain()
 
@@ -81,4 +174,10 @@ export function playNotificationSound(variant: NotificationSoundVariant = 'defau
   }
 
   window.setTimeout(() => gain.disconnect(), (end + 0.1) * 1000)
+  lastAttempt = `played:${variant}`
+  return true
+}
+
+export function playNotificationSound(variant: NotificationSoundVariant = 'default') {
+  return scheduleNotificationSound(variant)
 }

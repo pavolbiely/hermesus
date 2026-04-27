@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { installNotificationSoundUnlock } from '~/utils/notificationSound'
 import { readMessageCountForVisibleSession, syncInitialReadMessageCounts } from '~/utils/chatReadReceipts'
 import type { SessionGroup } from '~/utils/sessionGroups'
 import type { WebChatProfile, WebChatSession, WebChatWorkspace } from '~/types/web-chat'
@@ -432,6 +433,7 @@ watch(
 )
 
 onMounted(() => {
+  installNotificationSoundUnlock()
   loadReadMessageCounts()
   syncReadMessageCounts()
   timer = setInterval(() => {

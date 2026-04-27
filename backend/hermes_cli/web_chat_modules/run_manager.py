@@ -40,6 +40,8 @@ class RunContext:
 @dataclass
 class ActiveRun:
     context: RunContext
+    client_message_id: str | None = None
+    user_message_id: str | None = None
     prompts: dict[str, WebChatPrompt] = field(default_factory=dict)
     prompt_responses: dict[str, "queue.Queue[str | None]"] = field(default_factory=dict)
     thread: threading.Thread | None = None
@@ -116,6 +118,21 @@ class RunManager:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a workspace before sending attachments.")
         effective_input = self._services.input_with_attachment_context(request.input, attachments)
 
+        if request.clientMessageId and not request.editedMessageId:
+            existing_message = self._user_message_for_client_message_id(db, session_id, request.clientMessageId)
+            existing_run = self._run_for_client_message_id(session_id, request.clientMessageId)
+            if existing_message and existing_run:
+                return StartRunResponse(
+                    sessionId=session_id,
+                    runId=existing_run.context.run_id,
+                    userMessageId=str(existing_message["id"]),
+                )
+            if existing_message:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Message was already submitted. Refresh the chat before retrying.",
+                )
+
         model_config_updates = {"reasoningEffort": effective_reasoning_effort}
         if workspace_provided or workspace_path:
             model_config_updates["workspace"] = workspace_path
@@ -167,7 +184,11 @@ class RunManager:
             enabled_toolsets=request.enabledToolsets,
             baseline_git_status=baseline_git_status,
         )
-        active = ActiveRun(context=context)
+        active = ActiveRun(
+            context=context,
+            client_message_id=request.clientMessageId if not request.editedMessageId else None,
+            user_message_id=str(user_message_id) if user_message_id else None,
+        )
         active.thread = threading.Thread(target=self._run, args=(active,), daemon=True)
         with self._lock:
             self._runs[run_id] = active
@@ -281,6 +302,42 @@ class RunManager:
         if not active:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
         return active
+
+    def _run_for_client_message_id(self, session_id: str, client_message_id: str) -> ActiveRun | None:
+        with self._lock:
+            candidates = [
+                active for active in self._runs.values()
+                if active.context.session_id == session_id and active.client_message_id == client_message_id
+            ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda run: run.created_at)
+
+    def _user_message_for_client_message_id(self, db: Any, session_id: str, client_message_id: str) -> dict[str, Any] | None:
+        for message in db.get_messages(session_id):
+            if message.get("role") != "user":
+                continue
+            if self._message_client_message_id(message) == client_message_id:
+                return message
+        return None
+
+    def _message_client_message_id(self, message: dict[str, Any]) -> str | None:
+        items = message.get("codex_message_items")
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(items, list):
+            return None
+
+        for item in items:
+            if not isinstance(item, dict) or item.get("type") != "web_chat_client_message":
+                continue
+            value = item.get("clientMessageId")
+            if isinstance(value, str) and value:
+                return value
+        return None
 
     def _emit(self, active: ActiveRun, event: dict[str, Any]) -> None:
         with active.event_condition:

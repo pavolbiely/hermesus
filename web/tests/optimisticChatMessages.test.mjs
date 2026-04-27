@@ -72,6 +72,23 @@ test('drops an optimistic user message when the persisted message has the same c
   assert.deepEqual([...result.optimisticMessageIds], [])
 })
 
+test('keeps a failed local user message when the session snapshot is stale', () => {
+  const persisted = [message('server-1', 'assistant', 'previous')]
+  const failed = message('local-1', 'user', 'hello')
+  failed.clientMessageId = 'client-1'
+  failed.localStatus = 'failed'
+
+  const result = mergeOptimisticUserMessages(
+    persisted,
+    [...persisted, failed],
+    new Set(['local-1'])
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), ['server-1', 'local-1'])
+  assert.equal(result.messages[1].localStatus, 'failed')
+  assert.deepEqual([...result.optimisticMessageIds], ['local-1'])
+})
+
 test('does not preserve non-optimistic local messages across session refreshes', () => {
   const persisted = [message('server-1', 'user', 'persisted')]
   const localAssistant = message('local-assistant', 'assistant', 'draft')
