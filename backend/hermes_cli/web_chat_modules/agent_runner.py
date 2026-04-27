@@ -124,7 +124,6 @@ def agent_executor(
 
     runtime = resolve_runtime_provider(
         requested=context.provider or model_cfg.get("provider") or "auto",
-        explicit_base_url=model_cfg.get("base_url"),
     )
     model = context.model or runtime.get("model") or model_cfg.get("default") or model_cfg.get("model") or ""
     api_key = runtime.get("api_key")

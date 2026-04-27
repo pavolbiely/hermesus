@@ -212,6 +212,50 @@ def test_agent_executor_forwards_runtime_status_events(monkeypatch):
     }]
 
 
+def test_agent_executor_does_not_treat_config_base_url_as_explicit_override(monkeypatch):
+    from hermes_cli.web_chat_modules.agent_runner import agent_executor
+    from hermes_cli.web_chat_modules.run_manager import RunContext
+
+    runtime_kwargs = {}
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            pass
+
+        def run_conversation(self, prompt, *, conversation_history, task_id):
+            return {"final_response": "done"}
+
+    def fake_resolve_runtime_provider(**kwargs):
+        runtime_kwargs.update(kwargs)
+        return {
+            "provider": "openai-codex",
+            "model": "gpt-5.5",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+            "api_key": "pool-token",
+            "api_mode": "codex_responses",
+            "credential_pool": object(),
+        }
+
+    monkeypatch.setitem(sys.modules, "run_agent", types.SimpleNamespace(AIAgent=FakeAgent))
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda: {"model": {"provider": "openai-codex", "base_url": "https://chatgpt.com/backend-api/codex"}},
+    )
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", fake_resolve_runtime_provider)
+
+    context = RunContext(
+        run_id="run-codex-pool",
+        session_id="session-codex-pool",
+        input="hello",
+        model="gpt-5.5",
+        reasoning_effort="none",
+    )
+
+    assert agent_executor(context, lambda event: None, conversation_history=lambda _: []) == "done"
+    assert runtime_kwargs["requested"] == "openai-codex"
+    assert "explicit_base_url" not in runtime_kwargs
+
+
 def test_prompt_response_rejects_ambiguous_choice_and_text(client, monkeypatch):
     import hermes_cli.web_chat as web_chat
     from hermes_cli.web_chat_modules.models import WebChatPrompt
