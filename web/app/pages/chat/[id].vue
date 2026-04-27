@@ -374,6 +374,7 @@ async function startRunForLocalMessage(
     messages.value = messages.value.map(message => message.id === userMessage.id || message.clientMessageId === clientMessageId ? sentMessage : message)
     composer.rememberLastUsedSelection()
     playNotificationSound('sent')
+    void refreshSessions?.()
     connectRun(run.runId, sessionId.value)
     void scrollChatToBottomAfterRender()
   } catch (err) {
