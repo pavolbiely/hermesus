@@ -13,8 +13,27 @@ def test_lists_safe_web_chat_commands(client):
     assert response.status_code == 200
     data = response.json()
     command_ids = [command["id"] for command in data["commands"]]
-    assert command_ids == ["help", "status", "changes", "clear"]
-    assert data["commands"][0] == {
+    assert command_ids == [
+        "clear",
+        "title",
+        "rollback",
+        "status",
+        "profile",
+        "model",
+        "provider",
+        "personality",
+        "reasoning",
+        "fast",
+        "voice",
+        "help",
+        "usage",
+        "debug",
+        "changes",
+    ]
+    assert len(command_ids) == len(set(command_ids))
+
+    help_command = next(command for command in data["commands"] if command["id"] == "help")
+    assert help_command == {
         "id": "help",
         "name": "/help",
         "description": "Show available slash commands.",
@@ -25,6 +44,14 @@ def test_lists_safe_web_chat_commands(client):
     }
     clear = next(command for command in data["commands"] if command["id"] == "clear")
     assert clear["safety"] == "confirmation_required"
+    changes = next(command for command in data["commands"] if command["id"] == "changes")
+    assert changes["requiresWorkspace"] is True
+    model = next(command for command in data["commands"] if command["id"] == "model")
+    assert model["usage"] == "/model [model] [--provider name] [--global]"
+    reasoning = next(command for command in data["commands"] if command["id"] == "reasoning")
+    assert reasoning["usage"] == "/reasoning [level|show|hide]"
+    rollback = next(command for command in data["commands"] if command["id"] == "rollback")
+    assert rollback["usage"] == "/rollback [number]"
 
 
 def test_executes_help_command_without_starting_agent(client):
@@ -35,7 +62,9 @@ def test_executes_help_command_without_starting_agent(client):
     assert data["commandId"] == "help"
     assert data["handled"] is True
     assert data["message"]["role"] == "assistant"
-    assert "Available slash commands" in data["message"]["parts"][0]["text"]
+    help_text = data["message"]["parts"][0]["text"]
+    assert "Available slash commands" in help_text
+    assert "/model [model] [--provider name] [--global]" in help_text
 
 
 def test_executes_status_command(client, tmp_path):

@@ -42,7 +42,7 @@ const emit = defineEmits<{
       >
         <UIcon name="i-lucide-terminal" class="mt-0.5 size-4 shrink-0 text-muted" />
         <span class="min-w-0 flex-1">
-          <span class="block font-medium text-highlighted">{{ command.name }}</span>
+          <span class="block font-medium text-highlighted">{{ command.usage || command.name }}</span>
           <span class="block truncate text-muted">{{ command.description }}</span>
         </span>
         <UBadge
