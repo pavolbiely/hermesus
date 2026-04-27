@@ -1,4 +1,4 @@
-"""Profile-local isolated Git worktree helpers for web chat."""
+"""Project-local isolated Git worktree helpers for web chat."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from fastapi import HTTPException, status
 from hermes_state import SessionDB
 
 from .models import WebChatIsolatedWorkspace
-from .workspace_settings import user_home
 
 _SAFE_SESSION_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
@@ -68,16 +67,15 @@ def safe_session_slug(session_id: str) -> str:
     return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:24]
 
 
-def isolated_worktree_base_dir(profile: str | None) -> Path:
+def isolated_worktree_base_dir(source_git_root: str) -> Path:
     override = os.environ.get("HERMES_WEB_CHAT_WORKTREE_ROOT")
     if override:
         return Path(override).expanduser().resolve()
-    profile_name = safe_session_slug(profile or "default")
-    return user_home() / ".hermes" / "profiles" / profile_name / "web-chat" / "worktrees"
+    return Path(source_git_root).resolve() / ".hermes" / "web-chat" / "worktrees"
 
 
 def isolated_worktree_path(*, profile: str | None, source_git_root: str, session_id: str) -> Path:
-    return isolated_worktree_base_dir(profile) / source_workspace_hash(source_git_root) / safe_session_slug(session_id)
+    return isolated_worktree_base_dir(source_git_root) / source_workspace_hash(source_git_root) / safe_session_slug(session_id)
 
 
 def isolated_branch_name(*, source_git_root: str, session_id: str) -> str:
@@ -215,6 +213,7 @@ def ensure_session_worktree(
 
     worktree_path = isolated_worktree_path(profile=profile, source_git_root=source_git_root, session_id=session_id)
     branch_name = isolated_branch_name(source_git_root=source_git_root, session_id=session_id)
+    _ensure_source_git_excludes_worktrees(source_git_root)
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
     if worktree_path.exists() and not _is_valid_git_worktree(worktree_path):
         raise HTTPException(
@@ -356,6 +355,34 @@ def _has_head(source_git_root: str) -> bool:
     except Exception:
         return False
     return True
+
+
+def _ensure_source_git_excludes_worktrees(source_git_root: str) -> None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", source_git_root, "rev-parse", "--git-path", "info/exclude"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return
+
+    exclude_path = Path(result.stdout.strip())
+    if not exclude_path.is_absolute():
+        exclude_path = Path(source_git_root) / exclude_path
+    try:
+        exclude_path.parent.mkdir(parents=True, exist_ok=True)
+        current = exclude_path.read_text(encoding="utf-8") if exclude_path.exists() else ""
+        entries = [".hermes/web-chat/worktrees/", "/.hermes/web-chat/worktrees/"]
+        missing = [entry for entry in entries if entry not in current.splitlines()]
+        if missing:
+            prefix = "" if not current or current.endswith("\n") else "\n"
+            missing_text = "\n".join(missing)
+            exclude_path.write_text(f"{current}{prefix}{missing_text}\n", encoding="utf-8")
+    except OSError:
+        return
 
 
 def _add_worktree(source_git_root: str, worktree_path: Path, branch_name: str) -> None:

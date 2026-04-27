@@ -243,6 +243,43 @@ def test_runs_use_isolated_worktrees_per_chat(client, monkeypatch, tmp_path):
     assert first_detail["isolatedWorkspace"]["worktreePath"] == str(seen_workspaces[0])
 
 
+def test_isolated_worktree_defaults_to_project_hermes_dir(client, monkeypatch, tmp_path):
+    import hermes_cli.web_chat as web_chat
+
+    monkeypatch.delenv("HERMES_WEB_CHAT_WORKTREE_ROOT", raising=False)
+    repo = git_repo(tmp_path)
+    (repo / "tracked.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial"],
+        check=True,
+        capture_output=True,
+    )
+    seen = {}
+
+    def fake_executor(context, emit):
+        workspace = Path(context.workspace)
+        seen["workspace"] = workspace
+        (workspace / "tracked.txt").write_text("base\nproject-local\n", encoding="utf-8")
+        return "Done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+    start = client.post("/api/web-chat/runs", json={"input": "Change", "workspace": str(repo)}).json()
+    with client.stream("GET", f"/api/web-chat/runs/{start['runId']}/events") as stream:
+        stream.read()
+
+    expected_root = repo / ".hermes" / "web-chat" / "worktrees"
+    assert seen["workspace"].is_relative_to(expected_root)
+    source_status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain=v1"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert source_status.stdout == ""
+
+
+
 def test_delete_session_removes_isolated_worktree(client, monkeypatch, tmp_path):
     import hermes_cli.web_chat as web_chat
 
