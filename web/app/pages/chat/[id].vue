@@ -5,7 +5,7 @@ import { connectRouteRun } from '../../utils/routeRunConnection'
 import type { WebChatAttachment, WebChatMessage } from '~/types/web-chat'
 import type { QueuedMessage } from '~/utils/queuedMessages'
 import { latestChangePartKey, messageText } from '~/utils/chatMessages'
-import { writeClipboardText } from '~/utils/clipboard'
+import { filesFromClipboard, writeClipboardText } from '~/utils/clipboard'
 import { mergeOptimisticUserMessages } from '~/utils/optimisticChatMessages'
 import { markLocalMessageFailed, markLocalMessageSending, removeLocalMessage } from '~/utils/failedChatMessages'
 import { shouldHideChatUntilInitialScroll, scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender, nearestScrollableAncestor, isElementVisibleInRoot } from '~/utils/chatInitialScroll'
@@ -236,6 +236,19 @@ async function attachFiles(files: File[]) {
   } catch (err) {
     showError(err, 'Could not upload attachment.')
   }
+}
+
+async function onPromptPaste(event: ClipboardEvent) {
+  const files = filesFromClipboard(event)
+  if (!files.length) return
+
+  event.preventDefault()
+  if (chatStatus.value === 'submitted' || chatStatus.value === 'streaming' || context.attachmentsLoading.value) {
+    toast.add({ color: 'warning', title: 'Attachment upload is unavailable right now' })
+    return
+  }
+
+  await attachFiles(files)
 }
 
 function showVoiceError(message: string) {
@@ -749,6 +762,7 @@ onBeforeUnmount(() => {
             :class="isLoadingSession ? 'pointer-events-none invisible' : undefined"
             :error="error || context.contextError.value"
             @submit="onSubmit"
+            @paste="onPromptPaste"
             @keydown.down="onPromptArrowDown"
             @keydown.up="onPromptArrowUp"
             @keydown.esc="onPromptEscape"

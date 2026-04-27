@@ -18,3 +18,16 @@ export async function writeClipboardText(text: string) {
     document.body.removeChild(textarea)
   }
 }
+
+export function filesFromClipboard(event: ClipboardEvent) {
+  const clipboardData = event.clipboardData
+  if (!clipboardData) return []
+
+  const files = Array.from(clipboardData.files)
+  if (files.length) return files
+
+  return Array.from(clipboardData.items)
+    .filter(item => item.kind === 'file')
+    .map(item => item.getAsFile())
+    .filter((file): file is File => Boolean(file))
+}

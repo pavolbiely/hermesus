@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { playNotificationSound, prepareNotificationSound } from '../utils/notificationSound'
+import { filesFromClipboard } from '~/utils/clipboard'
 
 const input = ref('')
 const loading = ref(false)
@@ -32,6 +33,19 @@ async function attachFiles(files: File[]) {
   } catch (err) {
     showError(err, 'Could not upload attachment.')
   }
+}
+
+async function onPromptPaste(event: ClipboardEvent) {
+  const files = filesFromClipboard(event)
+  if (!files.length) return
+
+  event.preventDefault()
+  if (loading.value || context.attachmentsLoading.value) {
+    toast.add({ color: 'warning', title: 'Attachment upload is already in progress' })
+    return
+  }
+
+  await attachFiles(files)
 }
 
 function showVoiceError(message: string) {
@@ -100,6 +114,7 @@ async function onSubmit() {
             v-model="input"
             :error="error || context.contextError.value"
             @submit="onSubmit"
+            @paste="onPromptPaste"
             @keydown.down="onPromptArrowDown"
             @keydown.up="onPromptArrowUp"
             @keydown.esc="onPromptEscape"
