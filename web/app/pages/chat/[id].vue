@@ -8,7 +8,7 @@ import { latestChangePartKey, messageText } from '~/utils/chatMessages'
 import { filesFromClipboard, writeClipboardText } from '~/utils/clipboard'
 import { mergeOptimisticUserMessages } from '~/utils/optimisticChatMessages'
 import { markLocalMessageFailed, markLocalMessageSending, removeLocalMessage } from '~/utils/failedChatMessages'
-import { shouldHideChatUntilInitialScroll, scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender, nearestScrollableAncestor, isElementVisibleInRoot } from '~/utils/chatInitialScroll'
+import { scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender, nearestScrollableAncestor, isElementVisibleInRoot } from '~/utils/chatInitialScroll'
 import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
 
 const INITIAL_SESSION_MESSAGE_LIMIT = 60
@@ -81,13 +81,6 @@ const olderMessagesLabel = computed(() => {
 })
 const isLoadingSession = computed(() => (sessionStatus.value === 'idle' || sessionStatus.value === 'pending') && !displayedData.value)
 const hasSession = computed(() => Boolean(displayedData.value?.session))
-const shouldHideChatContent = computed(() => shouldHideChatUntilInitialScroll({
-  currentSessionId: sessionId.value,
-  loadedSessionId: displayedData.value?.session.id,
-  settledSessionId: initialScrollSettledSessionId.value,
-  isLoading: isLoadingSession.value,
-  hasSession: hasSession.value
-}))
 const {
   messages,
   submitStatus,
@@ -114,7 +107,7 @@ const {
 const error = computed(() => streamError.value)
 const latestGitChangePartKey = computed(() => latestChangePartKey(messages.value))
 const chatMessagesStatus = computed(() => chatStatus.value === 'submitted' ? 'streaming' : chatStatus.value)
-const showRunActivityIndicator = computed(() => Boolean(currentActivityLabel.value) && !shouldHideChatContent.value)
+const showRunActivityIndicator = computed(() => Boolean(currentActivityLabel.value))
 const promptContextUsage = computed(() => {
   const model = composer.models.value.find(model => model.id === composer.selectedModel.value)
   if (!model?.contextWindowTokens || !model.autoCompressTokens) return null
@@ -901,11 +894,7 @@ onBeforeUnmount(() => {
             :shouldAutoScroll="true"
             :shouldScrollToBottom="true"
             :autoScroll="true"
-            :class="[
-              '[--last-message-height:0px]',
-              shouldHideChatContent ? 'invisible' : undefined
-            ]"
-            :aria-hidden="shouldHideChatContent"
+            class="[--last-message-height:0px]"
           >
             <template #indicator>
               <ChatRunActivityIndicator :label="currentActivityLabel || 'Working…'" />

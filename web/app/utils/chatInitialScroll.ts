@@ -1,18 +1,3 @@
-type InitialScrollState = {
-  currentSessionId: string
-  loadedSessionId?: string | null
-  settledSessionId?: string | null
-  isLoading: boolean
-  hasSession: boolean
-}
-
-export function shouldHideChatUntilInitialScroll(state: InitialScrollState) {
-  if (state.isLoading || !state.hasSession) return false
-  if (state.loadedSessionId !== state.currentSessionId) return false
-
-  return state.settledSessionId !== state.currentSessionId
-}
-
 type BottomScrollOptions = {
   waitForDomUpdate?: () => Promise<void> | void
   waitForFrame?: () => Promise<void> | void
