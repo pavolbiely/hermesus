@@ -20,6 +20,7 @@ const emit = defineEmits<{
   startWorkspaceChat: [path: string]
   openSession: [session: WebChatSession]
   renameSession: [session: WebChatSession]
+  toggleSessionPinned: [session: WebChatSession]
   confirmSessionAction: [action: 'duplicate' | 'delete', session: WebChatSession]
 }>()
 
@@ -96,6 +97,12 @@ function renameSession(session: WebChatSession) {
   emit('renameSession', session)
 }
 
+function toggleSessionPinned(session: WebChatSession) {
+  openMenuSessionId.value = null
+  contextMenuReference.value = null
+  emit('toggleSessionPinned', session)
+}
+
 function confirmSessionAction(action: 'duplicate' | 'delete', session: WebChatSession) {
   openMenuSessionId.value = null
   contextMenuReference.value = null
@@ -104,6 +111,11 @@ function confirmSessionAction(action: 'duplicate' | 'delete', session: WebChatSe
 
 function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
   return [
+    {
+      label: session.pinned ? 'Unpin' : 'Pin',
+      icon: session.pinned ? 'i-lucide-pin-off' : 'i-lucide-pin',
+      onSelect: () => toggleSessionPinned(session)
+    },
     {
       label: 'Rename',
       icon: 'i-lucide-pencil',
@@ -183,7 +195,14 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
           <span v-if="isUnreadSession(session)" class="absolute inset-y-0 left-2 flex items-center" aria-hidden="true">
             <span class="block size-1.5 rounded-full bg-primary" />
           </span>
-          <span class="min-w-0 flex-1 truncate" :class="isUnreadSession(session) ? 'pl-4' : undefined">
+          <UIcon
+            v-if="session.pinned"
+            name="i-lucide-pin"
+            class="size-3.5 shrink-0 text-muted"
+            :class="isUnreadSession(session) ? 'ml-4' : undefined"
+            aria-hidden="true"
+          />
+          <span class="min-w-0 flex-1 truncate" :class="isUnreadSession(session) && !session.pinned ? 'pl-4' : undefined">
             {{ sessionTitle(session) }}
           </span>
 

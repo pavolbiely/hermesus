@@ -10,6 +10,7 @@ const session = (overrides) => ({
   model: null,
   reasoningEffort: null,
   workspace: overrides.workspace ?? null,
+  pinned: overrides.pinned ?? false,
   messageCount: 0,
   createdAt: overrides.createdAt ?? '2026-01-01T00:00:00Z',
   updatedAt: overrides.updatedAt ?? '2026-01-01T00:00:00Z'
@@ -46,6 +47,24 @@ test('keeps other chats after managed workspace groups', () => {
   })
 
   assert.deepEqual(groups.map(group => group.label), ['Alpha', 'Other chats'])
+})
+
+test('keeps pinned chats first within workspace groups', () => {
+  const groups = buildSessionGroups({
+    sessions: [
+      session({ id: 'newer-unpinned', workspace: '/repo/alpha', updatedAt: '2026-01-04T00:00:00Z' }),
+      session({ id: 'older-pinned', workspace: '/repo/alpha', pinned: true, updatedAt: '2026-01-02T00:00:00Z' }),
+      session({ id: 'newer-pinned', workspace: '/repo/alpha', pinned: true, updatedAt: '2026-01-03T00:00:00Z' })
+    ],
+    workspaces: [workspace({ id: 'alpha', label: 'Alpha', path: '/repo/alpha' })],
+    selectedWorkspace: null
+  })
+
+  assert.deepEqual(groups[0].sessions.map(s => s.id), [
+    'newer-pinned',
+    'older-pinned',
+    'newer-unpinned'
+  ])
 })
 
 test('sorts chats within workspace groups by last message time', () => {

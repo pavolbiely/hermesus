@@ -71,7 +71,8 @@ function sortedSessions(sessions: WebChatSession[]): WebChatSession[] {
 }
 
 function compareSessionsByLastMessage(a: WebChatSession, b: WebChatSession): number {
-  return timestampValue(b.updatedAt) - timestampValue(a.updatedAt)
+  return Number(b.pinned) - Number(a.pinned)
+    || timestampValue(b.updatedAt) - timestampValue(a.updatedAt)
     || timestampValue(b.createdAt) - timestampValue(a.createdAt)
     || a.id.localeCompare(b.id)
 }

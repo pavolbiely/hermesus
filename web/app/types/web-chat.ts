@@ -103,6 +103,7 @@ export type WebChatSession = {
   model: string | null
   reasoningEffort: string | null
   workspace: string | null
+  pinned: boolean
   messageCount: number
   createdAt: string
   updatedAt: string

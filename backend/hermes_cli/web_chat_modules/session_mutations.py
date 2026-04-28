@@ -64,6 +64,7 @@ def duplicate_session(
             parsed = None
         if isinstance(parsed, dict):
             model_config = parsed
+            model_config.pop("pinned", None)
 
     db.create_session(
         new_session_id,
@@ -151,8 +152,9 @@ def list_non_empty_sessions(
     return sessions[offset:offset + limit]
 
 
-def _session_last_active_sort_key(session: dict[str, Any]) -> tuple[float, float, str]:
+def _session_last_active_sort_key(session: dict[str, Any]) -> tuple[int, float, float, str]:
     return (
+        0 if _session_pinned(session) else 1,
         -_numeric_timestamp(session.get("last_active")),
         -_numeric_timestamp(session.get("started_at")),
         str(session.get("id") or ""),
@@ -161,3 +163,14 @@ def _session_last_active_sort_key(session: dict[str, Any]) -> tuple[float, float
 
 def _numeric_timestamp(value: Any) -> float:
     return value if isinstance(value, (int, float)) else 0.0
+
+
+def _session_pinned(session: dict[str, Any]) -> bool:
+    raw = session.get("model_config")
+    if not isinstance(raw, str) or not raw:
+        return False
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return isinstance(parsed, dict) and parsed.get("pinned") is True

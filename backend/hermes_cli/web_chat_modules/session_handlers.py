@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -68,16 +69,55 @@ def rename_session_response(
     serialize_messages: Callable[..., list[WebChatMessage]],
 ) -> SessionDetailResponse:
     get_session_or_404(db, session_id)
-    try:
-        db.set_session_title(session_id, payload.title)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if payload.title is None and payload.pinned is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No session changes provided")
+
+    if payload.title is not None:
+        try:
+            db.set_session_title(session_id, payload.title)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if payload.pinned is not None:
+        _update_session_model_config(db, session_id, {"pinned": True if payload.pinned else None})
 
     session = get_session_or_404(db, session_id)
     return SessionDetailResponse(
         session=serialize_session(session),
         messages=serialize_messages(db.get_messages(session_id)),
     )
+
+
+def _update_session_model_config(db: SessionDB, session_id: str, updates: dict[str, Any]) -> None:
+    update_model_settings = getattr(db, "update_session_model_settings", None)
+    if callable(update_model_settings):
+        update_model_settings(session_id, model_config_updates=updates)
+        return
+
+    def _do(conn: Any) -> None:
+        cursor = conn.execute("SELECT model_config FROM sessions WHERE id = ?", (session_id,))
+        row = cursor.fetchone()
+        config: dict[str, Any] = {}
+        if row and row["model_config"]:
+            try:
+                parsed = json.loads(row["model_config"])
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict):
+                config = parsed
+
+        for key, value in updates.items():
+            if value is None:
+                config.pop(key, None)
+            else:
+                config[key] = value
+
+        conn.execute(
+            "UPDATE sessions SET model_config = ? WHERE id = ?",
+            (json.dumps(config) if config else None, session_id),
+        )
+
+    db._execute_write(_do)
 
 
 def edit_message_response(

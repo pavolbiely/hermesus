@@ -95,6 +95,10 @@ export function useHermesApi() {
       method: 'PATCH',
       body: { title }
     }),
+    setSessionPinned: (id: string, pinned: boolean) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
+      method: 'PATCH',
+      body: { pinned }
+    }),
     editMessage: (sessionId: string, messageId: string, content: string) => request<SessionDetailResponse>(`/api/web-chat/sessions/${sessionId}/messages/${messageId}`, {
       method: 'PATCH',
       body: { content }

@@ -29,6 +29,7 @@ def test_lists_sessions_for_chat_sidebar(client):
         "model": "test-model",
         "reasoningEffort": None,
         "workspace": None,
+        "pinned": False,
         "messageCount": 2,
         "createdAt": data["sessions"][0]["createdAt"],
         "updatedAt": data["sessions"][0]["updatedAt"],
@@ -77,6 +78,30 @@ def test_lists_sidebar_sessions_by_last_message_timestamp(client):
         "older-session-with-newer-message",
         "newer-session",
     ]
+
+
+def test_lists_pinned_sidebar_sessions_first(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("newer-unpinned", source="web-chat")
+    db.create_session("older-pinned", source="web-chat", model_config={"pinned": True})
+    db.append_message("newer-unpinned", "user", "Updated later")
+    db.append_message("older-pinned", "user", "Pinned")
+
+    def set_timestamps(conn):
+        conn.execute("UPDATE messages SET timestamp = ? WHERE session_id = ?", (300.0, "newer-unpinned"))
+        conn.execute("UPDATE messages SET timestamp = ? WHERE session_id = ?", (100.0, "older-pinned"))
+
+    db._execute_write(set_timestamps)
+
+    response = client.get("/api/web-chat/sessions")
+
+    assert response.status_code == 200
+    sessions = response.json()["sessions"]
+    assert [session["id"] for session in sessions] == ["older-pinned", "newer-unpinned"]
+    assert sessions[0]["pinned"] is True
+    assert sessions[1]["pinned"] is False
 
 
 def test_compressed_sidebar_session_uses_tip_workspace(client, tmp_path):
@@ -244,6 +269,22 @@ def test_renames_session_title(client):
     assert response.status_code == 200
     assert response.json()["session"]["title"] == "New title"
     assert db.get_session("session-rename")["title"] == "New title"
+
+
+def test_pins_and_unpins_session(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("session-pin", source="web-chat")
+    db.append_message("session-pin", "user", "Pin me")
+
+    pinned = client.patch("/api/web-chat/sessions/session-pin", json={"pinned": True})
+    unpinned = client.patch("/api/web-chat/sessions/session-pin", json={"pinned": False})
+
+    assert pinned.status_code == 200
+    assert pinned.json()["session"]["pinned"] is True
+    assert unpinned.status_code == 200
+    assert unpinned.json()["session"]["pinned"] is False
 
 
 def test_deletes_session(client):

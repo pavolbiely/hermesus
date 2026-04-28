@@ -504,6 +504,22 @@ async function duplicateSession(session: WebChatSession) {
   }
 }
 
+async function toggleSessionPinned(session: WebChatSession) {
+  pendingSessionId.value = session.id
+  try {
+    await api.setSessionPinned(session.id, !session.pinned)
+    await refresh()
+  } catch (err) {
+    toast.add({
+      title: session.pinned ? 'Failed to unpin chat' : 'Failed to pin chat',
+      description: err instanceof Error ? err.message : String(err),
+      color: 'error'
+    })
+  } finally {
+    pendingSessionId.value = null
+  }
+}
+
 async function deleteSession(session: WebChatSession) {
   pendingSessionId.value = session.id
   try {
@@ -648,6 +664,7 @@ provide('appUpdateControl', {
           @start-workspace-chat="startWorkspaceChat"
           @open-session="openSession"
           @rename-session="beginRename"
+          @toggle-session-pinned="toggleSessionPinned"
           @confirm-session-action="beginConfirmAction"
         />
       </template>

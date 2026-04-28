@@ -100,6 +100,7 @@ class WebChatSession(BaseModel):
     model: str | None
     reasoningEffort: str | None = None
     workspace: str | None = None
+    pinned: bool = False
     messageCount: int
     createdAt: str
     updatedAt: str
@@ -274,7 +275,8 @@ class CreateSessionRequest(BaseModel):
 
 
 class RenameSessionRequest(BaseModel):
-    title: str = Field(min_length=1, max_length=120)
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    pinned: bool | None = None
 
 
 class EditMessageRequest(BaseModel):
