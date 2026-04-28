@@ -101,3 +101,22 @@ test('does not preserve non-optimistic local messages across session refreshes',
 
   assert.deepEqual(result.messages.map(item => item.id), ['server-1'])
 })
+
+test('preserves streaming assistant tool history while a run is active', () => {
+  const persisted = [message('server-1', 'user', 'run terminal')]
+  const localAssistant = message('local-assistant', 'assistant')
+  localAssistant.parts = [
+    { type: 'tool', name: 'terminal', status: 'completed' },
+    { type: 'tool', name: 'read_file', status: 'running' }
+  ]
+
+  const result = mergeOptimisticUserMessages(
+    persisted,
+    [...persisted, localAssistant],
+    new Set(),
+    { preserveStreamingAssistant: true }
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), ['server-1', 'local-assistant'])
+  assert.deepEqual(result.messages[1].parts, localAssistant.parts)
+})

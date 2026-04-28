@@ -148,7 +148,8 @@ watch(
     const merged = mergeOptimisticUserMessages(
       persistedMessages ? [...persistedMessages] : [],
       messages.value,
-      optimisticUserMessageIds
+      optimisticUserMessageIds,
+      { preserveStreamingAssistant: activeChatRuns.isRunning(currentSessionId) }
     )
     messages.value = merged.messages
     optimisticUserMessageIds = merged.optimisticMessageIds

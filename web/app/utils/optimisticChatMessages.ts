@@ -33,27 +33,42 @@ function hasEquivalentPersistedMessage(messages: WebChatMessage[], optimistic: W
   ))
 }
 
+type MergeOptimisticUserMessagesOptions = {
+  preserveStreamingAssistant?: boolean
+}
+
+function isStreamingAssistantMessage(message: WebChatMessage) {
+  return message.role === 'assistant' && message.parts.length > 0
+}
+
 export function mergeOptimisticUserMessages(
   persistedMessages: WebChatMessage[],
   currentMessages: WebChatMessage[],
-  optimisticMessageIds: Set<string>
+  optimisticMessageIds: Set<string>,
+  options: MergeOptimisticUserMessagesOptions = {}
 ) {
   const nextMessages = [...persistedMessages]
   const nextOptimisticIds = new Set(optimisticMessageIds)
   const persistedIds = new Set(persistedMessages.map(message => message.id))
 
   for (const message of currentMessages) {
-    if (!nextOptimisticIds.has(message.id)) continue
-    if (message.role !== 'user') {
-      nextOptimisticIds.delete(message.id)
-      continue
-    }
-    if (persistedIds.has(message.id) || hasEquivalentPersistedMessage(persistedMessages, message)) {
-      nextOptimisticIds.delete(message.id)
+    if (nextOptimisticIds.has(message.id)) {
+      if (message.role !== 'user') {
+        nextOptimisticIds.delete(message.id)
+        continue
+      }
+      if (persistedIds.has(message.id) || hasEquivalentPersistedMessage(persistedMessages, message)) {
+        nextOptimisticIds.delete(message.id)
+        continue
+      }
+
+      nextMessages.push(message)
       continue
     }
 
-    nextMessages.push(message)
+    if (options.preserveStreamingAssistant && !persistedIds.has(message.id) && isStreamingAssistantMessage(message)) {
+      nextMessages.push(message)
+    }
   }
 
   return { messages: nextMessages, optimisticMessageIds: nextOptimisticIds }
