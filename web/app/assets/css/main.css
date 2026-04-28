@@ -69,6 +69,29 @@ button.chat-preview-path {
   overflow-x: auto;
 }
 
+.chat-file-preview-line {
+  display: table-row;
+}
+
+.chat-file-preview-line-number,
+.chat-file-preview-line-content {
+  display: table-cell;
+}
+
+.chat-file-preview-line-number {
+  min-width: 3rem;
+  padding-inline: 0.75rem;
+  user-select: none;
+  text-align: right;
+  color: var(--ui-text-muted);
+}
+
+.chat-file-preview-line-content {
+  min-width: 100%;
+  padding-right: 1rem;
+  white-space: pre;
+}
+
 .chat-message-markdown :where(pre) {
   font-size: 0.8125rem;
   line-height: 1.25rem;

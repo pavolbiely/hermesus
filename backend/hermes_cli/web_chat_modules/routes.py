@@ -19,6 +19,7 @@ from .models import (
     ExecuteCommandRequest,
     ExecuteCommandResponse,
     FilePreviewRequest,
+    FilePreviewResolveRequest,
     RenameSessionRequest,
     RespondRunPromptRequest,
     RespondRunPromptResponse,
@@ -39,6 +40,7 @@ from .models import (
     WebChatCommand,
     WebChatCommandsResponse,
     WebChatFilePreview,
+    WebChatFilePreviewReference,
     WebChatMessage,
     WebChatModelCapability,
     WebChatProfilesResponse,
@@ -197,6 +199,14 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
     def get_file_preview(payload: FilePreviewRequest) -> WebChatFilePreview:
         return file_previews.preview_file(
             payload.path,
+            payload.workspace,
+            validate_workspace=services.validate_workspace,
+        )
+
+    @router.post("/file-preview/resolve", response_model=list[WebChatFilePreviewReference], response_model_exclude_none=True)
+    def resolve_file_preview_paths(payload: FilePreviewResolveRequest) -> list[WebChatFilePreviewReference]:
+        return file_previews.resolve_existing_files(
+            payload.paths,
             payload.workspace,
             validate_workspace=services.validate_workspace,
         )

@@ -9,7 +9,7 @@ from typing import Callable
 from fastapi import HTTPException, status
 
 from .git_changes import workspace_root
-from .models import WebChatFilePreview
+from .models import WebChatFilePreview, WebChatFilePreviewReference
 
 MAX_FILE_PREVIEW_BYTES = 256 * 1024
 TEXT_MIME_PREFIXES = ("text/",)
@@ -187,6 +187,40 @@ def preview_file(requested_path: str, workspace: str | None, *, validate_workspa
     )
 
 
+def resolve_existing_files(
+    requested_paths: list[str],
+    workspace: str | None,
+    *,
+    validate_workspace: WorkspaceValidator,
+) -> list[WebChatFilePreviewReference]:
+    workspace_root_path = validate_workspace(workspace)
+    if workspace_root_path is None:
+        return []
+
+    workspace_root_path = workspace_root_path.resolve()
+    git_root_path = (workspace_root(str(workspace_root_path)) or workspace_root_path).resolve()
+    allowed_roots = _unique_roots([workspace_root_path, git_root_path])
+    references: list[WebChatFilePreviewReference] = []
+    seen: set[str] = set()
+
+    for requested_path in requested_paths:
+        value = requested_path.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+
+        try:
+            path = _resolve_preview_path(value, workspace_root_path, git_root_path, allowed_roots)
+        except HTTPException:
+            continue
+        if not path.is_file():
+            continue
+
+        references.append(_preview_reference(path, requested_path, workspace_root_path, git_root_path))
+
+    return references
+
+
 def _resolve_preview_path(value: str, workspace_root_path: Path, git_root_path: Path, allowed_roots: list[Path]) -> Path:
     candidate = Path(value).expanduser()
     candidates = [candidate.resolve()] if candidate.is_absolute() else [
@@ -238,6 +272,24 @@ def _media_type(path: Path) -> str:
 
 def _language(path: Path) -> str | None:
     return LANGUAGE_BY_FILENAME.get(path.name) or LANGUAGE_BY_EXTENSION.get(path.suffix)
+
+
+def _preview_reference(
+    path: Path,
+    requested_path: str,
+    workspace_root_path: Path,
+    git_root_path: Path,
+) -> WebChatFilePreviewReference:
+    return WebChatFilePreviewReference(
+        path=str(path),
+        requestedPath=requested_path,
+        relativePath=_relative_path(path, git_root_path) or _relative_path(path, workspace_root_path),
+        name=path.name,
+        mediaType=_media_type(path),
+        size=path.stat().st_size,
+        language=_language(path),
+        exists=True,
+    )
 
 
 def _is_text_previewable(path: Path, media_type: str) -> bool:

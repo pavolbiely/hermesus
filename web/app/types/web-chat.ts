@@ -222,6 +222,22 @@ export type FilePreviewRequest = {
   workspace?: string | null
 }
 
+export type FilePreviewResolveRequest = {
+  paths: string[]
+  workspace?: string | null
+}
+
+export type WebChatFilePreviewReference = {
+  path: string
+  requestedPath: string
+  relativePath?: string | null
+  name: string
+  mediaType: string
+  size: number
+  language?: string | null
+  exists: boolean
+}
+
 export type WebChatFilePreview = {
   path: string
   requestedPath: string

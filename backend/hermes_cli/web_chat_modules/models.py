@@ -25,6 +25,22 @@ class FilePreviewRequest(BaseModel):
     workspace: str | None = None
 
 
+class FilePreviewResolveRequest(BaseModel):
+    paths: list[str] = Field(default_factory=list, max_length=100)
+    workspace: str | None = None
+
+
+class WebChatFilePreviewReference(BaseModel):
+    path: str
+    requestedPath: str
+    relativePath: str | None = None
+    name: str
+    mediaType: str
+    size: int
+    language: str | None = None
+    exists: bool = True
+
+
 class WebChatFilePreview(BaseModel):
     path: str
     requestedPath: str

@@ -14,6 +14,26 @@ const previewError = ref<string | null>(null)
 const preview = ref<WebChatFilePreview | null>(null)
 let previewPathObserver: MutationObserver | null = null
 let enhancePreviewFrame: number | null = null
+let previewResolveSequence = 0
+const existingPreviewPaths = new Set<string>()
+const missingPreviewPaths = new Set<string>()
+
+type PreviewElementCandidate = {
+  element: HTMLElement
+  path: string
+  href?: string | null
+}
+
+type PreviewTextMatch = {
+  raw: string
+  path: string
+  start: number
+}
+
+type PreviewTextCandidate = {
+  node: Text
+  matches: PreviewTextMatch[]
+}
 
 const tooltipContent = { side: 'top' as const, sideOffset: 8 }
 const richTooltipUi = {
@@ -57,32 +77,59 @@ function markPreviewTrigger(element: HTMLElement, path: string) {
   element.setAttribute('role', 'button')
   element.setAttribute('tabindex', '0')
   element.dataset.previewPath = path
+  delete element.dataset.previewCandidatePath
   element.classList.add('chat-preview-path')
 }
 
-function enhancePreviewPathNodes() {
+async function enhancePreviewPathNodes() {
   const root = messageContentRoot.value
   if (!root || props.message.role !== 'assistant') return
+
+  const elementCandidates = collectElementPreviewCandidates(root)
+  const textCandidates = collectTextPreviewCandidates(root)
+  const paths = new Set<string>()
+
+  for (const candidate of elementCandidates) paths.add(candidate.path)
+  for (const candidate of textCandidates) {
+    for (const match of candidate.matches) paths.add(match.path)
+  }
+
+  await resolveExistingPreviewPaths([...paths])
+
+  for (const candidate of elementCandidates) {
+    if (!existingPreviewPaths.has(candidate.path)) continue
+    if (candidate.href !== undefined) (candidate.element as HTMLAnchorElement).removeAttribute('href')
+    markPreviewTrigger(candidate.element, candidate.path)
+  }
+
+  for (const candidate of textCandidates) {
+    enhancePlainTextNode(candidate.node, candidate.matches.filter(match => existingPreviewPaths.has(match.path)))
+  }
+}
+
+function collectElementPreviewCandidates(root: HTMLElement) {
+  const candidates: PreviewElementCandidate[] = []
 
   for (const code of root.querySelectorAll<HTMLElement>('code')) {
     if (code.closest('pre') || code.dataset.previewPath) continue
     const path = normalizePreviewPathCandidate(code.textContent || '')
-    if (isPreviewablePathCandidate(path)) markPreviewTrigger(code, path)
+    if (isResolvablePreviewCandidate(path)) candidates.push({ element: code, path })
   }
 
-  for (const link of root.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+  for (const link of root.querySelectorAll<HTMLAnchorElement>('a[href], a[data-preview-candidate-path]')) {
     if (link.dataset.previewPath) continue
-    const href = link.getAttribute('href') || ''
+    const href = link.dataset.previewCandidatePath || link.getAttribute('href') || ''
     const path = normalizePreviewPathCandidate(href)
     if (!isPreviewablePathCandidate(path)) continue
+    link.dataset.previewCandidatePath = path
     link.removeAttribute('href')
-    markPreviewTrigger(link, path)
+    if (isResolvablePreviewCandidate(path)) candidates.push({ element: link, path, href })
   }
 
-  enhancePlainTextPreviewPaths(root)
+  return candidates
 }
 
-function enhancePlainTextPreviewPaths(root: HTMLElement) {
+function collectTextPreviewCandidates(root: HTMLElement) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement
@@ -95,16 +142,19 @@ function enhancePlainTextPreviewPaths(root: HTMLElement) {
         : NodeFilter.FILTER_SKIP
     }
   })
-  const nodes: Text[] = []
-  while (walker.nextNode()) nodes.push(walker.currentNode as Text)
-  for (const node of nodes) enhancePlainTextNode(node)
+  const candidates: PreviewTextCandidate[] = []
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    const matches = previewMatchesForText(node.textContent || '')
+    if (matches.length) candidates.push({ node, matches })
+  }
+
+  return candidates
 }
 
-function enhancePlainTextNode(node: Text) {
-  const text = node.textContent || ''
-  const fragment = document.createDocumentFragment()
-  let cursor = 0
-  let matched = false
+function previewMatchesForText(text: string) {
+  const matches: PreviewTextMatch[] = []
   LOCAL_PATH_PATTERN.lastIndex = 0
 
   for (const match of text.matchAll(LOCAL_PATH_PATTERN)) {
@@ -112,18 +162,55 @@ function enhancePlainTextNode(node: Text) {
     if (!raw || match.index === undefined) continue
     const start = match.index + match[0].lastIndexOf(raw)
     const path = normalizePreviewPathCandidate(raw)
-    if (!isPreviewablePathCandidate(path)) continue
-    if (start > cursor) fragment.append(document.createTextNode(text.slice(cursor, start)))
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.textContent = raw
-    markPreviewTrigger(button, path)
-    fragment.append(button)
-    cursor = start + raw.length
-    matched = true
+    if (isResolvablePreviewCandidate(path)) matches.push({ raw, path, start })
   }
 
-  if (!matched) return
+  return matches
+}
+
+function isResolvablePreviewCandidate(path: string) {
+  return isPreviewablePathCandidate(path) && !missingPreviewPaths.has(path)
+}
+
+async function resolveExistingPreviewPaths(paths: string[]) {
+  const unresolved = [...new Set(paths)].filter(path => !existingPreviewPaths.has(path) && !missingPreviewPaths.has(path))
+  if (!unresolved.length) return
+
+  const sequence = ++previewResolveSequence
+  const workspace = props.workspace
+
+  try {
+    const references = await api.resolveFilePreviewPaths({ paths: unresolved, workspace })
+    if (sequence !== previewResolveSequence || workspace !== props.workspace) return
+
+    const found = new Set(references.map(reference => reference.requestedPath))
+    for (const path of found) existingPreviewPaths.add(path)
+    for (const path of unresolved) {
+      if (!found.has(path)) missingPreviewPaths.add(path)
+    }
+  } catch {
+    if (sequence !== previewResolveSequence || workspace !== props.workspace) return
+    for (const path of unresolved) missingPreviewPaths.add(path)
+  }
+}
+
+function enhancePlainTextNode(node: Text, matches: PreviewTextMatch[]) {
+  if (!matches.length || !node.isConnected) return
+  const text = node.textContent || ''
+  const fragment = document.createDocumentFragment()
+  let cursor = 0
+
+  for (const match of matches) {
+    if (match.start < cursor) continue
+    if (match.start > cursor) fragment.append(document.createTextNode(text.slice(cursor, match.start)))
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = match.raw
+    markPreviewTrigger(button, match.path)
+    fragment.append(button)
+    cursor = match.start + match.raw.length
+  }
+
   if (cursor < text.length) fragment.append(document.createTextNode(text.slice(cursor)))
   node.parentNode?.replaceChild(fragment, node)
 }
@@ -156,7 +243,7 @@ function scheduleEnhancePreviewPathNodes() {
   if (enhancePreviewFrame !== null) window.cancelAnimationFrame(enhancePreviewFrame)
   enhancePreviewFrame = window.requestAnimationFrame(() => {
     enhancePreviewFrame = null
-    enhancePreviewPathNodes()
+    void enhancePreviewPathNodes()
   })
 }
 
@@ -175,9 +262,16 @@ function onPreviewKeydown(event: KeyboardEvent) {
   void openFilePreview(path)
 }
 
+function resetPreviewPathResolution() {
+  previewResolveSequence += 1
+  existingPreviewPaths.clear()
+  missingPreviewPaths.clear()
+}
+
 watch(
-  () => [props.message.id, props.message.parts.map(part => partText(part)).join('\n')],
+  () => [props.message.id, props.workspace, props.message.parts.map(part => partText(part)).join('\n')],
   async () => {
+    resetPreviewPathResolution()
     await nextTick()
     scheduleEnhancePreviewPathNodes()
   },

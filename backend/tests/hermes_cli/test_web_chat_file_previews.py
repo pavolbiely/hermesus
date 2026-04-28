@@ -12,6 +12,13 @@ def post_preview(client, path: str, workspace: str | None):
     return client.post("/api/web-chat/file-preview", json=payload)
 
 
+def post_resolve(client, paths: list[str], workspace: str | None):
+    payload = {"paths": paths}
+    if workspace is not None:
+        payload["workspace"] = workspace
+    return client.post("/api/web-chat/file-preview/resolve", json=payload)
+
+
 def test_file_preview_loads_relative_markdown_from_workspace(client, tmp_path):
     repo = git_repo(tmp_path)
     plan = repo / ".hermes" / "plans" / "example.md"
@@ -147,3 +154,37 @@ def test_file_preview_requires_workspace_for_relative_paths(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Select a workspace before previewing relative files"
+
+
+def test_file_preview_resolve_returns_only_existing_workspace_files(client, tmp_path):
+    repo = git_repo(tmp_path)
+    source = repo / "src" / "foo.ts"
+    source.parent.mkdir()
+    source.write_text("export const foo = 1\n", encoding="utf-8")
+    outside = tmp_path / "secret.md"
+    outside.write_text("secret", encoding="utf-8")
+
+    response = post_resolve(client, ["src/foo.ts", "missing.md", str(outside), "src/foo.ts"], str(repo))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["requestedPath"] == "src/foo.ts"
+    assert body[0]["path"] == str(source)
+    assert body[0]["relativePath"] == "src/foo.ts"
+    assert body[0]["exists"] is True
+    assert body[0]["language"] == "typescript"
+
+
+def test_file_preview_resolve_uses_git_root_for_subdirectory_workspace(client, tmp_path):
+    repo = git_repo(tmp_path)
+    subdir = repo / "apps" / "web"
+    subdir.mkdir(parents=True)
+    config = repo / "config" / "app.yaml"
+    config.parent.mkdir()
+    config.write_text("name: demo\n", encoding="utf-8")
+
+    response = post_resolve(client, ["config/app.yaml"], str(subdir))
+
+    assert response.status_code == 200
+    assert response.json()[0]["relativePath"] == "config/app.yaml"

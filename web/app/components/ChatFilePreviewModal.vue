@@ -15,11 +15,14 @@ const meta = computed(() => {
   if (!props.preview) return null
   return `${props.preview.mediaType} · ${formatBytes(props.preview.size)}${props.preview.truncated ? ' · truncated' : ''}`
 })
-const fencedCode = computed(() => {
-  const content = props.preview?.content || ''
-  const language = props.preview?.language || ''
-  return `\`\`\`${language}\n${content.replace(/```/g, '``\\`')}\n\`\`\``
-})
+const codeLines = computed(() => splitPreviewLines(props.preview?.content || ''))
+
+function splitPreviewLines(content: string) {
+  if (!content) return ['']
+  const lines = content.split('\n')
+  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
+  return lines
+}
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -78,12 +81,14 @@ function formatBytes(bytes: number) {
             class="chat-file-preview-markdown *:first:mt-0 *:last:mb-0"
           />
 
-          <Comark
+          <pre
             v-else-if="preview"
-            :markdown="fencedCode"
-            :plugins="[highlight()]"
-            class="chat-file-preview-code *:first:mt-0 *:last:mb-0"
-          />
+            class="chat-file-preview-code overflow-x-auto rounded-md bg-muted/40 py-3 text-xs leading-5"
+          ><code><span
+            v-for="(line, index) in codeLines"
+            :key="index"
+            class="chat-file-preview-line"
+          ><span class="chat-file-preview-line-number">{{ index + 1 }}</span><span class="chat-file-preview-line-content">{{ line || ' ' }}</span></span></code></pre>
         </div>
       </div>
     </template>
