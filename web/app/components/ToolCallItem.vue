@@ -81,7 +81,7 @@ const actionLabel = computed(() => toolCallTitle(props.part))
   >
     <button
       type="button"
-      class="group flex max-w-full items-center gap-1.5 overflow-hidden text-left text-sm text-muted transition-colors hover:text-default"
+      class="group flex w-full max-w-full items-center gap-1.5 overflow-hidden text-left text-sm text-muted transition-colors hover:text-default"
     >
       <UIcon
         :name="isRunning ? 'i-lucide-loader-circle' : 'i-lucide-chevron-down'"
