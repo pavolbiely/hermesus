@@ -15,6 +15,7 @@ const meta = computed(() => {
   if (!props.preview) return null
   return `${props.preview.mediaType} · ${formatBytes(props.preview.size)}${props.preview.truncated ? ' · truncated' : ''}`
 })
+const markdownPlugins = [highlight()]
 const codeLines = computed(() => splitPreviewLines(props.preview?.content || ''))
 
 function splitPreviewLines(content: string) {
@@ -77,7 +78,7 @@ function formatBytes(bytes: number) {
           <Comark
             v-else-if="preview && isMarkdown"
             :markdown="preview.content || ''"
-            :plugins="[highlight()]"
+            :plugins="markdownPlugins"
             class="chat-file-preview-markdown *:first:mt-0 *:last:mb-0"
           />
 

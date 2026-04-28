@@ -39,6 +39,7 @@ const tooltipContent = { side: 'top' as const, sideOffset: 8 }
 const richTooltipUi = {
   content: 'h-auto max-w-none items-stretch rounded-md bg-elevated px-3 py-2 text-default shadow-lg ring ring-default'
 }
+const markdownPlugins = [highlight()]
 
 const props = defineProps<{
   message: WebChatMessage
@@ -50,6 +51,14 @@ const props = defineProps<{
   setEditingMessageContainer: (el: unknown) => void
   latestChangePartKey: string | null
 }>()
+
+const shouldPausePreviewEnhancement = computed(() => props.isRunning && props.message.role === 'assistant')
+const previewEnhancementSource = computed(() => [
+  props.message.id,
+  props.workspace,
+  shouldPausePreviewEnhancement.value,
+  shouldPausePreviewEnhancement.value ? '' : props.message.parts.map(part => partText(part)).join('\n')
+] as const)
 
 function isLatestChangePart(message: WebChatMessage, part: WebChatPart) {
   return messagePartKey(message, part) === props.latestChangePartKey
@@ -238,9 +247,19 @@ async function openFilePreview(path: string) {
   }
 }
 
+function cancelEnhancePreviewPathNodes() {
+  if (enhancePreviewFrame === null || typeof window === 'undefined') return
+  window.cancelAnimationFrame(enhancePreviewFrame)
+  enhancePreviewFrame = null
+}
+
 function scheduleEnhancePreviewPathNodes() {
   if (typeof window === 'undefined') return
-  if (enhancePreviewFrame !== null) window.cancelAnimationFrame(enhancePreviewFrame)
+  if (shouldPausePreviewEnhancement.value) {
+    cancelEnhancePreviewPathNodes()
+    return
+  }
+  cancelEnhancePreviewPathNodes()
   enhancePreviewFrame = window.requestAnimationFrame(() => {
     enhancePreviewFrame = null
     void enhancePreviewPathNodes()
@@ -269,8 +288,13 @@ function resetPreviewPathResolution() {
 }
 
 watch(
-  () => [props.message.id, props.workspace, props.message.parts.map(part => partText(part)).join('\n')],
+  previewEnhancementSource,
   async () => {
+    if (shouldPausePreviewEnhancement.value) {
+      cancelEnhancePreviewPathNodes()
+      return
+    }
+
     resetPreviewPathResolution()
     await nextTick()
     scheduleEnhancePreviewPathNodes()
@@ -294,10 +318,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   previewPathObserver?.disconnect()
   previewPathObserver = null
-  if (enhancePreviewFrame !== null && typeof window !== 'undefined') {
-    window.cancelAnimationFrame(enhancePreviewFrame)
-    enhancePreviewFrame = null
-  }
+  cancelEnhancePreviewPathNodes()
 })
 </script>
 
@@ -347,7 +368,7 @@ onBeforeUnmount(() => {
         <Comark
           v-if="message.role === 'assistant'"
           :markdown="partText(group.part)"
-          :plugins="[highlight()]"
+          :plugins="markdownPlugins"
           class="chat-message-markdown *:first:mt-0 *:last:mb-0"
         />
         <div v-else-if="editingMessageId === message.id" :ref="setEditingMessageContainer" class="w-full">

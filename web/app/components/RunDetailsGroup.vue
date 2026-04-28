@@ -9,6 +9,7 @@ const props = defineProps<{
 }>()
 
 const expanded = ref(props.expandedDefault === true)
+const markdownPlugins = [highlight()]
 
 watch(() => props.expandedDefault, value => {
   expanded.value = value === true
@@ -60,7 +61,7 @@ function reasoningDurationSeconds(part: WebChatPart) {
           :streaming="isStreamingReasoning(part)"
           :duration="reasoningDurationSeconds(part)"
         >
-          <Comark :markdown="partText(part)" :plugins="[highlight()]" class="*:first:mt-0 *:last:mb-0" />
+          <Comark :markdown="partText(part)" :plugins="markdownPlugins" class="*:first:mt-0 *:last:mb-0" />
         </UChatReasoning>
 
         <ToolCallItem v-else-if="part.type === 'tool'" :part="part" />
