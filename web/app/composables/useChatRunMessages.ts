@@ -4,6 +4,15 @@ import { toolDisplayName } from '~/utils/toolCalls'
 import { createLocalMessage } from './useHermesRunStream'
 
 type SubmitStatus = 'ready' | 'submitted' | 'streaming' | 'error'
+type RunActivityKind = 'starting' | 'thinking' | 'tool' | 'composing' | 'working'
+
+type RunActivity = {
+  label: string
+  kind: RunActivityKind
+  updatedAt: number
+}
+
+const STILL_WORKING_DELAY_MS = 8000
 
 type UseChatRunMessagesOptions = {
   sessionId: ComputedRef<string>
@@ -55,15 +64,42 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   const submitStatus: Ref<SubmitStatus> = ref('ready')
   const streamError = ref<Error | undefined>()
   const hasAssistantResponseStarted = ref(false)
+  const currentActivity = ref<RunActivity | null>(null)
+  const now = ref(Date.now())
   const connectedRunIds = new Set<string>()
   let unsubscribeRun: (() => void) | undefined
+  let activityTimer: ReturnType<typeof setInterval> | undefined
 
   const isRunning = computed(() => options.activeChatRuns.isRunning(options.sessionId.value))
+  const currentActivityLabel = computed(() => {
+    if (!isRunning.value && submitStatus.value !== 'submitted') return null
+
+    const activity = currentActivity.value
+    if (!activity) return submitStatus.value === 'submitted' ? 'Starting…' : 'Working…'
+    if (activity.kind !== 'tool' && now.value - activity.updatedAt > STILL_WORKING_DELAY_MS) return 'Still working…'
+    return activity.label
+  })
   const chatStatus = computed(() => {
     if (submitStatus.value === 'error') return 'error'
     if (submitStatus.value === 'submitted' || (isRunning.value && !hasAssistantResponseStarted.value)) return 'submitted'
     return isRunning.value ? 'streaming' : 'ready'
   })
+
+  function setActivity(label: string, kind: RunActivityKind) {
+    currentActivity.value = { label, kind, updatedAt: Date.now() }
+    now.value = Date.now()
+  }
+
+  function clearActivity() {
+    currentActivity.value = null
+  }
+
+  function ensureActivityTimer() {
+    if (activityTimer || typeof setInterval !== 'function') return
+    activityTimer = setInterval(() => {
+      now.value = Date.now()
+    }, 1000)
+  }
 
   function assistantMessage() {
     let assistant = messages.value[messages.value.length - 1]
@@ -82,6 +118,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   function appendAssistantDelta(content: string) {
     if (!content) return
 
+    setActivity('Composing response…', 'composing')
     hasAssistantResponseStarted.value = true
     const assistant = assistantMessage()
     removeThinkingPart(assistant)
@@ -122,6 +159,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   function replaceAssistantMessage(payload: { content?: string, changes?: WebChatWorkspaceChanges | null } & RunMetrics) {
     if (!payload.content && !payload.changes?.files?.length) return
 
+    setActivity('Finalizing…', 'working')
     hasAssistantResponseStarted.value = true
     applyRunMetricsToLatestUser(payload)
     const assistant = assistantMessage()
@@ -170,6 +208,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   function appendReasoningDelta(content: string) {
     if (!content) return
 
+    setActivity('Thinking…', 'thinking')
     hasAssistantResponseStarted.value = true
     const assistant = assistantMessage()
     removeThinkingPart(assistant)
@@ -183,6 +222,15 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   }
 
   function appendToolStarted(payload: { name?: string, preview?: string, input?: unknown, occurredAt?: string }) {
+    const toolPart: WebChatPart = {
+      type: 'tool',
+      name: payload.name,
+      status: 'running',
+      startedAt: payload.occurredAt || new Date().toISOString(),
+      input: payload.input ?? payload.preview ?? null
+    }
+    toolPart.name = toolDisplayName(toolPart)
+    setActivity(`Running ${toolPart.name || 'tool'}…`, 'tool')
     hasAssistantResponseStarted.value = true
     let assistant = messages.value[messages.value.length - 1]
     if (!assistant || assistant.role !== 'assistant') {
@@ -194,18 +242,11 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     if (thinkingIndex >= 0) assistant.parts.splice(thinkingIndex, 1)
     completeOpenReasoning(assistant)
 
-    const toolPart: WebChatPart = {
-      type: 'tool',
-      name: payload.name,
-      status: 'running',
-      startedAt: payload.occurredAt || new Date().toISOString(),
-      input: payload.input ?? payload.preview ?? null
-    }
-    toolPart.name = toolDisplayName(toolPart)
     assistant.parts.push(toolPart)
   }
 
   function appendStatus(payload: AgentStatusEvent) {
+    setActivity(payload.kind === 'warn' ? 'Checking results…' : 'Working…', 'working')
     hasAssistantResponseStarted.value = true
     const assistant = assistantMessage()
     removeThinkingPart(assistant)
@@ -214,6 +255,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   }
 
   function markToolCompleted(payload: { name?: string, occurredAt?: string }) {
+    setActivity('Thinking…', 'thinking')
     const assistant = [...messages.value].reverse().find(message => message.role === 'assistant')
     const displayName = payload.name ? toolDisplayName({ name: payload.name }) : null
     const toolPart = assistant?.parts.findLast(part => part.type === 'tool' && part.status === 'running' && (!payload.name || part.name === payload.name || part.name === displayName))
@@ -259,6 +301,8 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
 
     if (targetSessionId === options.sessionId.value) {
       submitStatus.value = 'streaming'
+      setActivity('Starting…', 'starting')
+      ensureActivityTimer()
     }
 
     unsubscribeRun?.()
@@ -298,6 +342,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       async onFinished() {
         if (targetSessionId === options.sessionId.value) {
           submitStatus.value = 'ready'
+          clearActivity()
           if (options.refreshSessionOnFinish !== false) {
             await options.refresh()
           }
@@ -313,6 +358,8 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
 
   function cleanupRunMessages() {
     unsubscribeRun?.()
+    if (activityTimer) clearInterval(activityTimer)
+    activityTimer = undefined
   }
 
   return {
@@ -320,6 +367,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     submitStatus,
     streamError,
     chatStatus,
+    currentActivityLabel,
     isRunning,
     connectRun,
     hasConnectedRun,

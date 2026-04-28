@@ -67,6 +67,7 @@ const {
   submitStatus,
   streamError,
   chatStatus,
+  currentActivityLabel,
   isRunning,
   connectRun,
   hasConnectedRun,
@@ -87,7 +88,7 @@ const {
 const error = computed(() => streamError.value)
 const latestGitChangePartKey = computed(() => latestChangePartKey(messages.value))
 const chatMessagesStatus = computed(() => chatStatus.value === 'submitted' ? 'streaming' : chatStatus.value)
-const showSubmittedIndicator = computed(() => chatStatus.value === 'submitted')
+const showRunActivityIndicator = computed(() => Boolean(currentActivityLabel.value) && !shouldHideChatContent.value)
 const promptContextUsage = computed(() => {
   const model = composer.models.value.find(model => model.id === composer.selectedModel.value)
   if (!model?.contextWindowTokens || !model.autoCompressTokens) return null
@@ -775,10 +776,7 @@ onBeforeUnmount(() => {
             :aria-hidden="shouldHideChatContent"
           >
             <template #indicator>
-              <div class="flex items-center gap-2 overflow-hidden text-muted">
-                <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin" />
-                <UChatShimmer text="Thinking…" class="rainbow-chat-shimmer text-sm" />
-              </div>
+              <ChatRunActivityIndicator :label="currentActivityLabel || 'Working…'" />
             </template>
 
             <template #content="{ message }: { message: WebChatMessage }">
@@ -802,17 +800,14 @@ onBeforeUnmount(() => {
             </template>
           </UChatMessages>
           <UChatMessage
-            v-if="showSubmittedIndicator"
-            id="submitted-indicator"
+            v-if="showRunActivityIndicator"
+            id="run-activity-indicator"
             role="assistant"
             variant="naked"
             class="px-2.5"
           >
             <template #content>
-              <div class="flex items-center gap-2 overflow-hidden text-muted">
-                <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin" />
-                <UChatShimmer text="Thinking…" class="rainbow-chat-shimmer text-sm" />
-              </div>
+              <ChatRunActivityIndicator :label="currentActivityLabel || 'Working…'" />
             </template>
           </UChatMessage>
           <div ref="bottomReadSentinel" class="h-px w-full" aria-hidden="true" />
