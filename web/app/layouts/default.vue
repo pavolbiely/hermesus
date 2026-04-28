@@ -2,7 +2,7 @@
 import { installNotificationSoundUnlock } from '~/utils/notificationSound'
 import { readMessageCountForVisibleSession, syncInitialReadMessageCounts } from '~/utils/chatReadReceipts'
 import type { SessionGroup } from '~/utils/sessionGroups'
-import type { WebChatProfile, WebChatSession, WebChatWorkspace } from '~/types/web-chat'
+import type { WebChatProfile, WebChatSession, WebChatUpdateStatusResponse, WebChatWorkspace } from '~/types/web-chat'
 import { buildSessionGroups } from '~/utils/sessionGroups'
 
 const api = useHermesApi()
@@ -43,8 +43,16 @@ const workspaceLabel = ref('')
 const workspacePath = ref('')
 const workspacePending = ref(false)
 const workspaceDirectorySuggestions = ref<string[]>([])
+const updateStatus = ref<WebChatUpdateStatusResponse | null>(null)
+const updatePending = ref(false)
+const updateCompleted = ref(false)
 let workspaceDirectorySuggestionTimer: ReturnType<typeof setTimeout> | undefined
+let hideUpdateTimer: ReturnType<typeof setTimeout> | undefined
+let updateStatusTimer: ReturnType<typeof setInterval> | undefined
+let updateStatusCheckPending = false
+let lastUpdateStatusCheckAt = 0
 const READ_MESSAGE_COUNTS_KEY = 'hermes-chat-read-message-counts'
+const UPDATE_STATUS_CHECK_INTERVAL_MS = 20 * 60 * 1000
 let timer: ReturnType<typeof setInterval> | undefined
 let unsubscribeRunFinished: (() => void) | undefined
 
@@ -71,6 +79,15 @@ const canRename = computed(() => {
 })
 
 const canSaveWorkspace = computed(() => Boolean(workspaceLabel.value.trim() && workspacePath.value.trim()))
+const updateNeeded = computed(() => Boolean(updateStatus.value?.updateAvailable || updateStatus.value?.runtimeOutOfSync))
+const showUpdateButton = computed(() => updatePending.value || updateCompleted.value || updateNeeded.value)
+const updateButtonLabel = computed(() => updateCompleted.value ? 'Updated' : 'Update')
+const updateButtonColor = computed(() => updateCompleted.value ? 'success' : 'primary')
+const updateButtonTitle = computed(() => {
+  if (updateStatus.value?.updateAvailable && updateStatus.value?.runtimeOutOfSync) return 'Update Hermes and sync runtime'
+  if (updateStatus.value?.runtimeOutOfSync) return 'Sync runtime'
+  return 'Update Hermes'
+})
 
 const confirmTitle = computed(() => {
   if (!confirmAction.value || !confirmSession.value) return ''
@@ -155,6 +172,54 @@ watch(workspacePath, (path) => {
 async function refreshWorkspacesAndSessions() {
   await context.loadWorkspaces(context.selectedWorkspace.value)
   await refresh()
+}
+
+async function loadUpdateStatus() {
+  if (updateStatusCheckPending || updatePending.value) return
+
+  updateStatusCheckPending = true
+  lastUpdateStatusCheckAt = Date.now()
+  try {
+    updateStatus.value = await api.getUpdateStatus()
+  } catch {
+    updateStatus.value = null
+  } finally {
+    updateStatusCheckPending = false
+  }
+}
+
+function checkUpdateStatusIfDue() {
+  if (document.visibilityState !== 'visible') return
+  if (Date.now() - lastUpdateStatusCheckAt < UPDATE_STATUS_CHECK_INTERVAL_MS) return
+
+  void loadUpdateStatus()
+}
+
+function handleVisibilityChange() {
+  checkUpdateStatusIfDue()
+}
+
+async function updateHermes() {
+  if (updatePending.value) return
+  if (hideUpdateTimer) clearTimeout(hideUpdateTimer)
+
+  updatePending.value = true
+  updateCompleted.value = false
+  try {
+    updateStatus.value = await api.updateHermes()
+    updateCompleted.value = true
+    hideUpdateTimer = setTimeout(() => {
+      updateCompleted.value = false
+    }, 3000)
+  } catch (err) {
+    toast.add({
+      title: 'Update failed',
+      description: getHermesErrorMessage(err, 'Could not update Hermes.'),
+      color: 'error'
+    })
+  } finally {
+    updatePending.value = false
+  }
 }
 
 async function saveWorkspace() {
@@ -436,6 +501,9 @@ onMounted(() => {
   installNotificationSoundUnlock()
   loadReadMessageCounts()
   syncReadMessageCounts()
+  void loadUpdateStatus()
+  updateStatusTimer = setInterval(checkUpdateStatusIfDue, UPDATE_STATUS_CHECK_INTERVAL_MS)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   timer = setInterval(() => {
     now.value = new Date()
   }, 15_000)
@@ -444,12 +512,24 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
+  if (updateStatusTimer) clearInterval(updateStatusTimer)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   if (workspaceDirectorySuggestionTimer) clearTimeout(workspaceDirectorySuggestionTimer)
+  if (hideUpdateTimer) clearTimeout(hideUpdateTimer)
   unsubscribeRunFinished?.()
 })
 
 provide('refreshSessions', refresh)
 provide('markSessionRead', markSessionRead)
+provide('hermesUpdateControl', {
+  visible: showUpdateButton,
+  pending: updatePending,
+  completed: updateCompleted,
+  label: updateButtonLabel,
+  color: updateButtonColor,
+  title: updateButtonTitle,
+  update: updateHermes
+})
 </script>
 
 <template>

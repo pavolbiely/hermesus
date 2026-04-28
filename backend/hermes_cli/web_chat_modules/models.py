@@ -120,6 +120,17 @@ class WebChatCapabilitiesResponse(BaseModel):
     models: list[WebChatModelCapability]
 
 
+class WebChatUpdateStatusResponse(BaseModel):
+    updateAvailable: bool
+    runtimeOutOfSync: bool
+    upstreamPath: str
+    runtimePath: str
+    branch: str
+    currentRevision: str | None = None
+    remoteRevision: str | None = None
+    runtimeRevision: str | None = None
+
+
 class WebChatCommand(BaseModel):
     id: str
     name: str

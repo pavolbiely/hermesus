@@ -40,6 +40,7 @@ from .models import (
     WebChatModelCapability,
     WebChatProfilesResponse,
     WebChatSession,
+    WebChatUpdateStatusResponse,
     WebChatWorkspace,
     WebChatWorkspaceChanges,
     WebChatWorkspaceResponse,
@@ -82,6 +83,8 @@ class WebChatRouteServices:
     duplicate_session: Callable[[SessionDB, str], SessionDetailResponse]
     session_git_changes_by_message: Callable[[SessionDB, str], dict[str, WebChatWorkspaceChanges]]
     isolated_worktree_for_session: Callable[[SessionDB, str], Any | None]
+    update_status: Callable[[], WebChatUpdateStatusResponse]
+    perform_update: Callable[[], WebChatUpdateStatusResponse]
 
 
 def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) -> None:
@@ -113,6 +116,14 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
             defaultModel=services.default_model_id(),
             models=services.model_capabilities(),
         )
+
+    @router.get("/update", response_model=WebChatUpdateStatusResponse)
+    def get_update_status() -> WebChatUpdateStatusResponse:
+        return services.update_status()
+
+    @router.post("/update", response_model=WebChatUpdateStatusResponse)
+    def update_hermes() -> WebChatUpdateStatusResponse:
+        return services.perform_update()
 
     @router.get("/profiles", response_model=WebChatProfilesResponse)
     def get_profiles() -> WebChatProfilesResponse:

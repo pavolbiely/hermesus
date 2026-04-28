@@ -116,6 +116,7 @@ from .web_chat_modules.models import (
     WebChatProfile,
     WebChatProfilesResponse,
     WebChatSession,
+    WebChatUpdateStatusResponse,
     WebChatWorkspace,
     WebChatWorkspaceChanges,
     WebChatWorkspacesResponse,
@@ -130,6 +131,10 @@ from .web_chat_modules.profiles import (
 )
 from .web_chat_modules.run_manager import RunContext, RunManager as _RunManager, RunManagerServices
 from .web_chat_modules.routes import WebChatRouteServices, register_web_chat_routes
+from .web_chat_modules.updates import (
+    perform_update as _perform_update_impl,
+    update_status as _update_status_impl,
+)
 from .web_chat_modules.session_mutations import (
     duplicate_session as _duplicate_session_impl,
     list_non_empty_sessions as _list_non_empty_sessions_impl,
@@ -781,6 +786,14 @@ def _default_model_id() -> str | None:
     return _default_model_id_impl(available_ids=_available_model_ids)
 
 
+def _update_status() -> WebChatUpdateStatusResponse:
+    return _update_status_impl()
+
+
+def _perform_update() -> WebChatUpdateStatusResponse:
+    return _perform_update_impl()
+
+
 def _resolve_requested_model(model_id: str | None, *, session: dict[str, Any] | None = None) -> str | None:
     return _resolve_requested_model_impl(model_id, session=session, default_model=_default_model_id)
 
@@ -868,5 +881,7 @@ register_web_chat_routes(
         duplicate_session=_duplicate_session,
         session_git_changes_by_message=_session_git_changes_by_message,
         isolated_worktree_for_session=_isolated_worktree_for_session,
+        update_status=_update_status,
+        perform_update=_perform_update,
     ),
 )

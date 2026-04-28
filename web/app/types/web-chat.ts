@@ -123,6 +123,17 @@ export type WebChatCapabilitiesResponse = {
   models: WebChatModelCapability[]
 }
 
+export type WebChatUpdateStatusResponse = {
+  updateAvailable: boolean
+  runtimeOutOfSync: boolean
+  upstreamPath: string
+  runtimePath: string
+  branch: string
+  currentRevision?: string | null
+  remoteRevision?: string | null
+  runtimeRevision?: string | null
+}
+
 export type WebChatCommand = {
   id: string
   name: string

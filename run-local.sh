@@ -10,6 +10,7 @@ WEB_DEV_PORT="${WEB_DEV_PORT:-3019}"
 PYTHON="$UPSTREAM/venv/bin/python"
 WATCH=0
 DEV=0
+SYNC_RUNTIME=0
 WATCH_INTERVAL="${WATCH_INTERVAL:-1}"
 HERMES_SESSION_TOKEN_OVERRIDE="${HERMES_DEV_SESSION_TOKEN:-}"
 WEB_DEV_PID=""
@@ -26,6 +27,8 @@ Usage: ./run-local.sh [--watch|--dev]
 Options:
   --watch    Restart the Hermes dashboard when watched Python files change.
   --dev      Run Hermes backend with Python autorestart and Nuxt dev server with HMR.
+  --sync-runtime
+             Refresh the disposable runtime copy and exit.
 
 Environment:
   HERMES_AGENT_SOURCE     Path to the upstream Hermes checkout.
@@ -47,6 +50,9 @@ for arg in "$@"; do
     --dev)
       DEV=1
       ;;
+    --sync-runtime)
+      SYNC_RUNTIME=1
+      ;;
     -h|--help)
       usage
       exit 0
@@ -58,6 +64,12 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [[ "$SYNC_RUNTIME" == "1" && ("$WATCH" == "1" || "$DEV" == "1") ]]; then
+  echo "Use --sync-runtime by itself." >&2
+  usage >&2
+  exit 1
+fi
 
 if [[ "$WATCH" == "1" && "$DEV" == "1" ]]; then
   echo "Use either --watch or --dev, not both." >&2
@@ -94,7 +106,9 @@ prepare_runtime() {
     --exclude '__pycache__' \
     "$ROOT/backend/hermes_cli/web_chat_modules/" "$RUNTIME/hermes_cli/web_chat_modules/"
   mkdir -p "$RUNTIME/tests/hermes_cli"
-  cp "$ROOT/backend/tests/hermes_cli/test_web_chat.py" "$RUNTIME/tests/hermes_cli/test_web_chat.py"
+  cp "$ROOT"/backend/tests/hermes_cli/conftest.py "$RUNTIME/tests/hermes_cli/"
+  cp "$ROOT"/backend/tests/hermes_cli/test_web_chat*.py "$RUNTIME/tests/hermes_cli/"
+  git -C "$UPSTREAM" rev-parse HEAD > "$RUNTIME/.hermesum-runtime-source"
 
   RUNTIME_WEB_SERVER="$RUNTIME/hermes_cli/web_server.py" RUNTIME_HERMES_STATE="$RUNTIME/hermes_state.py" "$PYTHON" - <<'PY'
 from pathlib import Path
@@ -567,7 +581,9 @@ run_dev() {
   done
 }
 
-if [[ "$DEV" == "1" ]]; then
+if [[ "$SYNC_RUNTIME" == "1" ]]; then
+  prepare_runtime
+elif [[ "$DEV" == "1" ]]; then
   run_dev
 elif [[ "$WATCH" == "1" ]]; then
   run_watch

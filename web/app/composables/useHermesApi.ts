@@ -15,6 +15,7 @@ import type {
   WebChatCapabilitiesResponse,
   WebChatCommandsResponse,
   WebChatProfilesResponse,
+  WebChatUpdateStatusResponse,
   SwitchProfileResponse,
   WebChatWorkspaceResponse,
   WebChatWorkspacesResponse,
@@ -53,6 +54,8 @@ export function useHermesApi() {
 
   return {
     getCapabilities: () => request<WebChatCapabilitiesResponse>('/api/web-chat/capabilities'),
+    getUpdateStatus: () => request<WebChatUpdateStatusResponse>('/api/web-chat/update'),
+    updateHermes: () => request<WebChatUpdateStatusResponse>('/api/web-chat/update', { method: 'POST' }),
     getCommands: () => request<WebChatCommandsResponse>('/api/web-chat/commands'),
     executeCommand: (payload: ExecuteCommandRequest) => request<ExecuteCommandResponse>('/api/web-chat/commands/execute', {
       method: 'POST',
