@@ -76,10 +76,28 @@ def _git_branch(root: Path) -> str:
 
 
 def _remote_head(root: Path, branch: str) -> str | None:
-    output = _run_git(root, ["ls-remote", "origin", f"refs/heads/{branch}"], timeout=60).stdout
-    if not output:
-        return None
-    return output.split()[0]
+    ref = f"refs/remotes/origin/{branch}"
+    _run_git(root, ["fetch", "--quiet", "origin", f"refs/heads/{branch}:{ref}"], timeout=60)
+    output = _run_git(root, ["rev-parse", ref]).stdout
+    return output or None
+
+
+def _has_remote_update(root: Path, current_head: str | None, remote_head: str | None) -> bool:
+    if not current_head or not remote_head or current_head == remote_head:
+        return False
+
+    result = subprocess.run(
+        ["git", "-C", str(root), "merge-base", "--is-ancestor", current_head, remote_head],
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise RuntimeError((result.stderr or result.stdout or "git merge-base failed").strip())
 
 
 def _runtime_source_head(runtime: Path) -> str | None:
@@ -114,7 +132,7 @@ def update_status() -> WebChatUpdateStatusResponse:
     runtime_source_head = _runtime_source_head(runtime)
     runtime_exists = (runtime / "hermes_cli" / "web_chat.py").is_file()
     runtime_out_of_sync = not runtime_exists or runtime_source_head != upstream_head
-    update_available = bool(remote_head and remote_head != upstream_head)
+    update_available = _has_remote_update(upstream, upstream_head, remote_head)
 
     return WebChatUpdateStatusResponse(
         updateAvailable=update_available,
@@ -172,7 +190,7 @@ def app_update_status() -> WebChatAppUpdateStatusResponse:
         )
 
     return WebChatAppUpdateStatusResponse(
-        updateAvailable=bool(remote_head and remote_head != current_head),
+        updateAvailable=_has_remote_update(root, current_head, remote_head),
         appPath=str(root),
         branch=branch,
         currentRevision=_short(current_head),

@@ -15,13 +15,14 @@ const INITIAL_SESSION_MESSAGE_LIMIT = 60
 const OLDER_SESSION_MESSAGE_LIMIT = 80
 
 const route = useRoute()
+const sessionId = computed(() => String(route.params.id))
 const api = useHermesApi()
 const sessionCache = useWebChatSessionCache(api)
 const composer = useChatComposerCapabilities()
 const activeChatRuns = useActiveChatRuns()
 const context = useChatComposerContext()
 const toast = useToast()
-const input = ref('')
+const { input } = useChatDraft(sessionId)
 const chatContainer = ref<HTMLElement | null>(null)
 const bottomReadSentinel = ref<HTMLElement | null>(null)
 const olderMessagesSentinel = ref<HTMLElement | null>(null)
@@ -46,7 +47,6 @@ let readScrollRoot: Element | null = null
 let readScrollAnimationFrame: number | undefined
 let previousScrollRestoration: ScrollRestoration | undefined
 
-const sessionId = computed(() => String(route.params.id))
 const queuedMessages = useQueuedMessages()
 const queuedForSession = computed(() => queuedMessages.forSession(sessionId.value))
 const steeringQueuedMessageId = ref<string | null>(null)

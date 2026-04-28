@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { playNotificationSound, prepareNotificationSound } from '../utils/notificationSound'
 import { filesFromClipboard } from '~/utils/clipboard'
+import { NEW_CHAT_DRAFT_ID } from '~/utils/chatDrafts'
 
-const input = ref('')
+const { input, clearDraft } = useChatDraft(NEW_CHAT_DRAFT_ID)
 const loading = ref(false)
 const error = ref<Error | undefined>()
 const workspaceInvalidSignal = ref(0)
@@ -83,6 +84,7 @@ async function onSubmit() {
     })
     composer.rememberLastUsedSelection()
     context.clearAttachments()
+    clearDraft()
     playNotificationSound('sent')
     activeChatRuns.trackRun(result.sessionId, result.runId)
     await router.push({ path: `/chat/${result.sessionId}`, query: { run: result.runId } })
