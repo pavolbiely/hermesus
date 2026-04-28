@@ -21,6 +21,7 @@ function isLatestChangePart(message: WebChatMessage, part: WebChatPart) {
 
 const emit = defineEmits<{
   copy: [message: WebChatMessage]
+  regenerate: [message: WebChatMessage]
   edit: [message: WebChatMessage]
   cancelEdit: []
   saveEdit: [message: WebChatMessage]
@@ -146,6 +147,17 @@ const emit = defineEmits<{
         @click="emit('edit', message)"
       >
         <UIcon name="i-lucide-pencil" class="size-3" />
+      </button>
+    </UTooltip>
+    <UTooltip v-else text="Regenerate response">
+      <button
+        type="button"
+        class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50 disabled:pointer-events-none disabled:opacity-50"
+        aria-label="Regenerate response"
+        :disabled="isRunning"
+        @click="emit('regenerate', message)"
+      >
+        <UIcon name="i-lucide-rotate-ccw" class="size-3" />
       </button>
     </UTooltip>
     <UTooltip text="Copy">

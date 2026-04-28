@@ -418,6 +418,61 @@ function attachmentIdsForMessage(message: WebChatMessage) {
   return attachmentsForMessage(message).map(attachment => attachment.id)
 }
 
+function previousUserMessage(message: WebChatMessage) {
+  const messageIndex = messages.value.findIndex(item => item.id === message.id)
+  if (messageIndex <= 0) return null
+
+  for (let index = messageIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages.value[index]
+    if (candidate?.role === 'user') return candidate
+  }
+
+  return null
+}
+
+async function regenerateResponse(message: WebChatMessage) {
+  if (message.role !== 'assistant') return
+  if (activeChatRuns.isRunning(sessionId.value) || submitStatus.value === 'submitted') return
+
+  const userMessage = previousUserMessage(message)
+  const content = userMessage ? messageText(userMessage).trim() : ''
+  if (!userMessage || !content) {
+    toast.add({ color: 'warning', title: 'Could not find the prompt to regenerate.' })
+    return
+  }
+
+  const previousData = data.value
+  const previousMessages = [...messages.value]
+  void prepareNotificationSound()
+  submitStatus.value = 'submitted'
+
+  try {
+    const updated = await api.editMessage(sessionId.value, userMessage.id, content)
+    data.value = updated
+    messages.value = [...updated.messages]
+
+    const run = await api.startRun(content, {
+      sessionId: sessionId.value,
+      model: composer.selectedModel.value,
+      reasoningEffort: composer.selectedReasoningEffort.value,
+      workspace: context.selectedWorkspace.value,
+      attachments: attachmentIdsForMessage(userMessage),
+      editedMessageId: userMessage.id
+    })
+    composer.rememberLastUsedSelection()
+    playNotificationSound('sent')
+    void refreshSessions?.()
+    connectRun(run.runId, sessionId.value)
+    void scrollChatToBottomAfterRender()
+  } catch (err) {
+    data.value = previousData
+    messages.value = previousMessages
+    submitStatus.value = 'error'
+    activeChatRuns.markFinished(sessionId.value)
+    showError(err, 'Failed to regenerate response')
+  }
+}
+
 async function retryFailedMessage(message: WebChatMessage) {
   if (message.localStatus !== 'failed') return
   const text = messageText(message).trim()
@@ -712,6 +767,7 @@ onBeforeUnmount(() => {
                 :latest-change-part-key="latestGitChangePartKey"
                 :set-editing-message-container="setEditingMessageContainer"
                 @copy="copyMessage"
+                @regenerate="regenerateResponse"
                 @edit="startEditingMessage"
                 @cancel-edit="cancelEditingMessage"
                 @save-edit="saveEditedMessage"
