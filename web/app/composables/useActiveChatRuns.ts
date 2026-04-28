@@ -131,7 +131,7 @@ function eventTimestamp() {
 
 export function useActiveChatRuns() {
   const runningSessionIds = useState<string[]>('active-chat-run-session-ids', () => [])
-  const promptUnreadSessionIds = useState<string[]>('active-chat-prompt-unread-session-ids', () => [])
+  const localUnreadSessionIds = useState<string[]>('active-chat-local-unread-session-ids', () => [])
 
   function markRunning(sessionId: string) {
     if (!runningSessionIds.value.includes(sessionId)) {
@@ -167,18 +167,18 @@ export function useActiveChatRuns() {
     return [...trackedRuns.values()].find(run => run.sessionId === sessionId)?.runId || null
   }
 
-  function markPromptUnread(sessionId: string) {
-    if (!promptUnreadSessionIds.value.includes(sessionId)) {
-      promptUnreadSessionIds.value = [...promptUnreadSessionIds.value, sessionId]
+  function markLocalUnread(sessionId: string) {
+    if (!localUnreadSessionIds.value.includes(sessionId)) {
+      localUnreadSessionIds.value = [...localUnreadSessionIds.value, sessionId]
     }
   }
 
-  function clearPromptUnread(sessionId: string) {
-    promptUnreadSessionIds.value = promptUnreadSessionIds.value.filter(id => id !== sessionId)
+  function clearLocalUnread(sessionId: string) {
+    localUnreadSessionIds.value = localUnreadSessionIds.value.filter(id => id !== sessionId)
   }
 
-  function hasPromptUnread(sessionId: string) {
-    return promptUnreadSessionIds.value.includes(sessionId)
+  function hasLocalUnread(sessionId: string) {
+    return localUnreadSessionIds.value.includes(sessionId)
   }
 
   function finishRun(run: TrackedRun) {
@@ -222,7 +222,9 @@ export function useActiveChatRuns() {
     source.addEventListener('message.completed', (event) => {
       const payload = parsePayload(event)
       retargetRunFromEvent(run, payload)
-      playNotificationSound(runNotificationVariant(run.sessionId))
+      const notificationVariant = runNotificationVariant(run.sessionId)
+      playNotificationSound(notificationVariant)
+      if (notificationVariant === 'attention') markLocalUnread(run.sessionId)
       const metrics = payload.metrics && typeof payload.metrics === 'object' ? payload.metrics as Record<string, unknown> : {}
       recordAndNotify(run, 'onCompleted', {
         content: typeof payload.content === 'string' ? payload.content : undefined,
@@ -276,7 +278,7 @@ export function useActiveChatRuns() {
       retargetRunFromEvent(run, payload)
       const prompt = promptFromPayload(payload)
       if (!prompt) return
-      if (!isActiveVisibleChat(run.sessionId)) markPromptUnread(run.sessionId)
+      if (!isActiveVisibleChat(run.sessionId)) markLocalUnread(run.sessionId)
       playNotificationSound(runNotificationVariant(run.sessionId))
       recordAndNotify(run, 'onPromptRequested', prompt)
     })
@@ -351,14 +353,14 @@ export function useActiveChatRuns() {
 
   return {
     runningSessionIds,
-    promptUnreadSessionIds,
+    localUnreadSessionIds,
     markRunning,
     markFinished,
     isRunning,
     runIdForSession,
-    markPromptUnread,
-    clearPromptUnread,
-    hasPromptUnread,
+    markLocalUnread,
+    clearLocalUnread,
+    hasLocalUnread,
     trackRun,
     subscribe,
     stop,

@@ -12,7 +12,7 @@ const props = defineProps<{
   readMessageCounts: Record<string, number>
   readMessageCountsLoaded: boolean
   isSessionRunning: (session: WebChatSession) => boolean
-  hasPromptUnread?: (session: WebChatSession) => boolean
+  hasLocalUnread?: (session: WebChatSession) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -51,7 +51,7 @@ function isUnreadSession(session: WebChatSession) {
     session,
     props.readMessageCounts,
     props.readMessageCountsLoaded,
-    props.hasPromptUnread?.(session) || false
+    props.hasLocalUnread?.(session) || false
   )
 }
 

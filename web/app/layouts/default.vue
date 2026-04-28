@@ -438,8 +438,8 @@ function isSessionRunning(session: WebChatSession) {
   return activeChatRuns.isRunning(session.id)
 }
 
-function hasPromptUnread(session: WebChatSession) {
-  return activeChatRuns.hasPromptUnread(session.id)
+function hasLocalUnread(session: WebChatSession) {
+  return activeChatRuns.hasLocalUnread(session.id)
 }
 
 function beginRename(session: WebChatSession) {
@@ -690,7 +690,7 @@ provide('appUpdateControl', {
           :read-message-counts="readMessageCounts"
           :read-message-counts-loaded="readMessageCountsLoaded"
           :is-session-running="isSessionRunning"
-          :has-prompt-unread="hasPromptUnread"
+          :has-local-unread="hasLocalUnread"
           @edit-workspace="beginEditWorkspace"
           @start-workspace-chat="startWorkspaceChat"
           @open-session="openSession"

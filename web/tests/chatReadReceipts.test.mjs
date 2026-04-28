@@ -24,7 +24,7 @@ test('initial read-count sync only initializes unknown sessions and prunes delet
   })
 })
 
-test('prompt unread keeps a session unread regardless of message count', () => {
+test('local unread keeps a session unread regardless of message count', () => {
   assert.equal(isSessionUnread(
     { id: 'chat-1', messageCount: 3 },
     { 'chat-1': 3 },

@@ -4,9 +4,9 @@ export function isSessionUnread(
   session: Pick<WebChatSession, 'id' | 'messageCount'>,
   readMessageCounts: Record<string, number>,
   readMessageCountsLoaded: boolean,
-  hasPromptUnread = false
+  hasLocalUnread = false
 ) {
-  if (hasPromptUnread) return true
+  if (hasLocalUnread) return true
   if (!readMessageCountsLoaded) return false
 
   return Math.max(0, session.messageCount || 0) > Math.max(0, readMessageCounts[session.id] || 0)

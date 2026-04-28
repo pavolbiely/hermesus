@@ -437,7 +437,7 @@ function markCurrentSessionReadIfVisible() {
   if (!isBottomReadSentinelVisible() && !isLatestMessageVisible()) return
 
   markSessionRead(sessionId.value, visibleMessageCount())
-  activeChatRuns.clearPromptUnread(sessionId.value)
+  activeChatRuns.clearLocalUnread(sessionId.value)
 }
 
 function scheduleReadVisibilityCheck() {
