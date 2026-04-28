@@ -27,6 +27,7 @@ from .models import (
 )
 
 RunExecutor = Callable[["RunContext", Callable[[dict[str, Any]], None]], str]
+MESSAGE_ITEMS_FIELD = "codex_message_items"
 
 
 @dataclass
@@ -186,11 +187,12 @@ class RunManager:
                 {"type": "web_chat_attachment", "attachment": attachment.model_dump()}
                 for attachment in attachments
             )
-            user_message_id = db.append_message(
+            user_message_id = self._append_message(
+                db,
                 session_id,
                 "user",
                 request.input,
-                codex_message_items=message_items or None,
+                message_items=message_items or None,
             )
 
         baseline_git_status = self._services.git_status_porcelain(execution_workspace_path) if execution_workspace_path else None
@@ -268,11 +270,12 @@ class RunManager:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run does not support live steering")
 
         steer_agent(request.text)
-        message_id = self._services.db().append_message(
+        message_id = self._append_message(
+            self._services.db(),
             active.context.session_id,
             "system",
             None,
-            codex_message_items=[{"type": "web_chat_steer", "text": request.text}],
+            message_items=[{"type": "web_chat_steer", "text": request.text}],
         )
         self._emit(active, {"type": "run.steered", "messageId": str(message_id), "text": request.text})
         return SteerRunResponse(
@@ -354,7 +357,7 @@ class RunManager:
         return None
 
     def _message_client_message_id(self, message: dict[str, Any]) -> str | None:
-        items = message.get("codex_message_items")
+        items = message.get(MESSAGE_ITEMS_FIELD)
         if isinstance(items, str):
             try:
                 items = json.loads(items)
@@ -402,6 +405,28 @@ class RunManager:
 
     def _iso_now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _append_message(
+        self,
+        db: Any,
+        session_id: str,
+        role: str,
+        content: str | None,
+        *,
+        message_items: list[dict[str, Any]] | None = None,
+    ) -> Any:
+        """Append a web-chat message using the Hermes storage field.
+
+        SessionDB still names this generic metadata column `codex_message_items`
+        for compatibility with existing Hermes history. Keep that storage detail
+        behind a provider-neutral web-chat API in this module.
+        """
+        return db.append_message(
+            session_id,
+            role,
+            content,
+            codex_message_items=message_items,
+        )
 
     def _request_prompt(self, active: ActiveRun, prompt: WebChatPrompt, timeout_seconds: float = 600) -> str | None:
         prompt.runId = active.context.run_id
@@ -476,11 +501,12 @@ class RunManager:
             metrics = self._message_metrics(active, generation_duration_ms=generation_duration_ms)
             if active.context.stop_requested.is_set():
                 interrupted_text = "Chat interrupted."
-                assistant_message_id = self._services.db().append_message(
+                assistant_message_id = self._append_message(
+                    self._services.db(),
                     active.context.session_id,
                     "assistant",
                     interrupted_text,
-                    codex_message_items=self._message_items(active, metrics),
+                    message_items=self._message_items(active, metrics),
                 )
                 changes = self._services.persist_run_workspace_changes(active.context, assistant_message_id)
                 self._emit(
@@ -496,11 +522,12 @@ class RunManager:
                 self._finish(active, "stopped")
                 return
             if final_text:
-                assistant_message_id = self._services.db().append_message(
+                assistant_message_id = self._append_message(
+                    self._services.db(),
                     active.context.session_id,
                     "assistant",
                     final_text,
-                    codex_message_items=self._message_items(active, metrics),
+                    message_items=self._message_items(active, metrics),
                 )
                 changes = self._services.persist_run_workspace_changes(active.context, assistant_message_id)
                 self._emit(

@@ -9,6 +9,7 @@ from uuid import uuid4
 from hermes_state import SessionDB
 
 from .models import SessionDetailResponse, WebChatSession, WebChatWorkspaceChanges, WebChatMessage
+from .sessions import MESSAGE_ITEMS_FIELD
 
 
 def title_from_message(message: str) -> str:
@@ -90,7 +91,7 @@ def duplicate_session(
             reasoning_content=message.get("reasoning_content"),
             reasoning_details=parse_jsonish(message.get("reasoning_details")),
             codex_reasoning_items=parse_jsonish(message.get("codex_reasoning_items")),
-            codex_message_items=parse_jsonish(message.get("codex_message_items")),
+            codex_message_items=parse_jsonish(message.get(MESSAGE_ITEMS_FIELD)),
         )
         if message.get("id") is not None:
             message_id_map[int(message["id"])] = int(new_message_id)

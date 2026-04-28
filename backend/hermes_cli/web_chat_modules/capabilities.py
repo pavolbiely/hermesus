@@ -104,7 +104,7 @@ def available_model_ids(resolve_access_token: Callable[[], str | None] = resolve
 
     if configured_model:
         return [configured_model]
-    return _dedupe_model_ids(list(FALLBACK_CODEX_MODELS))
+    return []
 
 
 def model_reasoning_efforts(model_id: str | None) -> list[str]:

@@ -8,6 +8,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
+def test_available_model_ids_does_not_use_codex_fallback_for_other_providers(monkeypatch):
+    from hermes_cli.web_chat_modules import capabilities
+
+    monkeypatch.setattr(capabilities, "_configured_model_id", lambda: None)
+    monkeypatch.setattr(capabilities, "runtime_provider", lambda target_model=None: {"provider": "anthropic"})
+
+    assert capabilities.available_model_ids(resolve_access_token=lambda: "codex-token") == []
+
+
 def test_returns_chat_capabilities(client, monkeypatch):
     import hermes_cli.web_chat as web_chat
     from hermes_cli.web_chat_modules import capabilities

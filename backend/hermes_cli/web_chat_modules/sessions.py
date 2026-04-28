@@ -12,6 +12,8 @@ from hermes_state import SessionDB
 from .attachments import attachment_with_runtime_state
 from .models import WebChatAttachment, WebChatMessage, WebChatPart, WebChatPrompt, WebChatSession, WebChatWorkspaceChanges
 
+MESSAGE_ITEMS_FIELD = "codex_message_items"
+
 
 def iso_from_epoch(value: Any) -> str:
     try:
@@ -92,8 +94,13 @@ def serialize_session(session: dict[str, Any]) -> WebChatSession:
     )
 
 
+def message_items(message: dict[str, Any]) -> Any:
+    """Return provider-neutral web-chat metadata from the Hermes storage field."""
+    return parse_jsonish(message.get(MESSAGE_ITEMS_FIELD))
+
+
 def message_client_id(message: dict[str, Any]) -> str | None:
-    items = parse_jsonish(message.get("codex_message_items"))
+    items = message_items(message)
     if not isinstance(items, list):
         return None
 
@@ -107,7 +114,7 @@ def message_client_id(message: dict[str, Any]) -> str | None:
 
 
 def message_attachments(message: dict[str, Any]) -> list[WebChatAttachment]:
-    items = parse_jsonish(message.get("codex_message_items"))
+    items = message_items(message)
     if not isinstance(items, list):
         return []
 
@@ -126,7 +133,7 @@ def message_attachments(message: dict[str, Any]) -> list[WebChatAttachment]:
 
 
 def message_prompts(message: dict[str, Any]) -> list[WebChatPrompt]:
-    items = parse_jsonish(message.get("codex_message_items"))
+    items = message_items(message)
     if not isinstance(items, list):
         return []
 
@@ -145,7 +152,7 @@ def message_prompts(message: dict[str, Any]) -> list[WebChatPrompt]:
 
 
 def message_steers(message: dict[str, Any]) -> list[str]:
-    items = parse_jsonish(message.get("codex_message_items"))
+    items = message_items(message)
     if not isinstance(items, list):
         return []
 
@@ -160,7 +167,7 @@ def message_steers(message: dict[str, Any]) -> list[str]:
 
 
 def message_metrics(message: dict[str, Any]) -> dict[str, Any]:
-    items = parse_jsonish(message.get("codex_message_items"))
+    items = message_items(message)
     if not isinstance(items, list):
         return {}
 
