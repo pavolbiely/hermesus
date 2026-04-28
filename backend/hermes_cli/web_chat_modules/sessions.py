@@ -154,6 +154,19 @@ def message_steers(message: dict[str, Any]) -> list[str]:
     return steers
 
 
+def message_metrics(message: dict[str, Any]) -> dict[str, Any]:
+    items = parse_jsonish(message.get("codex_message_items"))
+    if not isinstance(items, list):
+        return {}
+
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "web_chat_metrics":
+            continue
+        metrics = item.get("metrics")
+        return metrics if isinstance(metrics, dict) else {}
+    return {}
+
+
 def message_parts(message: dict[str, Any]) -> list[WebChatPart]:
     parts: list[WebChatPart] = []
     attachments = message_attachments(message)
@@ -180,12 +193,24 @@ def message_parts(message: dict[str, Any]) -> list[WebChatPart]:
 
 
 def serialize_message(message: dict[str, Any]) -> WebChatMessage:
+    metrics = message_metrics(message)
     return WebChatMessage(
         id=str(message["id"]),
         role=message.get("role"),
         parts=message_parts(message),
         createdAt=iso_from_epoch(message.get("timestamp")),
         clientMessageId=message_client_id(message),
+        tokenCount=message.get("token_count") or metrics.get("tokenCount"),
+        inputTokens=metrics.get("inputTokens"),
+        outputTokens=metrics.get("outputTokens"),
+        cacheReadTokens=metrics.get("cacheReadTokens"),
+        cacheWriteTokens=metrics.get("cacheWriteTokens"),
+        reasoningTokens=metrics.get("reasoningTokens"),
+        apiCalls=metrics.get("apiCalls"),
+        generationDurationMs=metrics.get("generationDurationMs"),
+        modelDurationMs=metrics.get("modelDurationMs"),
+        toolDurationMs=metrics.get("toolDurationMs"),
+        promptWaitDurationMs=metrics.get("promptWaitDurationMs"),
         reasoning=message.get("reasoning") or message.get("reasoning_content"),
         toolName=message.get("tool_name"),
         toolCalls=message.get("tool_calls"),
@@ -244,6 +269,32 @@ def attach_tool_output(messages: list[WebChatMessage], tool_message: dict[str, A
     return False
 
 
+def input_token_count(metrics: dict[str, Any]) -> int | None:
+    values = [
+        metrics.get("inputTokens"),
+        metrics.get("cacheReadTokens"),
+        metrics.get("cacheWriteTokens"),
+    ]
+    total = sum(value for value in values if isinstance(value, (int, float)))
+    return int(total) if total > 0 else None
+
+
+def apply_turn_metrics_to_user_message(message: WebChatMessage, metrics: dict[str, Any]) -> None:
+    input_count = input_token_count(metrics)
+    if input_count is not None:
+        message.tokenCount = input_count
+    message.inputTokens = metrics.get("inputTokens")
+    message.cacheReadTokens = metrics.get("cacheReadTokens")
+    message.cacheWriteTokens = metrics.get("cacheWriteTokens")
+    message.outputTokens = metrics.get("outputTokens")
+    message.reasoningTokens = metrics.get("reasoningTokens")
+    message.apiCalls = metrics.get("apiCalls")
+    message.generationDurationMs = metrics.get("generationDurationMs")
+    message.modelDurationMs = metrics.get("modelDurationMs")
+    message.toolDurationMs = metrics.get("toolDurationMs")
+    message.promptWaitDurationMs = metrics.get("promptWaitDurationMs")
+
+
 def serialize_messages(
     messages: list[dict[str, Any]],
     *,
@@ -254,6 +305,11 @@ def serialize_messages(
         if message.get("role") == "tool" and attach_tool_output(serialized, message):
             continue
         web_message = serialize_message(message)
+        metrics = message_metrics(message)
+        if message.get("role") == "assistant" and metrics:
+            previous_user = next((item for item in reversed(serialized) if item.role == "user"), None)
+            if previous_user:
+                apply_turn_metrics_to_user_message(previous_user, metrics)
         changes = (changes_by_message or {}).get(str(message.get("id")))
         if changes and changes.files:
             web_message.parts.append(WebChatPart(type="changes", changes=changes.model_dump()))

@@ -277,6 +277,17 @@ def agent_executor(
             conversation_history=conversation_history(context.session_id),
             task_id=context.run_id,
         )
+        context.usage_metrics = {
+            key: value for key, value in {
+                "tokenCount": result.get("total_tokens"),
+                "inputTokens": result.get("input_tokens"),
+                "outputTokens": result.get("output_tokens"),
+                "cacheReadTokens": result.get("cache_read_tokens"),
+                "cacheWriteTokens": result.get("cache_write_tokens"),
+                "reasoningTokens": result.get("reasoning_tokens"),
+                "apiCalls": result.get("api_calls"),
+            }.items() if value is not None
+        }
         return str(result.get("final_response") or "")
     finally:
         if set_approval_callback:

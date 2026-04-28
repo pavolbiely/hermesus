@@ -76,6 +76,17 @@ class WebChatMessage(BaseModel):
     parts: list[WebChatPart]
     createdAt: str
     clientMessageId: str | None = None
+    tokenCount: int | None = None
+    inputTokens: int | None = None
+    outputTokens: int | None = None
+    cacheReadTokens: int | None = None
+    cacheWriteTokens: int | None = None
+    reasoningTokens: int | None = None
+    apiCalls: int | None = None
+    generationDurationMs: int | None = None
+    modelDurationMs: int | None = None
+    toolDurationMs: int | None = None
+    promptWaitDurationMs: int | None = None
     reasoning: str | None = None
     toolName: str | None = None
     toolCalls: Any | None = None

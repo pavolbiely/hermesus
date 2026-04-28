@@ -15,6 +15,41 @@ type UseChatRunMessagesOptions = {
   activeChatRuns: ReturnType<typeof useActiveChatRuns>
 }
 
+type RunMetrics = Partial<Pick<WebChatMessage,
+  | 'tokenCount'
+  | 'inputTokens'
+  | 'outputTokens'
+  | 'cacheReadTokens'
+  | 'cacheWriteTokens'
+  | 'reasoningTokens'
+  | 'apiCalls'
+  | 'generationDurationMs'
+  | 'modelDurationMs'
+  | 'toolDurationMs'
+  | 'promptWaitDurationMs'
+>>
+
+function inputTokenCount(metrics: RunMetrics) {
+  const total = [metrics.inputTokens, metrics.cacheReadTokens, metrics.cacheWriteTokens]
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    .reduce((sum, value) => sum + value, 0)
+  return total > 0 ? total : null
+}
+
+function applyRunMetrics(message: WebChatMessage, metrics: RunMetrics) {
+  message.tokenCount = metrics.tokenCount ?? null
+  message.inputTokens = metrics.inputTokens ?? null
+  message.outputTokens = metrics.outputTokens ?? null
+  message.cacheReadTokens = metrics.cacheReadTokens ?? null
+  message.cacheWriteTokens = metrics.cacheWriteTokens ?? null
+  message.reasoningTokens = metrics.reasoningTokens ?? null
+  message.apiCalls = metrics.apiCalls ?? null
+  message.generationDurationMs = metrics.generationDurationMs ?? null
+  message.modelDurationMs = metrics.modelDurationMs ?? null
+  message.toolDurationMs = metrics.toolDurationMs ?? null
+  message.promptWaitDurationMs = metrics.promptWaitDurationMs ?? null
+}
+
 export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   const messages = ref<WebChatMessage[]>([])
   const submitStatus: Ref<SubmitStatus> = ref('ready')
@@ -73,26 +108,38 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     }
   }
 
-  function replaceAssistantMessage(content?: string, changes?: WebChatWorkspaceChanges | null) {
-    if (!content && !changes?.files?.length) return
+  function applyRunMetricsToLatestUser(payload: RunMetrics) {
+    const user = [...messages.value].reverse().find(message => message.role === 'user')
+    if (!user) return
+
+    applyRunMetrics(user, {
+      ...payload,
+      tokenCount: inputTokenCount(payload)
+    })
+  }
+
+  function replaceAssistantMessage(payload: { content?: string, changes?: WebChatWorkspaceChanges | null } & RunMetrics) {
+    if (!payload.content && !payload.changes?.files?.length) return
 
     hasAssistantResponseStarted.value = true
+    applyRunMetricsToLatestUser(payload)
     const assistant = assistantMessage()
     removeThinkingPart(assistant)
+    applyRunMetrics(assistant, payload)
     for (const part of assistant.parts) {
       if (part.type === 'reasoning' && part.status === 'streaming') part.status = null
       if (part.type === 'tool' && part.status === 'running') part.status = 'completed'
     }
-    if (content) {
+    if (payload.content) {
       const textPart = assistant.parts.find(part => part.type === 'text')
       if (textPart) {
-        textPart.text = content
+        textPart.text = payload.content
         textPart.status = null
       } else {
-        assistant.parts.push({ type: 'text', text: content, status: null })
+        assistant.parts.push({ type: 'text', text: payload.content, status: null })
       }
     }
-    appendCompletedChanges(changes)
+    appendCompletedChanges(payload.changes)
   }
 
   function appendReasoningDelta(content: string) {
@@ -193,7 +240,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       onCompleted: (payload) => {
         if (targetSessionId !== options.sessionId.value) return
         if (options.shouldSuppressCompleted?.(payload)) return
-        replaceAssistantMessage(payload.content, payload.changes)
+        replaceAssistantMessage(payload)
       },
       onToolStarted: (payload) => {
         if (targetSessionId === options.sessionId.value) appendToolStarted(payload)

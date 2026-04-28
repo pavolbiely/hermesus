@@ -118,8 +118,26 @@ def test_returns_session_with_messages(client):
 
     db = SessionDB()
     db.create_session("session-detail", source="web-chat", model="test-model")
-    db.append_message("session-detail", "user", "Can you help?")
-    db.append_message("session-detail", "assistant", "Yes.", reasoning="Short reasoning")
+    db.append_message("session-detail", "user", "Can you help?", token_count=4)
+    db.append_message(
+        "session-detail",
+        "assistant",
+        "Yes.",
+        reasoning="Short reasoning",
+        token_count=128,
+        codex_message_items=[{"type": "web_chat_metrics", "metrics": {
+            "tokenCount": 128,
+            "inputTokens": 50,
+            "outputTokens": 60,
+            "cacheReadTokens": 5,
+            "reasoningTokens": 13,
+            "apiCalls": 2,
+            "generationDurationMs": 2500,
+            "modelDurationMs": 2000,
+            "toolDurationMs": 400,
+            "promptWaitDurationMs": 100,
+        }}],
+    )
 
     response = client.get("/api/web-chat/sessions/session-detail")
 
@@ -129,6 +147,15 @@ def test_returns_session_with_messages(client):
     assert data["session"]["messageCount"] == 2
     assert data["session"]["reasoningEffort"] is None
     assert [message["role"] for message in data["messages"]] == ["user", "assistant"]
+    assert [message["tokenCount"] for message in data["messages"]] == [55, 128]
+    assert data["messages"][0]["inputTokens"] == 50
+    assert data["messages"][1]["outputTokens"] == 60
+    assert data["messages"][1]["reasoningTokens"] == 13
+    assert data["messages"][1]["apiCalls"] == 2
+    assert data["messages"][1]["generationDurationMs"] == 2500
+    assert data["messages"][1]["modelDurationMs"] == 2000
+    assert data["messages"][1]["toolDurationMs"] == 400
+    assert data["messages"][1]["promptWaitDurationMs"] == 100
     assert data["messages"][0]["parts"] == [{"type": "text", "text": "Can you help?", "name": None, "status": None, "input": None, "output": None, "url": None, "mediaType": None, "approvalId": None, "prompt": None, "changes": None, "attachments": None}]
     assert data["messages"][1]["parts"][0]["type"] == "reasoning"
     assert data["messages"][1]["parts"][0]["text"] == "Short reasoning"

@@ -79,6 +79,17 @@ export type WebChatMessage = {
   role: 'user' | 'assistant' | 'system' | 'tool'
   parts: WebChatPart[]
   createdAt: string
+  tokenCount?: number | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  cacheReadTokens?: number | null
+  cacheWriteTokens?: number | null
+  reasoningTokens?: number | null
+  apiCalls?: number | null
+  generationDurationMs?: number | null
+  modelDurationMs?: number | null
+  toolDurationMs?: number | null
+  promptWaitDurationMs?: number | null
   reasoning?: string | null
   toolName?: string | null
   toolCalls?: unknown

@@ -7,7 +7,21 @@ type RunEventPayload = Record<string, unknown>
 
 type ToolRunPayload = { name?: string, preview?: string, input?: unknown }
 
-type CompletedRunPayload = { content?: string, changes?: WebChatWorkspaceChanges | null }
+type CompletedRunPayload = {
+  content?: string
+  changes?: WebChatWorkspaceChanges | null
+  tokenCount?: number | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  cacheReadTokens?: number | null
+  cacheWriteTokens?: number | null
+  reasoningTokens?: number | null
+  apiCalls?: number | null
+  generationDurationMs?: number | null
+  modelDurationMs?: number | null
+  toolDurationMs?: number | null
+  promptWaitDurationMs?: number | null
+}
 
 type ActiveRunHandlers = {
   onDelta?: (content: string) => void
@@ -106,6 +120,11 @@ function statusFromPayload(payload: RunEventPayload): AgentStatusEvent | null {
   }
 }
 
+function numericMetric(metrics: Record<string, unknown>, key: string) {
+  const value = metrics[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
 export function useActiveChatRuns() {
   const runningSessionIds = useState<string[]>('active-chat-run-session-ids', () => [])
   const promptUnreadSessionIds = useState<string[]>('active-chat-prompt-unread-session-ids', () => [])
@@ -200,9 +219,21 @@ export function useActiveChatRuns() {
       const payload = parsePayload(event)
       retargetRunFromEvent(run, payload)
       playNotificationSound(runNotificationVariant(run.sessionId))
+      const metrics = payload.metrics && typeof payload.metrics === 'object' ? payload.metrics as Record<string, unknown> : {}
       recordAndNotify(run, 'onCompleted', {
         content: typeof payload.content === 'string' ? payload.content : undefined,
-        changes: payload.changes && typeof payload.changes === 'object' ? payload.changes as WebChatWorkspaceChanges : null
+        changes: payload.changes && typeof payload.changes === 'object' ? payload.changes as WebChatWorkspaceChanges : null,
+        tokenCount: numericMetric(metrics, 'tokenCount'),
+        inputTokens: numericMetric(metrics, 'inputTokens'),
+        outputTokens: numericMetric(metrics, 'outputTokens'),
+        cacheReadTokens: numericMetric(metrics, 'cacheReadTokens'),
+        cacheWriteTokens: numericMetric(metrics, 'cacheWriteTokens'),
+        reasoningTokens: numericMetric(metrics, 'reasoningTokens'),
+        apiCalls: numericMetric(metrics, 'apiCalls'),
+        generationDurationMs: numericMetric(metrics, 'generationDurationMs'),
+        modelDurationMs: numericMetric(metrics, 'modelDurationMs'),
+        toolDurationMs: numericMetric(metrics, 'toolDurationMs'),
+        promptWaitDurationMs: numericMetric(metrics, 'promptWaitDurationMs')
       })
     })
 

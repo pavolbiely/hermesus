@@ -51,6 +51,7 @@ class RunContext:
     interrupt_agent: Callable[[str | None], None] | None = None
     steer_agent: Callable[[str], None] | None = None
     request_prompt: Callable[[WebChatPrompt, float], str | None] | None = field(default=None, repr=False)
+    usage_metrics: dict[str, Any] | None = None
 
 
 @dataclass
@@ -67,6 +68,9 @@ class ActiveRun:
     status: str = "running"
     terminal: bool = False
     next_event_id: int = 1
+    tool_duration_ms: int = 0
+    prompt_wait_duration_ms: int = 0
+    tool_started_at: dict[str, list[float]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -368,11 +372,27 @@ class RunManager:
         return None
 
     def _emit(self, active: ActiveRun, event: dict[str, Any]) -> None:
+        self._track_event_duration(active, event)
         with active.event_condition:
             event_id = active.next_event_id
             active.next_event_id += 1
             active.events.append({"id": event_id, "runId": active.context.run_id, "sessionId": active.context.session_id, **event})
             active.event_condition.notify_all()
+
+    def _track_event_duration(self, active: ActiveRun, event: dict[str, Any]) -> None:
+        event_type = event.get("type")
+        if event_type not in {"tool.started", "tool.completed"}:
+            return
+
+        key = str(event.get("name") or "tool")
+        now = time.time()
+        if event_type == "tool.started":
+            active.tool_started_at.setdefault(key, []).append(now)
+            return
+
+        starts = active.tool_started_at.get(key)
+        if starts:
+            active.tool_duration_ms += max(0, round((now - starts.pop()) * 1000))
 
     def _finish(self, active: ActiveRun, status: str) -> None:
         active.status = status
@@ -395,6 +415,7 @@ class RunManager:
             active.prompt_responses[prompt.id] = response_queue
         self._emit(active, {"type": "prompt.requested", "prompt": prompt.model_dump()})
 
+        wait_started_at = time.time()
         try:
             answer = response_queue.get(timeout=timeout_seconds)
         except queue.Empty:
@@ -405,6 +426,7 @@ class RunManager:
                     self._emit(active, {"type": "prompt.expired", "prompt": prompt.model_dump()})
             return None
         finally:
+            active.prompt_wait_duration_ms += max(0, round((time.time() - wait_started_at) * 1000))
             with self._lock:
                 active.prompt_responses.pop(prompt.id, None)
 
@@ -423,11 +445,26 @@ class RunManager:
                 response_queue.put(None)
             self._emit(active, {"type": "prompt.cancelled", "prompt": prompt.model_dump()})
 
-    def _prompt_items(self, active: ActiveRun) -> list[dict[str, Any]] | None:
+    def _message_metrics(self, active: ActiveRun, *, generation_duration_ms: int | None = None) -> dict[str, Any]:
+        metrics = dict(active.context.usage_metrics or {})
+        if generation_duration_ms is not None:
+            metrics["generationDurationMs"] = generation_duration_ms
+            metrics["toolDurationMs"] = active.tool_duration_ms
+            metrics["promptWaitDurationMs"] = active.prompt_wait_duration_ms
+            metrics["modelDurationMs"] = max(
+                0,
+                generation_duration_ms - active.tool_duration_ms - active.prompt_wait_duration_ms,
+            )
+        return metrics
+
+    def _message_items(self, active: ActiveRun, metrics: dict[str, Any]) -> list[dict[str, Any]] | None:
+        items: list[dict[str, Any]] = []
         prompts = list(active.prompts.values())
-        if not prompts:
-            return None
-        return [{"type": "web_chat_prompt", "prompt": prompt.model_dump()} for prompt in prompts]
+        items.extend({"type": "web_chat_prompt", "prompt": prompt.model_dump()} for prompt in prompts)
+        if metrics:
+            items.append({"type": "web_chat_metrics", "metrics": metrics})
+
+        return items or None
 
     def _run(self, active: ActiveRun) -> None:
         self._emit(active, {"type": "run.started"})
@@ -435,13 +472,15 @@ class RunManager:
         try:
             active.context.request_prompt = lambda prompt, timeout_seconds=600: self._request_prompt(active, prompt, timeout_seconds)
             final_text = self._executor(active.context, lambda event: self._emit(active, event))
+            generation_duration_ms = max(0, round((time.time() - active.created_at) * 1000))
+            metrics = self._message_metrics(active, generation_duration_ms=generation_duration_ms)
             if active.context.stop_requested.is_set():
                 interrupted_text = "Chat interrupted."
                 assistant_message_id = self._services.db().append_message(
                     active.context.session_id,
                     "assistant",
                     interrupted_text,
-                    codex_message_items=self._prompt_items(active),
+                    codex_message_items=self._message_items(active, metrics),
                 )
                 changes = self._services.persist_run_workspace_changes(active.context, assistant_message_id)
                 self._emit(
@@ -450,6 +489,7 @@ class RunManager:
                         "type": "message.completed",
                         "content": interrupted_text,
                         "changes": changes.model_dump() if changes else None,
+                        "metrics": metrics,
                     },
                 )
                 self._emit(active, {"type": "run.stopped"})
@@ -460,7 +500,7 @@ class RunManager:
                     active.context.session_id,
                     "assistant",
                     final_text,
-                    codex_message_items=self._prompt_items(active),
+                    codex_message_items=self._message_items(active, metrics),
                 )
                 changes = self._services.persist_run_workspace_changes(active.context, assistant_message_id)
                 self._emit(
@@ -469,6 +509,7 @@ class RunManager:
                         "type": "message.completed",
                         "content": final_text,
                         "changes": changes.model_dump() if changes else None,
+                        "metrics": metrics,
                     },
                 )
             self._emit(active, {"type": "run.completed"})

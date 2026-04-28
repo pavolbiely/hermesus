@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { formatMessageTimestamp, groupMessageParts, latestChangePartKey, messagePartKey, messageText, processGroupSummary } from '../app/utils/chatMessages.ts'
+import { formatMessageGenerationDuration, formatMessageTimestamp, formatMessageTokenCount, groupMessageParts, latestChangePartKey, messageDurationDetails, messagePartKey, messageText, messageTokenDetails, processGroupSummary } from '../app/utils/chatMessages.ts'
 
 test('groups consecutive process parts together', () => {
   const groups = groupMessageParts([
@@ -109,6 +109,95 @@ test('joins only text message parts with blank lines', () => {
       { type: 'text', text: 'Second' }
     ]
   }), 'First\n\nSecond')
+})
+
+test('formats message token counts', () => {
+  assert.equal(formatMessageTokenCount({
+    id: 'message-1',
+    role: 'assistant',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    tokenCount: 1,
+    parts: []
+  }), '1 token')
+  assert.equal(formatMessageTokenCount({
+    id: 'message-2',
+    role: 'assistant',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    tokenCount: 1234,
+    parts: []
+  }), '1.2K tokens')
+  assert.equal(formatMessageTokenCount({
+    id: 'message-3',
+    role: 'assistant',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    tokenCount: 0,
+    parts: []
+  }), '')
+})
+
+test('formats message token details', () => {
+  assert.deepEqual(messageTokenDetails({
+    id: 'message-1',
+    role: 'assistant',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    tokenCount: 1298,
+    inputTokens: 1000,
+    outputTokens: 200,
+    cacheReadTokens: 50,
+    cacheWriteTokens: 25,
+    reasoningTokens: 23,
+    apiCalls: 2,
+    parts: []
+  }), [
+    { label: 'Input', value: '1K tokens' },
+    { label: 'Cache read', value: '50 tokens' },
+    { label: 'Cache write', value: '25 tokens' },
+    { label: 'Output', value: '200 tokens' },
+    { label: 'Reasoning', value: '23 tokens' },
+    { label: 'API calls', value: '2' }
+  ])
+})
+
+test('formats message generation duration', () => {
+  assert.equal(formatMessageGenerationDuration({
+    id: 'message-1',
+    role: 'assistant',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    generationDurationMs: 1250,
+    parts: []
+  }), '1.3s')
+  assert.equal(formatMessageGenerationDuration({
+    id: 'message-2',
+    role: 'assistant',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    generationDurationMs: 72_000,
+    parts: []
+  }), '1m 12s')
+  assert.equal(formatMessageGenerationDuration({
+    id: 'message-3',
+    role: 'assistant',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    generationDurationMs: 250,
+    parts: []
+  }), '')
+})
+
+test('formats message duration details', () => {
+  assert.deepEqual(messageDurationDetails({
+    id: 'message-1',
+    role: 'assistant',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    generationDurationMs: 72_000,
+    modelDurationMs: 60_000,
+    toolDurationMs: 10_000,
+    promptWaitDurationMs: 2_000,
+    parts: []
+  }), [
+    { label: 'Total', value: '1m 12s' },
+    { label: 'Model / orchestration', value: '1m' },
+    { label: 'Tools', value: '10s' },
+    { label: 'Waiting for input', value: '2s' }
+  ])
 })
 
 test('formats older message timestamps with date and time', () => {

@@ -116,6 +116,86 @@ export function messageText(message: WebChatMessage) {
   return message.parts.map(partText).filter(Boolean).join('\n\n')
 }
 
+function finitePositive(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat(undefined, {
+    notation: value >= 1000 ? 'compact' : 'standard',
+    maximumFractionDigits: 1
+  }).format(value)
+}
+
+function formatTokens(value: number) {
+  return `${formatNumber(value)} ${value === 1 ? 'token' : 'tokens'}`
+}
+
+export function formatMessageTokenCount(message: WebChatMessage) {
+  const count = finitePositive(message.tokenCount)
+  return count ? formatTokens(count) : ''
+}
+
+export function messageTokenDetails(message: WebChatMessage) {
+  const rows: { label: string, value: string }[] = []
+  const input = finitePositive(message.inputTokens)
+  const cacheRead = finitePositive(message.cacheReadTokens)
+  const cacheWrite = finitePositive(message.cacheWriteTokens)
+  const output = finitePositive(message.outputTokens)
+  const reasoning = finitePositive(message.reasoningTokens)
+  const apiCalls = finitePositive(message.apiCalls)
+
+  if (input) rows.push({ label: 'Input', value: formatTokens(input) })
+  if (cacheRead) rows.push({ label: 'Cache read', value: formatTokens(cacheRead) })
+  if (cacheWrite) rows.push({ label: 'Cache write', value: formatTokens(cacheWrite) })
+  if (output) rows.push({ label: 'Output', value: formatTokens(output) })
+  if (reasoning) rows.push({ label: 'Reasoning', value: formatTokens(reasoning) })
+  if (apiCalls) rows.push({ label: 'API calls', value: formatNumber(apiCalls) })
+
+  if (!rows.length && finitePositive(message.tokenCount)) {
+    rows.push({ label: message.role === 'user' ? 'Input' : 'Total', value: formatTokens(message.tokenCount as number) })
+  }
+
+  return rows
+}
+
+export function messageTokenTooltipNote(message: WebChatMessage) {
+  if (message.role === 'user') {
+    return 'Input usage for this turn, including sent context when reported by the provider.'
+  }
+
+  return 'Provider-reported usage for this agent turn. Exact scope depends on provider reporting.'
+}
+
+function formatDuration(milliseconds: number) {
+  const seconds = milliseconds / 1000
+  if (seconds < 60) return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: seconds < 10 ? 1 : 0 }).format(seconds)}s`
+
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = Math.round(seconds % 60)
+  return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`
+}
+
+export function formatMessageGenerationDuration(message: WebChatMessage) {
+  const milliseconds = finitePositive(message.generationDurationMs)
+  return milliseconds && milliseconds >= 1000 ? formatDuration(milliseconds) : ''
+}
+
+export function messageDurationDetails(message: WebChatMessage) {
+  const rows: { label: string, value: string }[] = []
+  const total = finitePositive(message.generationDurationMs)
+  const model = finitePositive(message.modelDurationMs)
+  const tools = finitePositive(message.toolDurationMs)
+  const prompts = finitePositive(message.promptWaitDurationMs)
+
+  if (total) rows.push({ label: 'Total', value: formatDuration(total) })
+  if (model) rows.push({ label: 'Model / orchestration', value: formatDuration(model) })
+  if (tools) rows.push({ label: 'Tools', value: formatDuration(tools) })
+  if (prompts) rows.push({ label: 'Waiting for input', value: formatDuration(prompts) })
+
+  return rows
+}
+
 export function messageDate(createdAt: string) {
   const date = new Date(createdAt)
   return Number.isFinite(date.getTime()) ? date : null

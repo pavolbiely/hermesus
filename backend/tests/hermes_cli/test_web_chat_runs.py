@@ -22,6 +22,7 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
         seen["model"] = context.model
         seen["reasoningEffort"] = context.reasoning_effort
         seen["workspace"] = context.workspace
+        context.usage_metrics = {"tokenCount": 42, "inputTokens": 30, "outputTokens": 12, "apiCalls": 1}
         emit({"type": "message.delta", "content": "Done"})
         return "Done"
 
@@ -47,6 +48,8 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
     assert "event: run.started" in body
     assert "event: message.delta" in body
     assert "event: message.completed" in body
+    assert '"tokenCount":42' in body
+    assert '"generationDurationMs"' in body
     assert "event: run.completed" in body
 
     detail = client.get(f"/api/web-chat/sessions/{data['sessionId']}")
@@ -54,6 +57,13 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
     assert detail.json()["messages"][0]["id"] == data["userMessageId"]
     assert detail.json()["messages"][0]["clientMessageId"] == "client-message-1"
     assert detail.json()["messages"][1]["parts"][0]["text"] == "Done"
+    assert detail.json()["messages"][0]["tokenCount"] == 30
+    assert detail.json()["messages"][0]["inputTokens"] == 30
+    assert detail.json()["messages"][1]["tokenCount"] == 42
+    assert detail.json()["messages"][1]["outputTokens"] == 12
+    assert detail.json()["messages"][1]["apiCalls"] == 1
+    assert isinstance(detail.json()["messages"][1]["generationDurationMs"], int)
+    assert isinstance(detail.json()["messages"][1]["modelDurationMs"], int)
     assert detail.json()["session"]["model"] == "gpt-5.3-codex"
     assert detail.json()["session"]["reasoningEffort"] == "high"
     assert detail.json()["session"]["workspace"] == str(repo)

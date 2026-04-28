@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import highlight from '@comark/nuxt/plugins/highlight'
 import type { WebChatMessage, WebChatPart } from '~/types/web-chat'
-import { formatMessageTimestamp, groupMessageParts, messagePartKey, messageTimestampTitle, partText } from '~/utils/chatMessages'
+import { formatMessageGenerationDuration, formatMessageTimestamp, formatMessageTokenCount, groupMessageParts, messageDurationDetails, messagePartKey, messageTimestampTitle, messageTokenDetails, messageTokenTooltipNote, partText } from '~/utils/chatMessages'
 
 const editingText = defineModel<string>('editingText', { required: true })
+const openTooltipKey = ref<string | null>(null)
+
+const tooltipContent = { side: 'top' as const, sideOffset: 8 }
+const richTooltipUi = {
+  content: 'h-auto max-w-none items-stretch rounded-md bg-elevated px-3 py-2 text-default shadow-lg ring ring-default'
+}
 
 const props = defineProps<{
   message: WebChatMessage
@@ -28,6 +34,14 @@ const emit = defineEmits<{
   retryFailed: [message: WebChatMessage]
   editFailed: [message: WebChatMessage]
 }>()
+
+function setTooltipOpen(key: string, open: boolean) {
+  if (open) {
+    openTooltipKey.value = key
+  } else if (openTooltipKey.value === key) {
+    openTooltipKey.value = null
+  }
+}
 </script>
 
 <template>
@@ -132,13 +146,71 @@ const emit = defineEmits<{
   <div
     :class="[
       'pointer-events-none absolute -bottom-6 flex w-max max-w-none flex-nowrap items-center gap-1 whitespace-nowrap text-xs leading-4 text-muted opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100',
+      openTooltipKey ? 'pointer-events-auto opacity-100' : '',
       message.role === 'user' ? 'right-0 justify-end' : 'left-0 justify-start'
     ]"
   >
-    <span class="whitespace-nowrap" :title="messageTimestampTitle(message.createdAt)">
+    <UTooltip
+      v-if="message.role === 'assistant' && formatMessageTokenCount(message)"
+      :content="tooltipContent"
+      :ui="richTooltipUi"
+      @update:open="setTooltipOpen('tokens', $event)"
+    >
+      <span class="cursor-default whitespace-nowrap">
+        {{ formatMessageTokenCount(message) }}
+      </span>
+      <template #content>
+        <div class="min-w-44 space-y-1 text-xs">
+          <div
+            v-for="row in messageTokenDetails(message)"
+            :key="row.label"
+            class="flex items-center justify-between gap-4"
+          >
+            <span class="text-muted">{{ row.label }}</span>
+            <span class="font-medium text-highlighted">{{ row.value }}</span>
+          </div>
+          <p class="max-w-56 pt-1 text-[11px] leading-4 text-muted">
+            {{ messageTokenTooltipNote(message) }}
+          </p>
+        </div>
+      </template>
+    </UTooltip>
+    <span v-if="message.role === 'assistant' && formatMessageTokenCount(message)" aria-hidden="true">·</span>
+    <UTooltip
+      v-if="message.role === 'assistant' && formatMessageGenerationDuration(message)"
+      :content="tooltipContent"
+      :ui="richTooltipUi"
+      @update:open="setTooltipOpen('duration', $event)"
+    >
+      <span class="cursor-default whitespace-nowrap">
+        {{ formatMessageGenerationDuration(message) }}
+      </span>
+      <template #content>
+        <div class="min-w-44 space-y-1 text-xs">
+          <div
+            v-for="row in messageDurationDetails(message)"
+            :key="row.label"
+            class="flex items-center justify-between gap-4"
+          >
+            <span class="text-muted">{{ row.label }}</span>
+            <span class="font-medium text-highlighted">{{ row.value }}</span>
+          </div>
+          <p class="max-w-56 pt-1 text-[11px] leading-4 text-muted">
+            Total is wall-clock from run start to completion; tool and waiting time are measured when events are available.
+          </p>
+        </div>
+      </template>
+    </UTooltip>
+    <span v-if="message.role === 'assistant' && formatMessageGenerationDuration(message)" aria-hidden="true">·</span>
+    <span class="cursor-default whitespace-nowrap" :title="messageTimestampTitle(message.createdAt)">
       {{ formatMessageTimestamp(message.createdAt) }}
     </span>
-    <UTooltip v-if="message.role === 'user'" text="Edit prompt">
+    <UTooltip
+      v-if="message.role === 'user'"
+      text="Edit prompt"
+      :content="tooltipContent"
+      @update:open="setTooltipOpen('edit', $event)"
+    >
       <button
         type="button"
         class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50"
@@ -149,7 +221,12 @@ const emit = defineEmits<{
         <UIcon name="i-lucide-pencil" class="size-3" />
       </button>
     </UTooltip>
-    <UTooltip v-else text="Regenerate response">
+    <UTooltip
+      v-else
+      text="Regenerate response"
+      :content="tooltipContent"
+      @update:open="setTooltipOpen('regenerate', $event)"
+    >
       <button
         type="button"
         class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50 disabled:pointer-events-none disabled:opacity-50"
@@ -160,7 +237,11 @@ const emit = defineEmits<{
         <UIcon name="i-lucide-rotate-ccw" class="size-3" />
       </button>
     </UTooltip>
-    <UTooltip text="Copy">
+    <UTooltip
+      text="Copy"
+      :content="tooltipContent"
+      @update:open="setTooltipOpen('copy', $event)"
+    >
       <button
         type="button"
         class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50"
