@@ -8,7 +8,7 @@ import { latestChangePartKey, messageText } from '~/utils/chatMessages'
 import { filesFromClipboard, writeClipboardText } from '~/utils/clipboard'
 import { mergeOptimisticUserMessages } from '~/utils/optimisticChatMessages'
 import { markLocalMessageFailed, markLocalMessageSending, removeLocalMessage } from '~/utils/failedChatMessages'
-import { scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender, nearestScrollableAncestor, isElementVisibleInRoot } from '~/utils/chatInitialScroll'
+import { nearestScrollableAncestor, isElementVisibleInRoot } from '~/utils/chatInitialScroll'
 import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
 
 const INITIAL_SESSION_MESSAGE_LIMIT = 60
@@ -195,14 +195,11 @@ watch(
     if (loadedSessionId !== sessionId.value) return
     if (initialScrollSettledSessionId.value === loadedSessionId) return
 
-    if (typeof requestAnimationFrame !== 'function') {
-      initialScrollSettledSessionId.value = loadedSessionId
-      return
-    }
-
-    await scrollChatToBottomAfterRender()
+    await nextTick()
+    await waitForAnimationFrame()
     attachReadScrollListener()
     attachOlderMessagesObserver()
+    markCurrentSessionReadIfVisible()
     initialScrollSettledSessionId.value = loadedSessionId
   },
   { immediate: true, flush: 'post' }
@@ -459,21 +456,6 @@ function waitForAnimationFrame() {
   return new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
 }
 
-async function scrollChatToBottomAfterRender() {
-  await scrollElementTreeToBottomAfterRender(chatContainer.value, {
-    waitForDomUpdate: nextTick,
-    waitForFrame: waitForAnimationFrame,
-    frameCount: 3
-  })
-
-  for (const delay of [100, 350]) {
-    await new Promise<void>(resolve => setTimeout(resolve, delay))
-    scrollElementTreeToBottom(chatContainer.value)
-  }
-
-  markCurrentSessionReadIfVisible()
-}
-
 async function startRunForLocalMessage(
   userMessage: WebChatMessage,
   text: string,
@@ -504,7 +486,6 @@ async function startRunForLocalMessage(
     playNotificationSound('sent')
     void refreshSessions?.()
     connectRun(run.runId, sessionId.value)
-    void scrollChatToBottomAfterRender()
   } catch (err) {
     const errorMessage = getHermesErrorMessage(err, 'Not sent')
     messages.value = markLocalMessageFailed(messages.value, userMessage.id, errorMessage)
@@ -528,7 +509,6 @@ async function sendMessageNow(message: string) {
   if (pendingAttachments.length) userMessage.parts.unshift({ type: 'media', attachments: pendingAttachments })
   messages.value.push(userMessage)
   context.clearAttachments()
-  void scrollChatToBottomAfterRender()
 
   await startRunForLocalMessage(
     userMessage,
@@ -592,7 +572,6 @@ async function regenerateResponse(message: WebChatMessage) {
     playNotificationSound('sent')
     void refreshSessions?.()
     connectRun(run.runId, sessionId.value)
-    void scrollChatToBottomAfterRender()
   } catch (err) {
     data.value = previousData
     sessionCache.set(previousData)

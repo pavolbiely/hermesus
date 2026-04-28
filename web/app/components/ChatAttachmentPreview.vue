@@ -67,6 +67,16 @@ onBeforeUnmount(clearObjectUrl)
     </p>
   </UCard>
 
+  <div v-else-if="loading && isImage" class="w-64 overflow-hidden rounded-lg border border-default bg-muted">
+    <div class="flex h-40 w-64 items-center justify-center">
+      <UIcon name="i-lucide-loader-circle" class="size-5 animate-spin text-muted" />
+    </div>
+    <div class="flex w-64 items-center gap-2 px-2 py-1.5 text-xs text-muted">
+      <UIcon name="i-lucide-image" class="size-3.5 shrink-0" />
+      <span class="min-w-0 truncate">{{ attachment.name }}</span>
+    </div>
+  </div>
+
   <UCard v-else-if="loading" variant="subtle" class="w-56" :ui="{ body: 'p-3' }">
     <div class="flex items-center gap-2 text-sm text-muted">
       <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin" />
@@ -83,15 +93,17 @@ onBeforeUnmount(clearObjectUrl)
     :description="`${attachment.mediaType} · ${fileSize}`"
     :ui="{ content: 'sm:max-w-5xl', body: 'p-0' }"
   >
-    <button type="button" class="group block overflow-hidden rounded-lg border border-default bg-muted text-left transition hover:border-accented">
+    <button type="button" class="group block w-64 overflow-hidden rounded-lg border border-default bg-muted text-left transition hover:border-accented">
       <img
         :src="objectUrl"
         :alt="attachment.name"
-        class="max-h-40 max-w-64 object-cover transition group-hover:scale-[1.02]"
+        width="256"
+        height="160"
+        class="h-40 w-64 object-contain transition group-hover:scale-[1.02]"
         loading="lazy"
         @error="loadError = 'File no longer available'"
       >
-      <div class="flex max-w-64 items-center gap-2 px-2 py-1.5 text-xs text-muted">
+      <div class="flex w-64 items-center gap-2 px-2 py-1.5 text-xs text-muted">
         <UIcon name="i-lucide-image" class="size-3.5 shrink-0" />
         <span class="min-w-0 truncate">{{ attachment.name }}</span>
       </div>
