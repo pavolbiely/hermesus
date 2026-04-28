@@ -6,6 +6,7 @@ import type { WebChatAppUpdateStatusResponse, WebChatProfile, WebChatSession, We
 import { buildSessionGroups } from '~/utils/sessionGroups'
 
 const api = useHermesApi()
+const sessionCache = useWebChatSessionCache(api)
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -490,6 +491,7 @@ async function duplicateSession(session: WebChatSession) {
   pendingSessionId.value = session.id
   try {
     const duplicated = await api.duplicateSession(session.id)
+    sessionCache.set(duplicated)
     await refresh()
     cancelConfirmAction()
     await router.push(`/chat/${duplicated.session.id}`)
@@ -524,6 +526,7 @@ async function deleteSession(session: WebChatSession) {
   pendingSessionId.value = session.id
   try {
     await api.deleteSession(session.id)
+    sessionCache.remove(session.id)
     activeChatRuns.markFinished(session.id)
     await refresh()
     cancelConfirmAction()
@@ -539,7 +542,12 @@ async function deleteSession(session: WebChatSession) {
   }
 }
 
+function prefetchSession(session: WebChatSession) {
+  sessionCache.prefetch(session.id)
+}
+
 function openSession(session: WebChatSession) {
+  prefetchSession(session)
   void router.push(`/chat/${session.id}`)
 }
 
@@ -663,6 +671,7 @@ provide('appUpdateControl', {
           @edit-workspace="beginEditWorkspace"
           @start-workspace-chat="startWorkspaceChat"
           @open-session="openSession"
+          @prefetch-session="prefetchSession"
           @rename-session="beginRename"
           @toggle-session-pinned="toggleSessionPinned"
           @confirm-session-action="beginConfirmAction"

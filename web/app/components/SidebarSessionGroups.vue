@@ -19,6 +19,7 @@ const emit = defineEmits<{
   editWorkspace: [workspace: WebChatWorkspace]
   startWorkspaceChat: [path: string]
   openSession: [session: WebChatSession]
+  prefetchSession: [session: WebChatSession]
   renameSession: [session: WebChatSession]
   toggleSessionPinned: [session: WebChatSession]
   confirmSessionAction: [action: 'duplicate' | 'delete', session: WebChatSession]
@@ -187,6 +188,8 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
             isUnreadSession(session) ? 'font-bold text-black dark:text-white' : 'font-normal'
           ]"
           @click="emit('openSession', session)"
+          @pointerenter="emit('prefetchSession', session)"
+          @focus="emit('prefetchSession', session)"
           @keydown.enter.prevent="emit('openSession', session)"
           @keydown.space.prevent="emit('openSession', session)"
           @dblclick.stop.prevent="isActiveSession(session) && renameSession(session)"

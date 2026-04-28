@@ -13,6 +13,7 @@ import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
 
 const route = useRoute()
 const api = useHermesApi()
+const sessionCache = useWebChatSessionCache(api)
 const composer = useChatComposerCapabilities()
 const activeChatRuns = useActiveChatRuns()
 const context = useChatComposerContext()
@@ -49,15 +50,25 @@ const {
   status: sessionStatus
 } = useLazyAsyncData(
   () => `web-chat-session-${sessionId.value}`,
-  () => api.getSession(sessionId.value),
-  { watch: [sessionId] }
+  async () => {
+    const response = await sessionCache.fetch(sessionId.value)
+    sessionCache.set(response)
+    return response
+  },
+  {
+    watch: [sessionId]
+  }
 )
 
-const isLoadingSession = computed(() => sessionStatus.value === 'idle' || sessionStatus.value === 'pending')
-const hasSession = computed(() => Boolean(data.value?.session))
+const displayedData = computed(() => {
+  if (data.value?.session.id === sessionId.value) return data.value
+  return sessionCache.get(sessionId.value)
+})
+const isLoadingSession = computed(() => (sessionStatus.value === 'idle' || sessionStatus.value === 'pending') && !displayedData.value)
+const hasSession = computed(() => Boolean(displayedData.value?.session))
 const shouldHideChatContent = computed(() => shouldHideChatUntilInitialScroll({
   currentSessionId: sessionId.value,
-  loadedSessionId: data.value?.session.id,
+  loadedSessionId: displayedData.value?.session.id,
   settledSessionId: initialScrollSettledSessionId.value,
   isLoading: isLoadingSession.value,
   hasSession: hasSession.value
@@ -137,7 +148,15 @@ const {
 })
 
 watch(
-  [sessionId, () => data.value?.session.id, () => data.value?.messages],
+  data,
+  (response) => {
+    if (response?.session.id === sessionId.value) sessionCache.set(response)
+  },
+  { immediate: true }
+)
+
+watch(
+  [sessionId, () => displayedData.value?.session.id, () => displayedData.value?.messages],
   ([currentSessionId, loadedSessionId, persistedMessages]) => {
     if (loadedSessionId !== currentSessionId) {
       messages.value = []
@@ -163,7 +182,7 @@ watch(sessionId, () => {
 })
 
 watch(
-  () => [data.value?.session.id, messages.value.length] as const,
+  () => [displayedData.value?.session.id, messages.value.length] as const,
   async ([loadedSessionId]) => {
     if (loadedSessionId !== sessionId.value) return
     if (initialScrollSettledSessionId.value === loadedSessionId) return
@@ -181,7 +200,7 @@ watch(
 )
 
 watch(
-  () => data.value?.session,
+  () => displayedData.value?.session,
   async (session) => {
     if (!session || session.id !== sessionId.value) return
     await Promise.all([composer.initializeForSession(session), context.initializeForSession(session)])
@@ -192,7 +211,7 @@ watch(
 const title = computed(() => {
   if (isLoadingSession.value) return 'Loading chat…'
   if (sessionError.value || !hasSession.value) return 'Chat unavailable'
-  return data.value?.session.title || 'Chat'
+  return displayedData.value?.session.title || 'Chat'
 })
 
 function latestMeasuredContextTokens() {
@@ -216,7 +235,7 @@ function pathBaseName(path?: string | null) {
 }
 
 const workspaceStatus = computed(() => {
-  const workspace = data.value?.isolatedWorkspace
+  const workspace = displayedData.value?.isolatedWorkspace
   if (!workspace || workspace.status !== 'active') return null
 
   const sourceName = pathBaseName(workspace.sourceWorkspace)
@@ -305,7 +324,7 @@ function enqueueMessage(message: string) {
 }
 
 function visibleMessageCount() {
-  return Math.max(data.value?.session.messageCount || 0, messages.value.length)
+  return Math.max(displayedData.value?.session.messageCount || 0, messages.value.length)
 }
 
 function latestMessageElement() {
@@ -325,7 +344,7 @@ function isLatestMessageVisible() {
 }
 
 function markCurrentSessionReadIfVisible() {
-  if (!markSessionRead || data.value?.session.id !== sessionId.value) return
+  if (!markSessionRead || displayedData.value?.session.id !== sessionId.value) return
   if (!isBottomReadSentinelVisible() && !isLatestMessageVisible()) return
 
   markSessionRead(sessionId.value, visibleMessageCount())
@@ -468,7 +487,7 @@ async function regenerateResponse(message: WebChatMessage) {
     return
   }
 
-  const previousData = data.value
+  const previousData = data.value || displayedData.value || undefined
   const previousMessages = [...messages.value]
   void prepareNotificationSound()
   submitStatus.value = 'submitted'
@@ -476,6 +495,7 @@ async function regenerateResponse(message: WebChatMessage) {
   try {
     const updated = await api.editMessage(sessionId.value, userMessage.id, content)
     data.value = updated
+    sessionCache.set(updated)
     messages.value = [...updated.messages]
 
     const run = await api.startRun(content, {
@@ -493,6 +513,7 @@ async function regenerateResponse(message: WebChatMessage) {
     void scrollChatToBottomAfterRender()
   } catch (err) {
     data.value = previousData
+    sessionCache.set(previousData)
     messages.value = previousMessages
     submitStatus.value = 'error'
     activeChatRuns.markFinished(sessionId.value)
@@ -647,7 +668,7 @@ async function sendNextQueuedMessage() {
 }
 
 watch(
-  () => data.value?.activeRun,
+  () => displayedData.value?.activeRun,
   (activeRun) => {
     recoverActiveRun({
       sessionId: sessionId.value,
