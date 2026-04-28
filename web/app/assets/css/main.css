@@ -31,6 +31,44 @@ html.dark .shiki span {
   font-weight: 400;
 }
 
+.chat-preview-path {
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in oklab, currentColor 55%, transparent);
+}
+
+button.chat-preview-path {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.chat-preview-path:hover,
+.chat-preview-path:focus-visible {
+  color: var(--ui-primary);
+  text-decoration-color: currentColor;
+}
+
+.chat-file-preview-markdown :where(p, ul, ol, pre, blockquote) {
+  margin-block: 0.75rem;
+}
+
+.chat-file-preview-markdown :where(h1, h2, h3) {
+  margin-block: 1rem 0.5rem;
+  font-weight: 600;
+}
+
+.chat-file-preview-code :where(pre),
+.chat-file-preview-markdown :where(pre) {
+  overflow-x: auto;
+}
+
 .chat-message-markdown :where(pre) {
   font-size: 0.8125rem;
   line-height: 1.25rem;

@@ -102,6 +102,7 @@ from .web_chat_modules.commands import (
 from .web_chat_modules.models import (
     ExecuteCommandRequest,
     ExecuteCommandResponse,
+    FilePreviewRequest,
     SaveWorkspaceRequest,
     SessionDetailResponse,
     SwitchProfileRequest,
@@ -110,6 +111,7 @@ from .web_chat_modules.models import (
     WebChatAppUpdateStatusResponse,
     WebChatCommand,
     WebChatFileChange,
+    WebChatFilePreview,
     WebChatIsolatedWorkspace,
     WebChatMessage,
     WebChatModelCapability,

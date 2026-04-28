@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import highlight from '@comark/nuxt/plugins/highlight'
-import type { WebChatMessage, WebChatPart } from '~/types/web-chat'
+import type { WebChatFilePreview, WebChatMessage, WebChatPart } from '~/types/web-chat'
+import { isPreviewablePathCandidate, LOCAL_PATH_PATTERN, normalizePreviewPathCandidate } from '~/utils/filePreviewPaths'
 import { formatMessageGenerationDuration, formatMessageTimestamp, formatMessageTokenCount, groupMessageParts, messageDurationDetails, messagePartKey, messageTimestampTitle, messageTokenDetails, messageTokenTooltipNote, partText } from '~/utils/chatMessages'
 
 const editingText = defineModel<string>('editingText', { required: true })
+const api = useHermesApi()
 const openTooltipKey = ref<string | null>(null)
+const messageContentRoot = ref<HTMLElement | null>(null)
+const previewOpen = ref(false)
+const previewLoading = ref(false)
+const previewError = ref<string | null>(null)
+const preview = ref<WebChatFilePreview | null>(null)
+let previewPathObserver: MutationObserver | null = null
+let enhancePreviewFrame: number | null = null
 
 const tooltipContent = { side: 'top' as const, sideOffset: 8 }
 const richTooltipUi = {
@@ -17,6 +26,7 @@ const props = defineProps<{
   editingMessageId: string | null
   savingEditedMessageId: string | null
   isRunning: boolean
+  workspace: string | null
   setEditingMessageContainer: (el: unknown) => void
   latestChangePartKey: string | null
 }>()
@@ -42,10 +52,164 @@ function setTooltipOpen(key: string, open: boolean) {
     openTooltipKey.value = null
   }
 }
+
+function markPreviewTrigger(element: HTMLElement, path: string) {
+  element.setAttribute('role', 'button')
+  element.setAttribute('tabindex', '0')
+  element.dataset.previewPath = path
+  element.classList.add('chat-preview-path')
+}
+
+function enhancePreviewPathNodes() {
+  const root = messageContentRoot.value
+  if (!root || props.message.role !== 'assistant') return
+
+  for (const code of root.querySelectorAll<HTMLElement>('code')) {
+    if (code.closest('pre') || code.dataset.previewPath) continue
+    const path = normalizePreviewPathCandidate(code.textContent || '')
+    if (isPreviewablePathCandidate(path)) markPreviewTrigger(code, path)
+  }
+
+  for (const link of root.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+    if (link.dataset.previewPath) continue
+    const href = link.getAttribute('href') || ''
+    const path = normalizePreviewPathCandidate(href)
+    if (!isPreviewablePathCandidate(path)) continue
+    link.removeAttribute('href')
+    markPreviewTrigger(link, path)
+  }
+
+  enhancePlainTextPreviewPaths(root)
+}
+
+function enhancePlainTextPreviewPaths(root: HTMLElement) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement
+      if (!parent || parent.closest('pre, code, a, button, input, textarea, [data-preview-path]')) {
+        return NodeFilter.FILTER_REJECT
+      }
+      LOCAL_PATH_PATTERN.lastIndex = 0
+      return LOCAL_PATH_PATTERN.test(node.textContent || '')
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_SKIP
+    }
+  })
+  const nodes: Text[] = []
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text)
+  for (const node of nodes) enhancePlainTextNode(node)
+}
+
+function enhancePlainTextNode(node: Text) {
+  const text = node.textContent || ''
+  const fragment = document.createDocumentFragment()
+  let cursor = 0
+  let matched = false
+  LOCAL_PATH_PATTERN.lastIndex = 0
+
+  for (const match of text.matchAll(LOCAL_PATH_PATTERN)) {
+    const raw = match[1]
+    if (!raw || match.index === undefined) continue
+    const start = match.index + match[0].lastIndexOf(raw)
+    const path = normalizePreviewPathCandidate(raw)
+    if (!isPreviewablePathCandidate(path)) continue
+    if (start > cursor) fragment.append(document.createTextNode(text.slice(cursor, start)))
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = raw
+    markPreviewTrigger(button, path)
+    fragment.append(button)
+    cursor = start + raw.length
+    matched = true
+  }
+
+  if (!matched) return
+  if (cursor < text.length) fragment.append(document.createTextNode(text.slice(cursor)))
+  node.parentNode?.replaceChild(fragment, node)
+}
+
+function previewPathFromEvent(event: Event) {
+  const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-preview-path]') : null
+  return target?.dataset.previewPath || null
+}
+
+async function openFilePreview(path: string) {
+  const wasOpen = previewOpen.value
+  previewLoading.value = true
+  previewError.value = null
+  preview.value = null
+
+  if (wasOpen) previewOpen.value = true
+
+  try {
+    preview.value = await api.fetchFilePreview({ path, workspace: props.workspace })
+  } catch (err) {
+    previewError.value = err instanceof Error ? err.message : 'Could not load preview'
+  } finally {
+    previewLoading.value = false
+    previewOpen.value = true
+  }
+}
+
+function scheduleEnhancePreviewPathNodes() {
+  if (typeof window === 'undefined') return
+  if (enhancePreviewFrame !== null) window.cancelAnimationFrame(enhancePreviewFrame)
+  enhancePreviewFrame = window.requestAnimationFrame(() => {
+    enhancePreviewFrame = null
+    enhancePreviewPathNodes()
+  })
+}
+
+function onPreviewClick(event: MouseEvent) {
+  const path = previewPathFromEvent(event)
+  if (!path) return
+  event.preventDefault()
+  void openFilePreview(path)
+}
+
+function onPreviewKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  const path = previewPathFromEvent(event)
+  if (!path) return
+  event.preventDefault()
+  void openFilePreview(path)
+}
+
+watch(
+  () => [props.message.id, props.message.parts.map(part => partText(part)).join('\n')],
+  async () => {
+    await nextTick()
+    scheduleEnhancePreviewPathNodes()
+  },
+  { immediate: true, flush: 'post' }
+)
+
+onMounted(async () => {
+  await nextTick()
+  const root = messageContentRoot.value
+  if (!root || typeof MutationObserver === 'undefined') {
+    scheduleEnhancePreviewPathNodes()
+    return
+  }
+
+  previewPathObserver = new MutationObserver(() => scheduleEnhancePreviewPathNodes())
+  previewPathObserver.observe(root, { childList: true, subtree: true })
+  scheduleEnhancePreviewPathNodes()
+})
+
+onBeforeUnmount(() => {
+  previewPathObserver?.disconnect()
+  previewPathObserver = null
+  if (enhancePreviewFrame !== null && typeof window !== 'undefined') {
+    window.cancelAnimationFrame(enhancePreviewFrame)
+    enhancePreviewFrame = null
+  }
+})
 </script>
 
 <template>
-  <template v-for="(group, index) in groupMessageParts(message.parts)" :key="`${message.id}-${group.type}-${index}`">
+  <div ref="messageContentRoot" @click="onPreviewClick" @keydown="onPreviewKeydown">
+    <template v-for="(group, index) in groupMessageParts(message.parts)" :key="`${message.id}-${group.type}-${index}`">
     <RunDetailsGroup
       v-if="group.type === 'process'"
       :parts="group.parts"
@@ -252,4 +416,12 @@ function setTooltipOpen(key: string, open: boolean) {
       </button>
     </UTooltip>
   </div>
+  </div>
+
+  <ChatFilePreviewModal
+    v-model:open="previewOpen"
+    :preview="preview"
+    :loading="previewLoading"
+    :error="previewError"
+  />
 </template>

@@ -787,6 +787,7 @@ onBeforeUnmount(() => {
                 :editing-message-id="editingMessageId"
                 :saving-edited-message-id="savingEditedMessageId"
                 :is-running="isRunning"
+                :workspace="context.selectedWorkspace.value"
                 :latest-change-part-key="latestGitChangePartKey"
                 :set-editing-message-container="setEditingMessageContainer"
                 @copy="copyMessage"

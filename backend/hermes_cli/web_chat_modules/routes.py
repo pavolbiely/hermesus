@@ -10,7 +10,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadF
 from fastapi.responses import FileResponse, StreamingResponse
 from hermes_state import SessionDB
 
-from . import session_handlers
+from . import file_previews, session_handlers
 from .models import (
     CreateSessionRequest,
     DeleteSessionResponse,
@@ -18,6 +18,7 @@ from .models import (
     EditMessageRequest,
     ExecuteCommandRequest,
     ExecuteCommandResponse,
+    FilePreviewRequest,
     RenameSessionRequest,
     RespondRunPromptRequest,
     RespondRunPromptResponse,
@@ -37,6 +38,7 @@ from .models import (
     WebChatCapabilitiesResponse,
     WebChatCommand,
     WebChatCommandsResponse,
+    WebChatFilePreview,
     WebChatMessage,
     WebChatModelCapability,
     WebChatProfilesResponse,
@@ -190,6 +192,14 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
     def get_workspace_changes(workspace: str | None = None) -> WebChatWorkspaceChanges:
         validated = services.validate_workspace(workspace)
         return services.workspace_changes(str(validated) if validated else None)
+
+    @router.post("/file-preview", response_model=WebChatFilePreview, response_model_exclude_none=True)
+    def get_file_preview(payload: FilePreviewRequest) -> WebChatFilePreview:
+        return file_previews.preview_file(
+            payload.path,
+            payload.workspace,
+            validate_workspace=services.validate_workspace,
+        )
 
     @router.post("/sessions", status_code=status.HTTP_201_CREATED, response_model=SessionDetailResponse)
     def create_session(payload: CreateSessionRequest) -> SessionDetailResponse:

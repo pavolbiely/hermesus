@@ -2,6 +2,7 @@ import type {
   DirectorySuggestionsResponse,
   ExecuteCommandRequest,
   ExecuteCommandResponse,
+  FilePreviewRequest,
   SaveWorkspaceRequest,
   SessionDetailResponse,
   SessionListResponse,
@@ -14,6 +15,7 @@ import type {
   UploadAttachmentsResponse,
   WebChatCapabilitiesResponse,
   WebChatCommandsResponse,
+  WebChatFilePreview,
   WebChatProfilesResponse,
   WebChatAppUpdateStatusResponse,
   WebChatUpdateStatusResponse,
@@ -86,6 +88,10 @@ export function useHermesApi() {
     }),
     getWorkspaceChanges: (workspace?: string | null) => request<WebChatWorkspaceChanges>('/api/web-chat/workspace-changes', {
       query: workspace ? { workspace } : undefined
+    }),
+    fetchFilePreview: (payload: FilePreviewRequest) => request<WebChatFilePreview>('/api/web-chat/file-preview', {
+      method: 'POST',
+      body: payload
     }),
     listSessions: () => request<SessionListResponse>('/api/web-chat/sessions'),
     getSession: (id: string) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {

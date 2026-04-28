@@ -20,6 +20,25 @@ class WebChatAttachment(BaseModel):
     exists: bool = True
 
 
+class FilePreviewRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    workspace: str | None = None
+
+
+class WebChatFilePreview(BaseModel):
+    path: str
+    requestedPath: str
+    relativePath: str | None = None
+    name: str
+    mediaType: str
+    size: int
+    language: str | None = None
+    content: str | None = None
+    truncated: bool = False
+    previewable: bool = True
+    reason: str | None = None
+
+
 class WebChatPromptChoice(BaseModel):
     id: str
     label: str

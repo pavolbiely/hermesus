@@ -217,6 +217,25 @@ export type UploadAttachmentsResponse = {
   attachments: WebChatAttachment[]
 }
 
+export type FilePreviewRequest = {
+  path: string
+  workspace?: string | null
+}
+
+export type WebChatFilePreview = {
+  path: string
+  requestedPath: string
+  relativePath?: string | null
+  name: string
+  mediaType: string
+  size: number
+  language?: string | null
+  content?: string | null
+  truncated: boolean
+  previewable: boolean
+  reason?: string | null
+}
+
 export type WebChatFileChange = {
   path: string
   status: 'created' | 'edited' | 'deleted' | 'renamed' | 'copied'
