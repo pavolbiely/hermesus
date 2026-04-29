@@ -722,7 +722,7 @@ provide('appUpdateControl', {
           />
         </div>
 
-        <div class="mb-1 flex h-7 items-center justify-between px-2 text-sm font-medium text-muted">
+        <div class="flex h-6 items-center justify-between px-2 text-sm font-medium text-muted">
           <span>Workspaces</span>
           <UTooltip text="New workspace">
             <UButton
