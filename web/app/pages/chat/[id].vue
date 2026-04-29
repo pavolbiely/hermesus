@@ -692,12 +692,6 @@ async function steerQueuedMessage(id: string) {
   try {
     await api.steerRun(runId, { text: queued.text })
     queuedMessages.remove(id)
-    messages.value.push({
-      id: crypto.randomUUID(),
-      role: 'system',
-      createdAt: new Date().toISOString(),
-      parts: [{ type: 'steer', text: queued.text }]
-    })
   } catch (err) {
     if (isConflictError(err)) {
       try {

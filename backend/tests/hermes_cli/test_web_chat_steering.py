@@ -45,23 +45,13 @@ def test_steer_run_calls_runtime_callback_persists_message_and_emits_event(clien
     assert payload["messageId"] in body
     detail = client.get(f"/api/web-chat/sessions/{start['sessionId']}")
     assert [message["role"] for message in detail.json()["messages"]] == ["user", "system", "assistant"]
-    steer_message = detail.json()["messages"][1]
-    assert steer_message["parts"] == [
-        {
-            "type": "steer",
-            "text": "Use the simple path",
-            "name": None,
-            "status": None,
-            "input": None,
-            "output": None,
-            "url": None,
-            "mediaType": None,
-            "approvalId": None,
-            "prompt": None,
-            "changes": None,
-            "attachments": None,
-        }
-    ]
+    steer_part = detail.json()["messages"][1]["parts"][0]
+    assert steer_part["type"] == "event"
+    assert steer_part["eventType"] == "run_steered"
+    assert steer_part["severity"] == "info"
+    assert steer_part["title"] == "Run steered"
+    assert steer_part["description"] == "Use the simple path"
+    assert steer_part["occurredAt"]
 
 
 def test_steer_run_returns_404_for_unknown_run(client):

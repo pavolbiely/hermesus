@@ -181,7 +181,9 @@ def test_returns_session_with_messages(client):
     assert data["messages"][1]["modelDurationMs"] == 2000
     assert data["messages"][1]["toolDurationMs"] == 400
     assert data["messages"][1]["promptWaitDurationMs"] == 100
-    assert data["messages"][0]["parts"] == [{"type": "text", "text": "Can you help?", "name": None, "status": None, "input": None, "output": None, "url": None, "mediaType": None, "approvalId": None, "prompt": None, "changes": None, "attachments": None}]
+    user_text_part = data["messages"][0]["parts"][0]
+    assert user_text_part["type"] == "text"
+    assert user_text_part["text"] == "Can you help?"
     assert data["messages"][1]["parts"][0]["type"] == "reasoning"
     assert data["messages"][1]["parts"][0]["text"] == "Short reasoning"
     assert data["messages"][1]["parts"][1]["text"] == "Yes."

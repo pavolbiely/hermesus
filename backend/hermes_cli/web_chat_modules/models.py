@@ -91,10 +91,15 @@ class RespondRunPromptResponse(BaseModel):
 
 
 class WebChatPart(BaseModel):
-    type: Literal["text", "reasoning", "tool", "media", "interactive_prompt", "changes", "steer"]
+    type: Literal["text", "reasoning", "tool", "media", "interactive_prompt", "changes", "steer", "status", "event"]
     text: str | None = None
     name: str | None = None
     status: str | None = None
+    eventType: str | None = None
+    severity: str | None = None
+    title: str | None = None
+    description: str | None = None
+    occurredAt: str | None = None
     input: Any | None = None
     output: Any | None = None
     url: str | None = None
@@ -103,6 +108,7 @@ class WebChatPart(BaseModel):
     prompt: WebChatPrompt | None = None
     changes: Any | None = None
     attachments: list[WebChatAttachment] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class WebChatMessage(BaseModel):

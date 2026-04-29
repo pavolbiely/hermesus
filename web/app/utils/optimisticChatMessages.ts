@@ -41,6 +41,21 @@ function isStreamingAssistantMessage(message: WebChatMessage) {
   return message.role === 'assistant' && message.parts.length > 0
 }
 
+function isLocalSystemEventMessage(message: WebChatMessage) {
+  return message.role === 'system' && message.parts.some(part => part.type === 'event')
+}
+
+function systemEventKey(message: WebChatMessage) {
+  const event = message.parts.find(part => part.type === 'event')
+  if (!event) return null
+  return [event.eventType || '', event.title || '', event.description || '', event.text || ''].join('\u0000')
+}
+
+function hasEquivalentSystemEvent(messages: WebChatMessage[], message: WebChatMessage) {
+  const key = systemEventKey(message)
+  return Boolean(key && messages.some(candidate => systemEventKey(candidate) === key))
+}
+
 export function mergeOptimisticUserMessages(
   persistedMessages: WebChatMessage[],
   currentMessages: WebChatMessage[],
@@ -67,6 +82,8 @@ export function mergeOptimisticUserMessages(
     }
 
     if (options.preserveStreamingAssistant && !persistedIds.has(message.id) && isStreamingAssistantMessage(message)) {
+      nextMessages.push(message)
+    } else if (!persistedIds.has(message.id) && isLocalSystemEventMessage(message) && !hasEquivalentSystemEvent(nextMessages, message)) {
       nextMessages.push(message)
     }
   }

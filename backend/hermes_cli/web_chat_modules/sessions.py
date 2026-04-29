@@ -166,6 +166,25 @@ def message_steers(message: dict[str, Any]) -> list[str]:
     return steers
 
 
+def message_events(message: dict[str, Any]) -> list[WebChatPart]:
+    items = message_items(message)
+    if not isinstance(items, list):
+        return []
+
+    events: list[WebChatPart] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "web_chat_event":
+            continue
+        metadata = item.get("event")
+        if not isinstance(metadata, dict):
+            continue
+        try:
+            events.append(WebChatPart(type="event", **metadata))
+        except Exception:
+            continue
+    return events
+
+
 def message_metrics(message: dict[str, Any]) -> dict[str, Any]:
     items = message_items(message)
     if not isinstance(items, list):
@@ -186,6 +205,7 @@ def message_parts(message: dict[str, Any]) -> list[WebChatPart]:
         parts.append(WebChatPart(type="media", attachments=attachments))
     for prompt in message_prompts(message):
         parts.append(WebChatPart(type="interactive_prompt", prompt=prompt))
+    parts.extend(message_events(message))
     for steer in message_steers(message):
         parts.append(WebChatPart(type="steer", text=steer))
     if message.get("reasoning") or message.get("reasoning_content"):

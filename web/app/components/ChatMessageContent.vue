@@ -356,6 +356,11 @@ onBeforeUnmount(() => {
         :initially-open="isLatestChangePart(message, group.part)"
       />
 
+      <ChatSystemEvent
+        v-else-if="group.part.type === 'event'"
+        :part="group.part"
+      />
+
       <InteractivePromptCard
         v-else-if="group.part.type === 'interactive_prompt' && group.part.prompt"
         :prompt="group.part.prompt"

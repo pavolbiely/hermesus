@@ -53,14 +53,30 @@ export type SteerRunResponse = {
 export type AgentStatusEvent = {
   kind: 'lifecycle' | 'warn' | string
   message: string
+  messageId?: string | null
   createdAt?: string | null
 }
 
+export type WebChatSystemEventType =
+  | 'run_stopped'
+  | 'run_failed'
+  | 'run_steered'
+  | 'prompt_expired'
+  | 'prompt_cancelled'
+  | 'agent_warning'
+
+export type WebChatSystemEventSeverity = 'info' | 'warning' | 'error'
+
 export type WebChatPart = {
-  type: 'text' | 'reasoning' | 'tool' | 'media' | 'interactive_prompt' | 'changes' | 'steer' | 'status'
+  type: 'text' | 'reasoning' | 'tool' | 'media' | 'interactive_prompt' | 'changes' | 'steer' | 'status' | 'event'
   text?: string | null
   name?: string | null
   status?: string | null
+  eventType?: WebChatSystemEventType | string | null
+  severity?: WebChatSystemEventSeverity | string | null
+  title?: string | null
+  description?: string | null
+  occurredAt?: string | null
   startedAt?: string | null
   completedAt?: string | null
   durationMs?: number | null
@@ -72,6 +88,7 @@ export type WebChatPart = {
   prompt?: InteractivePrompt | null
   changes?: WebChatWorkspaceChanges | null
   attachments?: WebChatAttachment[] | null
+  metadata?: Record<string, unknown> | null
 }
 
 export type WebChatMessage = {

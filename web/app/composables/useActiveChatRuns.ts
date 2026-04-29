@@ -6,6 +6,9 @@ import { createRunEventReplay } from '../utils/runEventReplay'
 type RunEventPayload = Record<string, unknown>
 
 type ToolRunPayload = { name?: string, preview?: string, input?: unknown, occurredAt?: string }
+type RunLifecyclePayload = { message?: string, messageId?: string, occurredAt?: string }
+type RunFailedPayload = RunLifecyclePayload & { error: string }
+type RunSteeredPayload = { text?: string, messageId?: string, occurredAt?: string }
 
 type CompletedRunPayload = {
   content?: string
@@ -32,6 +35,11 @@ type ActiveRunHandlers = {
   onStatus?: (payload: AgentStatusEvent) => void
   onPromptRequested?: (prompt: InteractivePrompt) => void
   onPromptUpdated?: (prompt: InteractivePrompt) => void
+  onPromptExpired?: (prompt: InteractivePrompt) => void
+  onPromptCancelled?: (prompt: InteractivePrompt) => void
+  onRunStopped?: (payload: RunLifecyclePayload) => void
+  onRunFailed?: (payload: RunFailedPayload) => void
+  onRunSteered?: (payload: RunSteeredPayload) => void
   onError?: (error: Error) => void
   onFinished?: () => void
 }
@@ -292,22 +300,52 @@ export function useActiveChatRuns() {
     }
 
     source.addEventListener('prompt.answered', updatePrompt)
-    source.addEventListener('prompt.expired', updatePrompt)
-    source.addEventListener('prompt.cancelled', updatePrompt)
+    source.addEventListener('prompt.expired', (event) => {
+      updatePrompt(event)
+      const prompt = promptFromPayload(parsePayload(event))
+      if (prompt) recordAndNotify(run, 'onPromptExpired', prompt)
+    })
+    source.addEventListener('prompt.cancelled', (event) => {
+      updatePrompt(event)
+      const prompt = promptFromPayload(parsePayload(event))
+      if (prompt) recordAndNotify(run, 'onPromptCancelled', prompt)
+    })
 
     source.addEventListener('run.completed', (event) => {
       retargetRunFromEvent(run, parsePayload(event))
       finishRun(run)
     })
     source.addEventListener('run.stopped', (event) => {
-      retargetRunFromEvent(run, parsePayload(event))
+      const payload = parsePayload(event)
+      retargetRunFromEvent(run, payload)
+      recordAndNotify(run, 'onRunStopped', {
+        message: typeof payload.message === 'string' ? payload.message : undefined,
+        messageId: typeof payload.messageId === 'string' ? payload.messageId : undefined,
+        occurredAt: eventTimestamp()
+      })
       finishRun(run)
+    })
+
+    source.addEventListener('run.steered', (event) => {
+      const payload = parsePayload(event)
+      retargetRunFromEvent(run, payload)
+      recordAndNotify(run, 'onRunSteered', {
+        text: typeof payload.text === 'string' ? payload.text : undefined,
+        messageId: typeof payload.messageId === 'string' ? payload.messageId : undefined,
+        occurredAt: eventTimestamp()
+      })
     })
 
     source.addEventListener('run.failed', (event) => {
       const payload = parsePayload(event)
       retargetRunFromEvent(run, payload)
-      const error = new Error(typeof payload.error === 'string' ? payload.error : 'Run failed')
+      const errorMessage = typeof payload.error === 'string' ? payload.error : 'Run failed'
+      recordAndNotify(run, 'onRunFailed', {
+        error: errorMessage,
+        messageId: typeof payload.messageId === 'string' ? payload.messageId : undefined,
+        occurredAt: eventTimestamp()
+      })
+      const error = new Error(errorMessage)
       notify(run, subscriber => subscriber.onError?.(error))
       finishRun(run)
     })

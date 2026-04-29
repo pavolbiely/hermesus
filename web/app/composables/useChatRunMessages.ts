@@ -1,5 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
-import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatWorkspaceChanges } from '~/types/web-chat'
+import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatSystemEventSeverity, WebChatSystemEventType, WebChatWorkspaceChanges } from '~/types/web-chat'
 import { toolDisplayName } from '~/utils/toolCalls'
 import { createLocalMessage } from './useHermesRunStream'
 
@@ -10,6 +10,18 @@ type RunActivity = {
   label: string
   kind: RunActivityKind
   updatedAt: number
+}
+
+type SystemEventOptions = {
+  eventType: WebChatSystemEventType
+  severity?: WebChatSystemEventSeverity
+  title: string
+  description?: string | null
+  text?: string | null
+  occurredAt?: string | null
+  metadata?: Record<string, unknown> | null
+  messageId?: string | null
+  dedupeKey?: string | null
 }
 
 const STILL_WORKING_DELAY_MS = 8000
@@ -67,6 +79,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   const currentActivity = ref<RunActivity | null>(null)
   const now = ref(Date.now())
   const connectedRunIds = new Set<string>()
+  const systemEventKeys = new Set<string>()
   let unsubscribeRun: (() => void) | undefined
   let activityTimer: ReturnType<typeof setInterval> | undefined
 
@@ -205,6 +218,30 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     completeProcessPart(reasoningPart)
   }
 
+  function appendSystemEvent(event: SystemEventOptions) {
+    const key = event.dedupeKey || `${event.messageId || event.eventType}:${event.title}:${event.description || event.text || ''}`
+    if (systemEventKeys.has(key)) return
+    if (event.messageId && messages.value.some(message => message.id === event.messageId)) return
+    systemEventKeys.add(key)
+
+    const localMessage = createLocalMessage('system', '')
+    messages.value.push({
+      ...localMessage,
+      id: event.messageId || localMessage.id,
+      createdAt: event.occurredAt || new Date().toISOString(),
+      parts: [{
+        type: 'event',
+        eventType: event.eventType,
+        severity: event.severity || 'info',
+        title: event.title,
+        description: event.description,
+        text: event.text,
+        occurredAt: event.occurredAt || null,
+        metadata: event.metadata || null
+      }]
+    })
+  }
+
   function appendReasoningDelta(content: string) {
     if (!content) return
 
@@ -247,6 +284,19 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
 
   function appendStatus(payload: AgentStatusEvent) {
     setActivity(payload.kind === 'warn' ? 'Checking results…' : 'Working…', 'working')
+    if (payload.kind === 'warn') {
+      appendSystemEvent({
+        eventType: 'agent_warning',
+        severity: 'warning',
+        title: 'Agent warning',
+        description: payload.message,
+        occurredAt: payload.createdAt,
+        messageId: payload.messageId,
+        dedupeKey: `agent_warning:${payload.messageId || payload.createdAt || payload.message}`
+      })
+      return
+    }
+
     hasAssistantResponseStarted.value = true
     const assistant = assistantMessage()
     removeThinkingPart(assistant)
@@ -285,6 +335,27 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
         return
       }
     }
+  }
+
+  function appendPromptExpired(prompt: InteractivePrompt) {
+    appendSystemEvent({
+      eventType: 'prompt_expired',
+      severity: 'warning',
+      title: prompt.kind === 'approval' ? 'Approval expired' : 'Question expired',
+      description: prompt.title,
+      occurredAt: prompt.answeredAt || new Date().toISOString(),
+      dedupeKey: `prompt_expired:${prompt.id}`
+    })
+  }
+
+  function appendPromptCancelled(prompt: InteractivePrompt) {
+    appendSystemEvent({
+      eventType: 'prompt_cancelled',
+      title: prompt.kind === 'approval' ? 'Approval cancelled' : 'Question cancelled',
+      description: prompt.title,
+      occurredAt: prompt.answeredAt || new Date().toISOString(),
+      dedupeKey: `prompt_cancelled:${prompt.id}`
+    })
   }
 
   function connectRun(runId: string, targetSessionId = options.sessionId.value) {
@@ -332,6 +403,46 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       },
       onPromptUpdated: (prompt) => {
         if (targetSessionId === options.sessionId.value) updatePrompt(prompt)
+      },
+      onPromptExpired: (prompt) => {
+        if (targetSessionId === options.sessionId.value) appendPromptExpired(prompt)
+      },
+      onPromptCancelled: (prompt) => {
+        if (targetSessionId === options.sessionId.value) appendPromptCancelled(prompt)
+      },
+      onRunStopped: (payload) => {
+        if (targetSessionId !== options.sessionId.value) return
+        appendSystemEvent({
+          eventType: 'run_stopped',
+          title: 'Run stopped',
+          description: payload.message || 'Stopped by user.',
+          occurredAt: payload.occurredAt,
+          messageId: payload.messageId,
+          dedupeKey: `run_stopped:${payload.messageId || runId}`
+        })
+      },
+      onRunFailed: (payload) => {
+        if (targetSessionId !== options.sessionId.value) return
+        appendSystemEvent({
+          eventType: 'run_failed',
+          severity: 'error',
+          title: 'Run failed',
+          description: payload.error,
+          occurredAt: payload.occurredAt,
+          messageId: payload.messageId,
+          dedupeKey: `run_failed:${payload.messageId || runId}`
+        })
+      },
+      onRunSteered: (payload) => {
+        if (targetSessionId !== options.sessionId.value) return
+        appendSystemEvent({
+          eventType: 'run_steered',
+          title: 'Run steered',
+          description: payload.text || null,
+          occurredAt: payload.occurredAt,
+          messageId: payload.messageId,
+          dedupeKey: `run_steered:${payload.messageId || payload.text || runId}`
+        })
       },
       onError: (err) => {
         if (targetSessionId !== options.sessionId.value) return

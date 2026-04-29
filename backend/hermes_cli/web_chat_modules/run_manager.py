@@ -270,19 +270,13 @@ class RunManager:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Run does not support live steering")
 
         steer_agent(request.text)
-        message_id = self._append_message(
-            self._services.db(),
-            active.context.session_id,
-            "system",
-            None,
-            message_items=[{"type": "web_chat_steer", "text": request.text}],
-        )
-        self._emit(active, {"type": "run.steered", "messageId": str(message_id), "text": request.text})
+        emitted_event = self._emit(active, {"type": "run.steered", "text": request.text})
+        message_id = emitted_event.get("messageId")
         return SteerRunResponse(
             runId=run_id,
             sessionId=active.context.session_id,
             accepted=True,
-            messageId=str(message_id),
+            messageId=str(message_id) if message_id else None,
         )
 
     def respond_prompt(self, run_id: str, prompt_id: str, request: RespondRunPromptRequest) -> RespondRunPromptResponse:
@@ -374,13 +368,89 @@ class RunManager:
                 return value
         return None
 
-    def _emit(self, active: ActiveRun, event: dict[str, Any]) -> None:
+    def _emit(self, active: ActiveRun, event: dict[str, Any]) -> dict[str, Any]:
         self._track_event_duration(active, event)
+        system_message_id = self._persist_system_event(active, event)
+        if system_message_id is not None and not event.get("messageId"):
+            event = {**event, "messageId": str(system_message_id)}
+        emitted_event = {"runId": active.context.run_id, "sessionId": active.context.session_id, **event}
         with active.event_condition:
             event_id = active.next_event_id
             active.next_event_id += 1
-            active.events.append({"id": event_id, "runId": active.context.run_id, "sessionId": active.context.session_id, **event})
+            emitted_event = {"id": event_id, **emitted_event}
+            active.events.append(emitted_event)
             active.event_condition.notify_all()
+        return emitted_event
+
+    def _persist_system_event(self, active: ActiveRun, event: dict[str, Any]) -> Any | None:
+        system_event = self._system_event_part(active, event)
+        if not system_event:
+            return None
+        return self._append_message(
+            self._services.db(),
+            active.context.session_id,
+            "system",
+            None,
+            message_items=[{"type": "web_chat_event", "event": system_event}],
+        )
+
+    def _system_event_part(self, active: ActiveRun, event: dict[str, Any]) -> dict[str, Any] | None:
+        event_type = event.get("type")
+        occurred_at = self._iso_now()
+
+        if event_type == "run.steered":
+            return {
+                "eventType": "run_steered",
+                "severity": "info",
+                "title": "Run steered",
+                "description": event.get("text") if isinstance(event.get("text"), str) else None,
+                "occurredAt": occurred_at,
+            }
+        if event_type == "run.stopped":
+            return {
+                "eventType": "run_stopped",
+                "severity": "info",
+                "title": "Run stopped",
+                "description": event.get("message") if isinstance(event.get("message"), str) else "Stopped by user.",
+                "occurredAt": occurred_at,
+            }
+        if event_type == "run.failed":
+            return {
+                "eventType": "run_failed",
+                "severity": "error",
+                "title": "Run failed",
+                "description": event.get("error") if isinstance(event.get("error"), str) else None,
+                "occurredAt": occurred_at,
+            }
+        if event_type == "agent.status" and event.get("kind") == "warn":
+            return {
+                "eventType": "agent_warning",
+                "severity": "warning",
+                "title": "Agent warning",
+                "description": event.get("message") if isinstance(event.get("message"), str) else None,
+                "occurredAt": occurred_at,
+            }
+        if event_type in {"prompt.expired", "prompt.cancelled"}:
+            prompt = event.get("prompt")
+            if not isinstance(prompt, dict):
+                return None
+            prompt_kind = prompt.get("kind")
+            prompt_title = prompt.get("title") if isinstance(prompt.get("title"), str) else None
+            is_approval = prompt_kind == "approval"
+            return {
+                "eventType": "prompt_expired" if event_type == "prompt.expired" else "prompt_cancelled",
+                "severity": "warning",
+                "title": (
+                    "Approval expired" if is_approval and event_type == "prompt.expired"
+                    else "Question expired" if event_type == "prompt.expired"
+                    else "Approval cancelled" if is_approval
+                    else "Question cancelled"
+                ),
+                "description": prompt_title,
+                "occurredAt": occurred_at,
+                "metadata": {"promptId": prompt.get("id")},
+            }
+        return None
 
     def _track_event_duration(self, active: ActiveRun, event: dict[str, Any]) -> None:
         event_type = event.get("type")

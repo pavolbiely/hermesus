@@ -11,6 +11,15 @@ function message(id, role, text) {
   }
 }
 
+function systemEvent(id, eventType, title) {
+  return {
+    id,
+    role: 'system',
+    createdAt: '2026-04-27T12:00:00.000Z',
+    parts: [{ type: 'event', eventType, title }]
+  }
+}
+
 test('keeps an optimistic user message when the session snapshot is stale', () => {
   const persisted = [message('server-1', 'assistant', 'previous')]
   const optimistic = message('local-1', 'user', 'hello')
@@ -100,6 +109,32 @@ test('does not preserve non-optimistic local messages across session refreshes',
   )
 
   assert.deepEqual(result.messages.map(item => item.id), ['server-1'])
+})
+
+test('preserves local system events across session refreshes', () => {
+  const persisted = [message('server-1', 'user', 'persisted')]
+  const event = systemEvent('local-event', 'run_stopped', 'Run stopped')
+
+  const result = mergeOptimisticUserMessages(
+    persisted,
+    [...persisted, event],
+    new Set()
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), ['server-1', 'local-event'])
+})
+
+test('does not duplicate equivalent system events after persistence', () => {
+  const persisted = [systemEvent('server-event', 'run_stopped', 'Run stopped')]
+  const local = systemEvent('local-event', 'run_stopped', 'Run stopped')
+
+  const result = mergeOptimisticUserMessages(
+    persisted,
+    [...persisted, local],
+    new Set()
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), ['server-event'])
 })
 
 test('preserves streaming assistant tool history while a run is active', () => {

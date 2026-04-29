@@ -106,6 +106,18 @@ def test_run_prompt_timeout_expires_and_fails_safe(client, monkeypatch):
     assert '"status":"expired"' in body
     assert "event: run.completed" in body
 
+    session = client.get(f"/api/web-chat/sessions/{run['sessionId']}")
+    assert session.status_code == 200
+    event_parts = [
+        message["parts"][0]
+        for message in session.json()["messages"]
+        if message["role"] == "system" and message["parts"] and message["parts"][0]["type"] == "event"
+    ]
+    assert event_parts[0]["eventType"] == "prompt_expired"
+    assert event_parts[0]["severity"] == "warning"
+    assert event_parts[0]["title"] == "Approval expired"
+    assert event_parts[0]["description"] == "Allow command?"
+
 
 def test_agent_executor_routes_cross_thread_terminal_approval_to_web_prompt(monkeypatch):
     from hermes_cli.web_chat_modules.agent_runner import agent_executor

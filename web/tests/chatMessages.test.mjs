@@ -22,15 +22,17 @@ test('keeps non-process parts out of process groups', () => {
     { type: 'media', attachments: [] },
     { type: 'interactive_prompt', prompt: null },
     { type: 'changes', changes: null },
+    { type: 'event', title: 'Run stopped', eventType: 'run_stopped' },
     { type: 'steer', text: 'Please continue' }
   ])
 
-  assert.equal(groups.length, 5)
+  assert.equal(groups.length, 6)
   assert.equal(groups[0].type, 'process')
   assert.equal(groups[1].type, 'part')
   assert.equal(groups[2].type, 'part')
   assert.equal(groups[3].type, 'part')
   assert.equal(groups[4].type, 'part')
+  assert.equal(groups[5].type, 'part')
 })
 
 test('groups status parts with run details', () => {
