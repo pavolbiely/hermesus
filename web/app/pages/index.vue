@@ -21,7 +21,17 @@ const newChatRequest = useNewChatRequest()
 const toast = useToast()
 const slashCommands = useSlashCommands({ input })
 
-await Promise.all([composer.initializeForNewChat(), context.initialize()])
+onMounted(() => {
+  void initializeComposer()
+})
+
+async function initializeComposer() {
+  try {
+    await Promise.all([composer.initializeForNewChat(), context.initialize()])
+  } catch (err) {
+    showError(err, 'Could not initialize new chat')
+  }
+}
 
 watch(
   () => newChatRequest.request.value,

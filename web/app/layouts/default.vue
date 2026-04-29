@@ -197,10 +197,10 @@ async function indexSessionsForSearch() {
   }))
 }
 
-async function startWorkspaceChat(workspacePath: string) {
+function startWorkspaceChat(workspacePath: string) {
   requestedSessionId.value = null
   newChatRequest.openNewChat(workspacePath)
-  await router.push('/')
+  void router.push('/')
 }
 
 function beginCreateWorkspace() {
