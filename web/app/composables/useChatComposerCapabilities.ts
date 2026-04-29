@@ -1,4 +1,6 @@
 import type { WebChatCapabilitiesResponse, WebChatModelCapability, WebChatSession } from '~/types/web-chat'
+import type { ChatComposerSelection } from '~/utils/chatComposerSelections'
+import { rememberChatComposerSelection, resolveSessionComposerSelection } from '~/utils/chatComposerSelections'
 
 function normalizeReasoningValue(value: string | null | undefined) {
   const normalized = value?.trim().toLowerCase()
@@ -18,6 +20,7 @@ export function useChatComposerCapabilities() {
   const selectedModel = useState<string | null>('chat-composer-selected-model', () => null)
   const selectedProvider = useState<string | null>('chat-composer-selected-provider', () => null)
   const selectedReasoningEffort = useState<string | null>('chat-composer-selected-reasoning', () => null)
+  const sessionSelections = useState<Record<string, ChatComposerSelection>>('chat-composer-session-selections', () => ({}))
   const lastUsedModel = useState<string | null>('chat-composer-last-used-model', () => null)
   const lastUsedProvider = useState<string | null>('chat-composer-last-used-provider', () => null)
   const lastUsedReasoningEffort = useState<string | null>('chat-composer-last-used-reasoning', () => null)
@@ -85,13 +88,27 @@ export function useChatComposerCapabilities() {
     setSelection(lastUsedModel.value, lastUsedReasoningEffort.value, lastUsedProvider.value)
   }
 
+  function applySessionSelection(session: WebChatSession | null | undefined) {
+    if (!session) {
+      setSelection(null, null, null)
+      return
+    }
+
+    const selection = resolveSessionComposerSelection(session, sessionSelections.value[session.id])
+    setSelection(selection.model, selection.reasoningEffort, selection.provider)
+  }
+
   async function initializeForSession(session: WebChatSession | null | undefined) {
     await ensureCapabilities()
-    setSelection(
-      session?.model || lastUsedModel.value,
-      normalizeReasoningValue(session?.reasoningEffort) || lastUsedReasoningEffort.value,
-      session?.provider || lastUsedProvider.value
-    )
+    applySessionSelection(session)
+  }
+
+  function rememberSessionSelection(sessionId: string | null | undefined) {
+    sessionSelections.value = rememberChatComposerSelection(sessionSelections.value, sessionId, {
+      model: selectedModel.value,
+      provider: selectedProvider.value,
+      reasoningEffort: selectedReasoningEffort.value
+    })
   }
 
   function rememberLastUsedSelection() {
@@ -117,7 +134,9 @@ export function useChatComposerCapabilities() {
     supportedReasoningEfforts,
     ensureCapabilities,
     initializeForNewChat,
+    applySessionSelection,
     initializeForSession,
+    rememberSessionSelection,
     rememberLastUsedSelection
   }
 }

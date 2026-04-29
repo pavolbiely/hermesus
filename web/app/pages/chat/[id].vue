@@ -220,9 +220,22 @@ watch(
   () => displayedData.value?.session,
   async (session) => {
     if (!session || session.id !== sessionId.value) return
-    await Promise.all([composer.initializeForSession(session), context.initializeForSession(session)])
+
+    const targetSessionId = session.id
+    await Promise.all([composer.ensureCapabilities(), context.initializeForSession(session)])
+    if (targetSessionId !== sessionId.value) return
+
+    composer.applySessionSelection(session)
   },
   { immediate: true }
+)
+
+watch(
+  [composer.selectedModel, composer.selectedProvider, composer.selectedReasoningEffort],
+  () => {
+    if (displayedData.value?.session.id !== sessionId.value) return
+    composer.rememberSessionSelection(sessionId.value)
+  }
 )
 
 const title = computed(() => {
