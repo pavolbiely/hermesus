@@ -20,10 +20,14 @@ watch(
 const isPending = computed(() => localPrompt.value.status === 'pending')
 const isApproval = computed(() => localPrompt.value.kind === 'approval')
 const statusLabel = computed(() => {
-  if (localPrompt.value.status === 'answered') return answeredLabel(localPrompt.value)
+  if (localPrompt.value.status === 'answered') return 'Answered'
   if (localPrompt.value.status === 'expired') return 'Expired'
   if (localPrompt.value.status === 'cancelled') return 'Cancelled'
   return 'Waiting for your response'
+})
+const responseSummaryLabel = computed(() => {
+  if (localPrompt.value.status === 'answered') return answeredLabel(localPrompt.value)
+  return statusLabel.value
 })
 const cardClasses = computed(() => isApproval.value
   ? 'border-warning/30 bg-warning/5'
@@ -139,7 +143,7 @@ async function respond(choice?: string) {
       </div>
 
       <p v-else class="text-xs text-muted">
-        {{ statusLabel }}<span v-if="localPrompt.answeredAt"> at {{ new Date(localPrompt.answeredAt).toLocaleTimeString() }}</span>.
+        {{ responseSummaryLabel }}<span v-if="localPrompt.answeredAt"> at {{ new Date(localPrompt.answeredAt).toLocaleTimeString() }}</span>.
       </p>
     </div>
   </UCard>
