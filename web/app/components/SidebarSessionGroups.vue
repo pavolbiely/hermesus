@@ -27,7 +27,7 @@ const emit = defineEmits<{
 
 const OTHER_CHATS_GROUP_ID = '__other__'
 const COLLAPSED_GROUPS_STORAGE_KEY = 'hermes-chat-collapsed-session-groups'
-const MAX_COLLAPSED_SESSION_COUNT = 10
+const MAX_COLLAPSED_SESSION_COUNT = 5
 
 const openMenuSessionId = ref<string | null>(null)
 const contextMenuReference = shallowRef<{ getBoundingClientRect: () => DOMRect } | null>(null)
