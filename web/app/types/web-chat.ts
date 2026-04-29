@@ -67,8 +67,21 @@ export type WebChatSystemEventType =
 
 export type WebChatSystemEventSeverity = 'info' | 'warning' | 'error'
 
+export type WebChatTaskPlanItemStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
+
+export type WebChatTaskPlanItem = {
+  id: string
+  content: string
+  status: WebChatTaskPlanItemStatus
+}
+
+export type WebChatTaskPlan = {
+  items: WebChatTaskPlanItem[]
+  updatedAt?: string | null
+}
+
 export type WebChatPart = {
-  type: 'text' | 'reasoning' | 'tool' | 'media' | 'interactive_prompt' | 'changes' | 'steer' | 'status' | 'event'
+  type: 'text' | 'reasoning' | 'tool' | 'media' | 'interactive_prompt' | 'changes' | 'steer' | 'status' | 'event' | 'task_plan'
   text?: string | null
   name?: string | null
   status?: string | null
@@ -86,6 +99,7 @@ export type WebChatPart = {
   mediaType?: string | null
   approvalId?: string | null
   prompt?: InteractivePrompt | null
+  taskPlan?: WebChatTaskPlan | null
   changes?: WebChatWorkspaceChanges | null
   attachments?: WebChatAttachment[] | null
   metadata?: Record<string, unknown> | null

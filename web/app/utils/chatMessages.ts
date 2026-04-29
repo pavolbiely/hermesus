@@ -4,7 +4,7 @@ export type MessagePartGroup =
   | { type: 'process'; parts: WebChatPart[] }
   | { type: 'part'; part: WebChatPart }
 
-const PROCESS_PART_TYPES = new Set(['reasoning', 'tool', 'status'])
+const PROCESS_PART_TYPES = new Set(['reasoning', 'tool', 'status', 'task_plan'])
 
 export function partText(part: WebChatPart) {
   return typeof part.text === 'string' ? part.text : ''
@@ -80,6 +80,7 @@ function plural(count: number, singular: string, pluralValue = `${singular}s`) {
 
 export function processGroupSummary(parts: WebChatPart[]) {
   const tools = parts.filter(part => part.type === 'tool')
+  const taskPlan = parts.find(part => part.type === 'task_plan')?.taskPlan
   const reasoningCount = parts.filter(part => part.type === 'reasoning').length
   const statusCount = parts.filter(part => part.type === 'status').length
   const warningCount = parts.filter(part => part.type === 'status' && part.status === 'warn').length
@@ -92,6 +93,7 @@ export function processGroupSummary(parts: WebChatPart[]) {
   }, {})
 
   const labels: string[] = []
+  if (taskPlan?.items.length) labels.push(plural(taskPlan.items.length, 'task'))
   if (reasoningCount) labels.push('Reasoned')
   if (warningCount) labels.push(plural(warningCount, 'warning'))
   else if (statusCount) labels.push(plural(statusCount, 'status', 'statuses'))

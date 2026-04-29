@@ -73,6 +73,7 @@ class ActiveRun:
     tool_duration_ms: int = 0
     prompt_wait_duration_ms: int = 0
     tool_started_at: dict[str, list[float]] = field(default_factory=dict)
+    latest_task_plan: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -374,6 +375,7 @@ class RunManager:
 
     def _emit(self, active: ActiveRun, event: dict[str, Any]) -> dict[str, Any]:
         self._track_event_duration(active, event)
+        self._track_task_plan(active, event)
         system_message_id = self._persist_system_event(active, event)
         if system_message_id is not None and not event.get("messageId"):
             event = {**event, "messageId": str(system_message_id)}
@@ -385,6 +387,14 @@ class RunManager:
             active.events.append(emitted_event)
             active.event_condition.notify_all()
         return emitted_event
+
+    def _track_task_plan(self, active: ActiveRun, event: dict[str, Any]) -> None:
+        if event.get("type") != "task_plan.updated":
+            return
+
+        task_plan = event.get("taskPlan")
+        if isinstance(task_plan, dict) and isinstance(task_plan.get("items"), list):
+            active.latest_task_plan = task_plan
 
     def _persist_system_event(self, active: ActiveRun, event: dict[str, Any]) -> Any | None:
         system_event = self._system_event_part(active, event)
@@ -560,6 +570,8 @@ class RunManager:
         items: list[dict[str, Any]] = []
         prompts = list(active.prompts.values())
         items.extend({"type": "web_chat_prompt", "prompt": prompt.model_dump()} for prompt in prompts)
+        if active.latest_task_plan:
+            items.append({"type": "web_chat_task_plan", "taskPlan": active.latest_task_plan})
         if metrics:
             items.append({"type": "web_chat_metrics", "metrics": metrics})
 

@@ -192,6 +192,25 @@ def message_events(message: dict[str, Any]) -> list[WebChatPart]:
     return events
 
 
+def message_task_plans(message: dict[str, Any]) -> list[WebChatPart]:
+    items = message_items(message)
+    if not isinstance(items, list):
+        return []
+
+    parts: list[WebChatPart] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "web_chat_task_plan":
+            continue
+        task_plan = item.get("taskPlan")
+        if not isinstance(task_plan, dict):
+            continue
+        try:
+            parts.append(WebChatPart(type="task_plan", taskPlan=task_plan))
+        except Exception:
+            continue
+    return parts
+
+
 def message_metrics(message: dict[str, Any]) -> dict[str, Any]:
     items = message_items(message)
     if not isinstance(items, list):
@@ -215,6 +234,7 @@ def message_parts(message: dict[str, Any]) -> list[WebChatPart]:
     parts.extend(message_events(message))
     for steer in message_steers(message):
         parts.append(WebChatPart(type="steer", text=steer))
+    parts.extend(message_task_plans(message))
     if message.get("reasoning") or message.get("reasoning_content"):
         parts.append(WebChatPart(type="reasoning", text=message.get("reasoning") or message.get("reasoning_content")))
     if message.get("content") and message.get("role") != "tool":

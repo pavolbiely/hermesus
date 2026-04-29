@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import os
 from threading import Lock
 from typing import Any, Callable
@@ -12,6 +13,7 @@ from .models import WebChatPrompt, WebChatPromptChoice
 from .run_manager import RunContext
 
 WEB_CHAT_SOURCE = "web-chat"
+_VALID_TASK_STATUSES = {"pending", "in_progress", "completed", "cancelled"}
 
 _APPROVAL_BRIDGE_LOCK = Lock()
 _APPROVAL_BRIDGE_CALLBACKS: list[Callable[..., str]] = []
@@ -87,6 +89,42 @@ def _choice_id(index: int) -> str:
     return f"choice_{index}"
 
 
+def task_plan_from_tool_result(tool_name: str | None, result: str | None) -> dict[str, Any] | None:
+    """Return a normalized task-plan payload from the Hermes `todo` tool result."""
+    if tool_name != "todo" or not result:
+        return None
+
+    try:
+        data = json.loads(result)
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+    todos = data.get("todos") if isinstance(data, dict) else None
+    if not isinstance(todos, list):
+        return None
+
+    items: list[dict[str, str]] = []
+    for index, item in enumerate(todos):
+        if not isinstance(item, dict):
+            continue
+
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+
+        status = str(item.get("status") or "pending")
+        if status not in _VALID_TASK_STATUSES:
+            status = "pending"
+
+        item_id = str(item.get("id") or f"item-{index + 1}")
+        items.append({"id": item_id, "content": content, "status": status})
+
+    if not items:
+        return None
+
+    return {"items": items, "updatedAt": _iso_now()}
+
+
 def agent_executor(
     context: RunContext,
     emit: Callable[[dict[str, Any]], None],
@@ -158,6 +196,16 @@ def agent_executor(
             "preview": preview,
             "input": args,
         })
+
+    def tool_complete(
+        _tool_call_id: str | None,
+        tool_name: str | None,
+        _args: Any | None,
+        result: str | None,
+    ) -> None:
+        task_plan = task_plan_from_tool_result(tool_name, result)
+        if task_plan:
+            emit({"type": "task_plan.updated", "taskPlan": task_plan})
 
     def status_callback(kind: str, message: str) -> None:
         if not message:
@@ -262,6 +310,7 @@ def agent_executor(
             reasoning_callback=reasoning_delta,
             clarify_callback=clarify_callback,
             tool_progress_callback=tool_progress,
+            tool_complete_callback=tool_complete,
             status_callback=status_callback,
         )
         context.interrupt_agent = getattr(agent, "interrupt", None)

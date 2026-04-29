@@ -67,6 +67,11 @@ function reasoningDurationSeconds(part: WebChatPart) {
 
         <ToolCallItem v-else-if="part.type === 'tool'" :part="part" />
 
+        <ChatTaskPlanCard
+          v-else-if="part.type === 'task_plan' && part.taskPlan"
+          :task-plan="part.taskPlan"
+        />
+
         <div
           v-else-if="part.type === 'status'"
           class="flex items-start gap-2 rounded-md px-2 py-1 text-xs"

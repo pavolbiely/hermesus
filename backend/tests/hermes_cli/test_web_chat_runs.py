@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 from pathlib import Path
@@ -102,6 +103,73 @@ def test_start_run_streams_agent_warning_as_system_event(client, monkeypatch, tm
     assert messages[1]["parts"][0]["eventType"] == "agent_warning"
     assert messages[1]["parts"][0]["description"] == "test warning"
     assert messages[2]["parts"][0]["text"] == "Done"
+
+
+def test_start_run_streams_and_persists_task_plan(client, monkeypatch, tmp_path):
+    import hermes_cli.web_chat as web_chat
+
+    repo = git_repo(tmp_path)
+    task_plan = {
+        "todos": [
+            {"id": "1", "content": "Inspect current UI", "status": "completed"},
+            {"id": "2", "content": "Build plan card", "status": "in_progress"},
+            {"id": "3", "content": "Verify behavior", "status": "pending"},
+        ]
+    }
+
+    def fake_executor(context, emit):
+        emit({
+            "type": "task_plan.updated",
+            "taskPlan": {
+                "items": task_plan["todos"],
+                "updatedAt": "2026-04-30T00:00:00+00:00",
+            },
+        })
+        return "Done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+
+    response = client.post("/api/web-chat/runs", json={"input": "Say done", "workspace": str(repo)})
+    assert response.status_code == 202
+    run = response.json()
+
+    with client.stream("GET", f"/api/web-chat/runs/{run['runId']}/events") as stream:
+        body = stream.read().decode()
+
+    assert "event: task_plan.updated" in body
+    assert "Build plan card" in body
+
+    detail = client.get(f"/api/web-chat/sessions/{run['sessionId']}")
+    assistant = detail.json()["messages"][1]
+    task_plan_part = assistant["parts"][0]
+    assert task_plan_part["type"] == "task_plan"
+    assert task_plan_part["taskPlan"] == {
+        "items": task_plan["todos"],
+        "updatedAt": "2026-04-30T00:00:00+00:00",
+    }
+    assert assistant["parts"][1]["text"] == "Done"
+
+
+def test_task_plan_from_todo_tool_result_normalizes_items():
+    from hermes_cli.web_chat_modules.agent_runner import task_plan_from_tool_result
+
+    result = task_plan_from_tool_result(
+        "todo",
+        json.dumps({
+            "todos": [
+                {"id": "a", "content": " First task ", "status": "completed"},
+                {"content": "Second task", "status": "unknown"},
+                {"id": "empty", "content": "   ", "status": "pending"},
+            ]
+        }),
+    )
+
+    assert result is not None
+    assert result["items"] == [
+        {"id": "a", "content": "First task", "status": "completed"},
+        {"id": "item-2", "content": "Second task", "status": "pending"},
+    ]
+    assert result["updatedAt"]
 
 
 def test_stop_run_interrupts_executor_and_persists_stopped_event(client, monkeypatch, tmp_path):

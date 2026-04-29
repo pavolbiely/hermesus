@@ -1,4 +1,4 @@
-import type { AgentStatusEvent, InteractivePrompt, WebChatWorkspaceChanges } from '~/types/web-chat'
+import type { AgentStatusEvent, InteractivePrompt, WebChatTaskPlan, WebChatWorkspaceChanges } from '~/types/web-chat'
 import { reconcileRunSession } from '../utils/activeRunSession'
 import { notificationSoundVariant, playNotificationSound } from '../utils/notificationSound'
 import { createRunEventReplay } from '../utils/runEventReplay'
@@ -32,6 +32,7 @@ type ActiveRunHandlers = {
   onCompleted?: (payload: CompletedRunPayload) => void
   onToolStarted?: (payload: ToolRunPayload) => void
   onToolCompleted?: (payload: ToolRunPayload) => void
+  onTaskPlanUpdated?: (payload: WebChatTaskPlan) => void
   onStatus?: (payload: AgentStatusEvent) => void
   onPromptRequested?: (prompt: InteractivePrompt) => void
   onPromptUpdated?: (prompt: InteractivePrompt) => void
@@ -126,6 +127,16 @@ function statusFromPayload(payload: RunEventPayload): AgentStatusEvent | null {
     message: payload.message,
     createdAt: typeof payload.createdAt === 'string' ? payload.createdAt : null
   }
+}
+
+function taskPlanFromPayload(payload: RunEventPayload): WebChatTaskPlan | null {
+  const taskPlan = payload.taskPlan
+  if (!taskPlan || typeof taskPlan !== 'object') return null
+
+  const items = (taskPlan as { items?: unknown }).items
+  if (!Array.isArray(items)) return null
+
+  return taskPlan as WebChatTaskPlan
 }
 
 function numericMetric(metrics: Record<string, unknown>, key: string) {
@@ -271,6 +282,14 @@ export function useActiveChatRuns() {
         input: payload.input,
         occurredAt: eventTimestamp()
       })
+    })
+
+    source.addEventListener('task_plan.updated', (event) => {
+      const payload = parsePayload(event)
+      retargetRunFromEvent(run, payload)
+      const taskPlan = taskPlanFromPayload(payload)
+      if (!taskPlan) return
+      recordAndNotify(run, 'onTaskPlanUpdated', taskPlan)
     })
 
     source.addEventListener('agent.status', (event) => {

@@ -1,5 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
-import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatSystemEventSeverity, WebChatSystemEventType, WebChatWorkspaceChanges } from '~/types/web-chat'
+import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatSystemEventSeverity, WebChatSystemEventType, WebChatTaskPlan, WebChatWorkspaceChanges } from '~/types/web-chat'
 import { toolDisplayName } from '~/utils/toolCalls'
 import { createLocalMessage } from './useHermesRunStream'
 
@@ -303,6 +303,24 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     assistant.parts.push({ type: 'status', text: payload.message, status: payload.kind })
   }
 
+  function appendTaskPlan(taskPlan: WebChatTaskPlan) {
+    if (!taskPlan.items.length) return
+
+    setActivity('Updating plan…', 'working')
+    hasAssistantResponseStarted.value = true
+    const assistant = assistantMessage()
+    removeThinkingPart(assistant)
+    completeOpenReasoning(assistant)
+
+    const existing = assistant.parts.find(part => part.type === 'task_plan')
+    if (existing) {
+      existing.taskPlan = taskPlan
+      return
+    }
+
+    assistant.parts.push({ type: 'task_plan', taskPlan })
+  }
+
   function markToolCompleted(payload: { name?: string, occurredAt?: string }) {
     setActivity('Thinking…', 'thinking')
     const assistant = [...messages.value].reverse().find(message => message.role === 'assistant')
@@ -392,6 +410,9 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       },
       onToolCompleted: (payload) => {
         if (targetSessionId === options.sessionId.value) markToolCompleted(payload)
+      },
+      onTaskPlanUpdated: (taskPlan) => {
+        if (targetSessionId === options.sessionId.value) appendTaskPlan(taskPlan)
       },
       onStatus: (payload) => {
         if (targetSessionId === options.sessionId.value) appendStatus(payload)

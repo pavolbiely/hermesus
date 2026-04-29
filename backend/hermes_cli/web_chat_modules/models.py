@@ -90,8 +90,19 @@ class RespondRunPromptResponse(BaseModel):
     prompt: WebChatPrompt
 
 
+class WebChatTaskPlanItem(BaseModel):
+    id: str
+    content: str
+    status: Literal["pending", "in_progress", "completed", "cancelled"] = "pending"
+
+
+class WebChatTaskPlan(BaseModel):
+    items: list[WebChatTaskPlanItem]
+    updatedAt: str | None = None
+
+
 class WebChatPart(BaseModel):
-    type: Literal["text", "reasoning", "tool", "media", "interactive_prompt", "changes", "steer", "status", "event"]
+    type: Literal["text", "reasoning", "tool", "media", "interactive_prompt", "changes", "steer", "status", "event", "task_plan"]
     text: str | None = None
     name: str | None = None
     status: str | None = None
@@ -106,6 +117,7 @@ class WebChatPart(BaseModel):
     mediaType: str | None = None
     approvalId: str | None = None
     prompt: WebChatPrompt | None = None
+    taskPlan: WebChatTaskPlan | None = None
     changes: Any | None = None
     attachments: list[WebChatAttachment] | None = None
     metadata: dict[str, Any] | None = None
