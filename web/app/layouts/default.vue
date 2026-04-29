@@ -44,6 +44,7 @@ const profileOptions = computed(() => (profilesData.value?.profiles || []).map(p
   profile
 })))
 const selectedProfile = ref<string | undefined>(profilesData.value?.activeProfile || undefined)
+const selectedProfileLabel = computed(() => profileOptions.value.find(option => option.value === selectedProfile.value)?.label)
 const profileSwitchPending = ref(false)
 const now = ref(new Date())
 const readMessageCounts = ref<Record<string, number>>({})
@@ -656,27 +657,6 @@ provide('appUpdateControl', {
 
       <template #default>
         <div class="-mt-2 space-y-2 px-0.5 pb-3">
-          <USelectMenu
-            :model-value="selectedProfile"
-            :items="profileOptions"
-            value-key="value"
-            label-key="label"
-            size="sm"
-            class="w-full"
-            :loading="profilesPending || profileSwitchPending"
-            :disabled="profilesPending || profileSwitchPending || !profileOptions.length"
-            placeholder="Hermes profile"
-            @update:model-value="selectProfile"
-          >
-            <template #leading>
-              <UIcon
-                :name="profileSwitchPending ? 'i-lucide-loader-circle' : 'i-lucide-user-round'"
-                class="size-4"
-                :class="profileSwitchPending ? 'animate-spin' : undefined"
-              />
-            </template>
-          </USelectMenu>
-
           <div class="grid grid-cols-2 gap-1.5">
             <UButton
               block
@@ -723,6 +703,42 @@ provide('appUpdateControl', {
           @toggle-session-pinned="toggleSessionPinned"
           @confirm-session-action="beginConfirmAction"
         />
+      </template>
+
+      <template #footer>
+        <div class="w-full pb-1">
+          <USelectMenu
+            :model-value="selectedProfile"
+            :items="profileOptions"
+            value-key="value"
+            label-key="label"
+            size="xs"
+            class="block w-full max-w-none"
+            :ui="{
+              base: 'w-full max-w-none !justify-start text-left',
+              value: 'flex-1 text-left',
+              placeholder: 'flex-1 text-left',
+              trailing: 'ms-auto'
+            }"
+            :loading="profilesPending || profileSwitchPending"
+            :disabled="profilesPending || profileSwitchPending || !profileOptions.length"
+            placeholder="Hermes profile"
+            @update:model-value="selectProfile"
+          >
+            <template #default>
+              <span class="min-w-0 flex-1 truncate text-left">
+                {{ selectedProfileLabel || 'Hermes profile' }}
+              </span>
+            </template>
+            <template #leading>
+              <UIcon
+                :name="profileSwitchPending ? 'i-lucide-loader-circle' : 'i-lucide-user-round'"
+                class="size-3.5"
+                :class="profileSwitchPending ? 'animate-spin' : undefined"
+              />
+            </template>
+          </USelectMenu>
+        </div>
       </template>
     </UDashboardSidebar>
 
