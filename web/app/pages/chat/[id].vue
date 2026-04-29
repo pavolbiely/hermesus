@@ -36,7 +36,6 @@ const loadingSkeletonCount = computed(() => loadingChatSkeletonCount(lastRendere
 const slashCommands = useSlashCommands({ input })
 const copiedMessageId = ref<string | null>(null)
 const workspaceInvalidSignal = ref(0)
-const suppressNextInterruptedMessage = ref(false)
 const loadingOlderMessages = ref(false)
 const olderMessagesError = ref<string | null>(null)
 let preserveScrollAfterPrepend: { root: Element, previousScrollHeight: number, previousScrollTop: number } | null = null
@@ -102,11 +101,6 @@ const {
   refresh,
   refreshSessions,
   refreshSessionOnFinish: false,
-  shouldSuppressCompleted: (payload) => {
-    if (!suppressNextInterruptedMessage.value || payload.content !== 'Chat interrupted.') return false
-    suppressNextInterruptedMessage.value = false
-    return true
-  },
   toast,
   activeChatRuns
 })
@@ -160,9 +154,6 @@ const {
   activeChatRuns,
   connectRun,
   rememberLastUsedSelection: composer.rememberLastUsedSelection,
-  onInterruptingForEdit: () => {
-    suppressNextInterruptedMessage.value = true
-  },
   showError
 })
 

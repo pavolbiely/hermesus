@@ -571,30 +571,13 @@ class RunManager:
         try:
             active.context.request_prompt = lambda prompt, timeout_seconds=600: self._request_prompt(active, prompt, timeout_seconds)
             final_text = self._executor(active.context, lambda event: self._emit(active, event))
-            generation_duration_ms = max(0, round((time.time() - active.created_at) * 1000))
-            metrics = self._message_metrics(active, generation_duration_ms=generation_duration_ms)
             if active.context.stop_requested.is_set():
-                interrupted_text = "Chat interrupted."
-                assistant_message_id = self._append_message(
-                    self._services.db(),
-                    active.context.session_id,
-                    "assistant",
-                    interrupted_text,
-                    message_items=self._message_items(active, metrics),
-                )
-                changes = self._services.persist_run_workspace_changes(active.context, assistant_message_id)
-                self._emit(
-                    active,
-                    {
-                        "type": "message.completed",
-                        "content": interrupted_text,
-                        "changes": changes.model_dump() if changes else None,
-                        "metrics": metrics,
-                    },
-                )
                 self._emit(active, {"type": "run.stopped"})
                 self._finish(active, "stopped")
                 return
+
+            generation_duration_ms = max(0, round((time.time() - active.created_at) * 1000))
+            metrics = self._message_metrics(active, generation_duration_ms=generation_duration_ms)
             if final_text:
                 assistant_message_id = self._append_message(
                     self._services.db(),

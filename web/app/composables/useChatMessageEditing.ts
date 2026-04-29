@@ -16,7 +16,6 @@ type UseChatMessageEditingOptions = {
   activeChatRuns: ReturnType<typeof useActiveChatRuns>
   connectRun: (runId: string, sessionId: string) => void
   rememberLastUsedSelection: () => void
-  onInterruptingForEdit?: () => void
   showError: (err: unknown, fallback: string) => void
 }
 
@@ -121,7 +120,6 @@ export function useChatMessageEditing(options: UseChatMessageEditingOptions) {
     const runId = options.activeChatRuns.runIdForSession(sessionId)
     if (!runId) return
 
-    options.onInterruptingForEdit?.()
     await options.activeChatRuns.stop(sessionId)
     await waitForRunToFinish(sessionId, runId)
   }

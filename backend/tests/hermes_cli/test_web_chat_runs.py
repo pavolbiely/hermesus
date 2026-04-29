@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import threading
 from pathlib import Path
@@ -69,7 +68,7 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
     assert detail.json()["session"]["workspace"] == str(repo)
 
 
-def test_start_run_streams_agent_status_without_persisting_status(client, monkeypatch, tmp_path):
+def test_start_run_streams_agent_warning_as_system_event(client, monkeypatch, tmp_path):
     import hermes_cli.web_chat as web_chat
 
     repo = git_repo(tmp_path)
@@ -98,12 +97,14 @@ def test_start_run_streams_agent_status_without_persisting_status(client, monkey
 
     detail = client.get(f"/api/web-chat/sessions/{run['sessionId']}")
     messages = detail.json()["messages"]
-    assert [message["role"] for message in messages] == ["user", "assistant"]
-    assert messages[1]["parts"][0]["text"] == "Done"
-    assert "test warning" not in json.dumps(messages)
+    assert [message["role"] for message in messages] == ["user", "system", "assistant"]
+    assert messages[1]["parts"][0]["type"] == "event"
+    assert messages[1]["parts"][0]["eventType"] == "agent_warning"
+    assert messages[1]["parts"][0]["description"] == "test warning"
+    assert messages[2]["parts"][0]["text"] == "Done"
 
 
-def test_stop_run_interrupts_executor_and_persists_interrupted_message(client, monkeypatch, tmp_path):
+def test_stop_run_interrupts_executor_and_persists_stopped_event(client, monkeypatch, tmp_path):
     import hermes_cli.web_chat as web_chat
 
     repo = tmp_path / "repo"
@@ -137,15 +138,18 @@ def test_stop_run_interrupts_executor_and_persists_interrupted_message(client, m
     with client.stream("GET", f"/api/web-chat/runs/{run['runId']}/events") as stream:
         body = stream.read().decode()
 
-    assert "event: message.completed" in body
-    assert "Chat interrupted." in body
+    assert "event: message.completed" not in body
+    assert "Chat interrupted." not in body
     assert "event: run.stopped" in body
     assert "Should not be persisted" not in body
 
     detail = client.get(f"/api/web-chat/sessions/{run['sessionId']}")
     messages = detail.json()["messages"]
-    assert [message["role"] for message in messages] == ["user", "assistant"]
-    assert messages[1]["parts"][0]["text"] == "Chat interrupted."
+    assert [message["role"] for message in messages] == ["user", "system"]
+    assert messages[1]["parts"][0]["type"] == "event"
+    assert messages[1]["parts"][0]["eventType"] == "run_stopped"
+    assert messages[1]["parts"][0]["title"] == "Run stopped"
+    assert messages[1]["parts"][0]["description"] == "Stopped by user."
 
 
 def test_start_run_persists_workspace_changes_with_patch(client, monkeypatch, tmp_path):
@@ -494,6 +498,10 @@ def test_stop_run_marks_active_run_as_stopping(client, monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.json() == {"runId": start["runId"], "stopped": True}
+
+    with client.stream("GET", f"/api/web-chat/runs/{start['runId']}/events") as stream:
+        body = stream.read().decode()
+    assert "event: run.stopped" in body
 
 
 def test_session_detail_exposes_active_run_and_pending_prompt(client, monkeypatch):
