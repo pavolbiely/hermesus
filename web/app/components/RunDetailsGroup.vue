@@ -60,8 +60,9 @@ function reasoningDurationSeconds(part: WebChatPart) {
           :text="partText(part)"
           :streaming="isStreamingReasoning(part)"
           :duration="reasoningDurationSeconds(part)"
+          :ui="{ body: 'max-h-[200px] pt-1 overflow-y-auto text-sm text-dimmed whitespace-pre-wrap' }"
         >
-          <Comark :markdown="partText(part)" :plugins="markdownPlugins" class="*:first:mt-0 *:last:mb-0" />
+          <Comark :markdown="partText(part)" :plugins="markdownPlugins" class="chat-reasoning-markdown" />
         </UChatReasoning>
 
         <ToolCallItem v-else-if="part.type === 'tool'" :part="part" />
