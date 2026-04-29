@@ -242,6 +242,10 @@ export type SaveWorkspaceRequest = {
   path: string
 }
 
+export type ReorderWorkspacesRequest = {
+  workspaceIds: string[]
+}
+
 export type DirectorySuggestionsResponse = {
   suggestions: string[]
 }

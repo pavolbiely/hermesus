@@ -23,6 +23,7 @@ const emit = defineEmits<{
   renameSession: [session: WebChatSession]
   toggleSessionPinned: [session: WebChatSession]
   confirmSessionAction: [action: 'duplicate' | 'delete', session: WebChatSession]
+  reorderWorkspaces: [workspaceIds: string[]]
 }>()
 
 const OTHER_CHATS_GROUP_ID = '__other__'
@@ -30,9 +31,14 @@ const COLLAPSED_GROUPS_STORAGE_KEY = 'hermes-chat-collapsed-session-groups'
 const MAX_COLLAPSED_SESSION_COUNT = 5
 
 const openMenuSessionId = ref<string | null>(null)
+const draggingWorkspaceId = ref<string | null>(null)
+const dragPreviewWorkspaceIds = ref<string[] | null>(null)
+const preserveDroppedPreview = ref(false)
+const suppressNextWorkspaceClick = ref(false)
 const contextMenuReference = shallowRef<{ getBoundingClientRect: () => DOMRect } | null>(null)
 const collapsedGroupIds = ref(new Set<string>([OTHER_CHATS_GROUP_ID]))
 const expandedSessionGroupIds = ref(new Set<string>())
+let clearDroppedPreviewTimer: number | undefined
 
 function sessionTitle(session: WebChatSession) {
   return session.title || session.preview || 'Untitled chat'
@@ -50,6 +56,106 @@ function sessionTimestampTitle(updatedAt: string) {
 
 function isActiveSession(session: WebChatSession) {
   return props.activeSessionId === session.id
+}
+
+function isSortableWorkspaceGroup(group: SessionGroup) {
+  return Boolean(group.workspace)
+}
+
+const displayedGroups = computed(() => {
+  const previewIds = dragPreviewWorkspaceIds.value
+  if (!previewIds) return props.groups
+
+  const workspaceGroups = new Map(
+    props.groups
+      .filter(group => group.workspace)
+      .map(group => [group.workspace!.id, group])
+  )
+  const orderedWorkspaceGroups = [
+    ...previewIds.map(id => workspaceGroups.get(id)).filter((group): group is SessionGroup => Boolean(group)),
+    ...props.groups.filter(group => group.workspace && !previewIds.includes(group.workspace.id))
+  ]
+  const fixedGroups = props.groups.filter(group => !group.workspace)
+
+  return [...orderedWorkspaceGroups, ...fixedGroups]
+})
+
+function workspaceGroupIds() {
+  return props.groups
+    .map(group => group.workspace?.id)
+    .filter((id): id is string => Boolean(id))
+}
+
+function startWorkspaceDrag(group: SessionGroup, event: DragEvent) {
+  if (!group.workspace) return
+  draggingWorkspaceId.value = group.workspace.id
+  dragPreviewWorkspaceIds.value = workspaceGroupIds()
+  event.dataTransfer?.setData('text/plain', group.workspace.id)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+function orderedWorkspaceIdsWithMove(sourceId: string, targetId: string, placeAfter: boolean) {
+  const workspaceIds = dragPreviewWorkspaceIds.value || workspaceGroupIds()
+  const nextWorkspaceIds = workspaceIds.filter(id => id !== sourceId)
+  const targetIndex = nextWorkspaceIds.indexOf(targetId)
+  if (targetIndex === -1) return workspaceIds
+
+  nextWorkspaceIds.splice(targetIndex + (placeAfter ? 1 : 0), 0, sourceId)
+  return nextWorkspaceIds
+}
+
+function dragOverWorkspace(group: SessionGroup, event: DragEvent) {
+  const sourceId = draggingWorkspaceId.value
+  const targetId = group.workspace?.id
+  if (!sourceId || !targetId) return
+
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  if (sourceId === targetId) return
+
+  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const nextWorkspaceIds = orderedWorkspaceIdsWithMove(sourceId, targetId, event.clientY > bounds.top + bounds.height / 2)
+  if (nextWorkspaceIds.join('\0') !== dragPreviewWorkspaceIds.value?.join('\0')) {
+    dragPreviewWorkspaceIds.value = nextWorkspaceIds
+  }
+}
+
+function dropWorkspace(group: SessionGroup, event: DragEvent) {
+  event.preventDefault()
+  const sourceId = draggingWorkspaceId.value
+  const targetId = group.workspace?.id
+  if (!sourceId || !targetId) {
+    endWorkspaceDrag()
+    return
+  }
+
+  const workspaceIds = dragPreviewWorkspaceIds.value || orderedWorkspaceIdsWithMove(sourceId, targetId, false)
+  preserveDroppedPreview.value = true
+  if (clearDroppedPreviewTimer) clearTimeout(clearDroppedPreviewTimer)
+  clearDroppedPreviewTimer = window.setTimeout(() => {
+    preserveDroppedPreview.value = false
+    dragPreviewWorkspaceIds.value = null
+  }, 1000)
+  emit('reorderWorkspaces', workspaceIds)
+  endWorkspaceDrag()
+}
+
+function endWorkspaceDrag() {
+  if (draggingWorkspaceId.value) {
+    suppressNextWorkspaceClick.value = true
+    window.setTimeout(() => {
+      suppressNextWorkspaceClick.value = false
+    })
+  }
+  draggingWorkspaceId.value = null
+  if (!preserveDroppedPreview.value) {
+    dragPreviewWorkspaceIds.value = null
+  }
+}
+
+function toggleWorkspaceGroup(group: SessionGroup) {
+  if (suppressNextWorkspaceClick.value) return
+  toggleGroupCollapsed(group)
 }
 
 function isUnreadSession(session: WebChatSession) {
@@ -131,6 +237,20 @@ function toggleGroupCollapsed(group: SessionGroup) {
 }
 
 watch(
+  () => props.groups,
+  () => {
+    const previewIds = dragPreviewWorkspaceIds.value
+    if (!preserveDroppedPreview.value || !previewIds) return
+    if (workspaceGroupIds().join('\0') !== previewIds.join('\0')) return
+
+    if (clearDroppedPreviewTimer) clearTimeout(clearDroppedPreviewTimer)
+    clearDroppedPreviewTimer = undefined
+    preserveDroppedPreview.value = false
+    dragPreviewWorkspaceIds.value = null
+  }
+)
+
+watch(
   collapsedGroupIds,
   ids => saveCollapsedGroupIds(ids)
 )
@@ -173,6 +293,10 @@ onMounted(() => {
   collapsedGroupIds.value = readCollapsedGroupIds()
   expandActiveSessionGroup()
   revealActiveSession()
+})
+
+onUnmounted(() => {
+  if (clearDroppedPreviewTimer) clearTimeout(clearDroppedPreviewTimer)
 })
 
 function openSessionMenu(session: WebChatSession) {
@@ -258,16 +382,34 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
 </script>
 
 <template>
-  <nav class="space-y-4 px-0.5" aria-label="Chat sessions by workspace">
-    <section v-for="group in groups" :key="group.id" class="space-y-1">
+  <TransitionGroup
+    tag="nav"
+    name="workspace-sort"
+    class="space-y-4 px-0.5"
+    aria-label="Chat sessions by workspace"
+  >
+    <section
+      v-for="group in displayedGroups"
+      :key="group.id"
+      class="space-y-1"
+      @dragover="dragOverWorkspace(group, $event)"
+      @drop="dropWorkspace(group, $event)"
+    >
       <div
         role="button"
         tabindex="0"
         class="group/workspace flex h-7 w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-md px-1.5 text-left text-xs font-medium uppercase tracking-wide text-muted outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+        :class="[
+          isSortableWorkspaceGroup(group) ? 'cursor-grab active:cursor-grabbing' : '',
+          draggingWorkspaceId === group.workspace?.id ? 'opacity-50' : ''
+        ]"
         :aria-expanded="!isGroupCollapsed(group)"
-        @click="toggleGroupCollapsed(group)"
-        @keydown.enter.prevent="toggleGroupCollapsed(group)"
-        @keydown.space.prevent="toggleGroupCollapsed(group)"
+        :draggable="isSortableWorkspaceGroup(group)"
+        @click="toggleWorkspaceGroup(group)"
+        @dragstart="startWorkspaceDrag(group, $event)"
+        @dragend="endWorkspaceDrag"
+        @keydown.enter.prevent="toggleWorkspaceGroup(group)"
+        @keydown.space.prevent="toggleWorkspaceGroup(group)"
       >
         <span class="flex min-w-0 items-center gap-1.5 truncate" :title="group.path || undefined">
           <UIcon
@@ -397,5 +539,11 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
         No chats yet
       </p>
     </section>
-  </nav>
+  </TransitionGroup>
 </template>
+
+<style scoped>
+.workspace-sort-move {
+  transition: transform 150ms ease;
+}
+</style>

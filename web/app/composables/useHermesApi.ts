@@ -4,6 +4,7 @@ import type {
   ExecuteCommandResponse,
   FilePreviewRequest,
   FilePreviewResolveRequest,
+  ReorderWorkspacesRequest,
   SaveWorkspaceRequest,
   SessionDetailResponse,
   SessionListResponse,
@@ -103,6 +104,10 @@ export function useHermesApi() {
       body: payload
     }),
     updateWorkspace: (id: string, payload: SaveWorkspaceRequest) => request<WebChatWorkspaceResponse>(`/api/web-chat/workspaces/${id}`, {
+      method: 'PATCH',
+      body: payload
+    }),
+    reorderWorkspaces: (payload: ReorderWorkspacesRequest) => request<WebChatWorkspacesResponse>('/api/web-chat/workspaces/order', {
       method: 'PATCH',
       body: payload
     }),

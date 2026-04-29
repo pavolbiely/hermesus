@@ -29,7 +29,6 @@ export function buildSessionGroups(options: BuildSessionGroupsOptions): SessionG
   }
 
   const groups: SessionGroup[] = [...options.workspaces]
-    .sort(compareWorkspaces)
     .map((workspace) => {
       const key = workspaceKey(workspace.path)
       return {
@@ -58,12 +57,6 @@ export function buildSessionGroups(options: BuildSessionGroupsOptions): SessionG
   }
 
   return groups
-}
-
-function compareWorkspaces(a: WebChatWorkspace, b: WebChatWorkspace): number {
-  return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
-    || a.label.localeCompare(b.label)
-    || a.path.localeCompare(b.path)
 }
 
 function sortedSessions(sessions: WebChatSession[]): WebChatSession[] {

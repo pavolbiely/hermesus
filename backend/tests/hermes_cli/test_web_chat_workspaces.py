@@ -288,6 +288,63 @@ def test_manages_workspaces_for_composer(client, tmp_path):
     assert client.get("/api/web-chat/workspaces").json() == {"workspaces": [], "activeWorkspace": None}
 
 
+def test_reorders_managed_workspaces(client, tmp_path, monkeypatch):
+    project = tmp_path / "settings-project"
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    third = tmp_path / "third"
+    project.mkdir()
+    first.mkdir()
+    second.mkdir()
+    third.mkdir()
+    monkeypatch.setenv("HERMES_WEB_CHAT_PROJECT_ROOT", str(project))
+
+    first_response = client.post("/api/web-chat/workspaces", json={"label": "First", "path": str(first)})
+    second_response = client.post("/api/web-chat/workspaces", json={"label": "Second", "path": str(second)})
+    third_response = client.post("/api/web-chat/workspaces", json={"label": "Third", "path": str(third)})
+    workspace_ids = [
+        first_response.json()["workspace"]["id"],
+        second_response.json()["workspace"]["id"],
+        third_response.json()["workspace"]["id"],
+    ]
+
+    response = client.patch("/api/web-chat/workspaces/order", json={"workspaceIds": [workspace_ids[2], workspace_ids[0], workspace_ids[1]]})
+
+    assert response.status_code == 200
+    assert [workspace["id"] for workspace in response.json()["workspaces"]] == [workspace_ids[2], workspace_ids[0], workspace_ids[1]]
+    assert [workspace["id"] for workspace in client.get("/api/web-chat/workspaces").json()["workspaces"]] == [
+        workspace_ids[2],
+        workspace_ids[0],
+        workspace_ids[1],
+    ]
+
+    settings_path = project / ".hermes" / "web-chat" / "settings.json"
+    assert [workspace["id"] for workspace in json.loads(settings_path.read_text(encoding="utf-8"))["workspaces"]] == [
+        workspace_ids[2],
+        workspace_ids[0],
+        workspace_ids[1],
+    ]
+
+
+def test_reorder_workspaces_rejects_unknown_or_duplicate_ids(client, tmp_path, monkeypatch):
+    project = tmp_path / "settings-project"
+    workspace = tmp_path / "workspace"
+    project.mkdir()
+    workspace.mkdir()
+    monkeypatch.setenv("HERMES_WEB_CHAT_PROJECT_ROOT", str(project))
+
+    create = client.post("/api/web-chat/workspaces", json={"label": "Workspace", "path": str(workspace)})
+    workspace_id = create.json()["workspace"]["id"]
+
+    duplicate = client.patch("/api/web-chat/workspaces/order", json={"workspaceIds": [workspace_id, workspace_id]})
+    unknown = client.patch("/api/web-chat/workspaces/order", json={"workspaceIds": ["missing"]})
+
+    assert duplicate.status_code == 400
+    assert duplicate.json()["detail"] == "Workspace IDs must be unique"
+    assert unknown.status_code == 404
+    assert unknown.json()["detail"] == "Workspace not found"
+
+
 def test_managed_workspaces_are_stored_in_project_hermes_settings(client, tmp_path, monkeypatch):
     project = tmp_path / "settings-project"
     home = tmp_path / "home"

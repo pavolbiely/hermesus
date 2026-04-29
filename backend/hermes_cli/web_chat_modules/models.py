@@ -313,6 +313,10 @@ class SaveWorkspaceRequest(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
 
 
+class ReorderWorkspacesRequest(BaseModel):
+    workspaceIds: list[str]
+
+
 class DirectorySuggestionsResponse(BaseModel):
     suggestions: list[str]
 

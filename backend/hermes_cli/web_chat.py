@@ -105,6 +105,7 @@ from .web_chat_modules.models import (
     ExecuteCommandResponse,
     FilePreviewRequest,
     FilePreviewResolveRequest,
+    ReorderWorkspacesRequest,
     SaveWorkspaceRequest,
     SessionDetailResponse,
     SwitchProfileRequest,
@@ -184,6 +185,7 @@ from .web_chat_modules.workspaces import (
     project_root as _project_root_impl,
     project_web_chat_settings_path as _project_web_chat_settings_path_impl,
     read_legacy_db_workspaces as _read_legacy_db_workspaces_impl,
+    reorder_managed_workspaces as _reorder_managed_workspaces_impl,
     update_managed_workspace as _update_managed_workspace_impl,
     validate_workspace as _validate_workspace_impl,
     default_workspace as _default_workspace_impl,
@@ -271,6 +273,10 @@ def _create_managed_workspace(request: SaveWorkspaceRequest) -> WebChatWorkspace
 
 def _update_managed_workspace(workspace_id: str, request: SaveWorkspaceRequest) -> WebChatWorkspace:
     return _update_managed_workspace_impl(workspace_id, request, _db, _PROJECT_SETTINGS_LOCK)
+
+
+def _reorder_managed_workspaces(request: ReorderWorkspacesRequest) -> list[WebChatWorkspace]:
+    return _reorder_managed_workspaces_impl(request, _db, _PROJECT_SETTINGS_LOCK)
 
 
 def _delete_managed_workspace(workspace_id: str) -> None:
@@ -890,6 +896,7 @@ register_web_chat_routes(
         directory_suggestions=_directory_suggestions,
         create_managed_workspace=_create_managed_workspace,
         update_managed_workspace=_update_managed_workspace,
+        reorder_managed_workspaces=_reorder_managed_workspaces,
         delete_managed_workspace=_delete_managed_workspace,
         store_upload=_store_upload,
         load_attachment=_load_attachment,

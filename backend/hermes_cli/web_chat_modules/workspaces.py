@@ -10,7 +10,7 @@ from uuid import uuid4
 from fastapi import HTTPException, status
 from hermes_state import SessionDB
 
-from .models import SaveWorkspaceRequest, WebChatWorkspace, WebChatWorkspacesResponse
+from .models import ReorderWorkspacesRequest, SaveWorkspaceRequest, WebChatWorkspace, WebChatWorkspacesResponse
 from .workspace_settings import (
     DbFactory,
     empty_project_settings,
@@ -32,10 +32,7 @@ def list_managed_workspaces(db_factory: DbFactory, settings_lock: threading.Lock
     del db
     with settings_lock:
         entries = workspace_entries(load_project_settings(db_factory))
-    return sorted(
-        (workspace_from_mapping(entry) for entry in entries),
-        key=lambda workspace: (workspace.label.lower(), workspace.label, workspace.path),
-    )
+    return [workspace_from_mapping(entry) for entry in entries]
 
 
 def find_managed_workspace_by_path(
@@ -112,6 +109,33 @@ def update_managed_workspace(
         write_project_settings(settings)
 
     return workspace_from_mapping({"id": workspace_id, "label": label, "path": path})
+
+
+def reorder_managed_workspaces(
+    request: ReorderWorkspacesRequest,
+    db_factory: DbFactory,
+    settings_lock: threading.Lock,
+) -> list[WebChatWorkspace]:
+    workspace_ids = request.workspaceIds
+    if len(workspace_ids) != len(set(workspace_ids)):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace IDs must be unique")
+
+    requested_ids = set(workspace_ids)
+    with settings_lock:
+        settings = load_project_settings(db_factory)
+        stored_entries = settings_workspace_entries(settings)
+        entries_by_id = {entry["id"]: entry for entry in stored_entries}
+        unknown_ids = [workspace_id for workspace_id in workspace_ids if workspace_id not in entries_by_id]
+        if unknown_ids:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+
+        ordered_entries = [entries_by_id[workspace_id] for workspace_id in workspace_ids]
+        remaining_entries = [entry for entry in stored_entries if entry["id"] not in requested_ids]
+        settings["workspaces"] = [*ordered_entries, *remaining_entries]
+        write_project_settings(settings)
+        entries = workspace_entries(settings)
+
+    return [workspace_from_mapping(entry) for entry in entries]
 
 
 def workspace_label(path: Path) -> str:

@@ -21,6 +21,7 @@ from .models import (
     FilePreviewRequest,
     FilePreviewResolveRequest,
     RenameSessionRequest,
+    ReorderWorkspacesRequest,
     RespondRunPromptRequest,
     RespondRunPromptResponse,
     SaveWorkspaceRequest,
@@ -77,6 +78,7 @@ class WebChatRouteServices:
     directory_suggestions: Callable[[str], list[str]]
     create_managed_workspace: Callable[[SaveWorkspaceRequest], WebChatWorkspace]
     update_managed_workspace: Callable[[str, SaveWorkspaceRequest], WebChatWorkspace]
+    reorder_managed_workspaces: Callable[[ReorderWorkspacesRequest], list[WebChatWorkspace]]
     delete_managed_workspace: Callable[[str], None]
     store_upload: Callable[[UploadFile, str | None], Awaitable[WebChatAttachment]]
     load_attachment: Callable[[str, str | None], WebChatAttachment]
@@ -172,6 +174,10 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
     @router.post("/workspaces", status_code=status.HTTP_201_CREATED, response_model=WebChatWorkspaceResponse)
     def create_workspace(payload: SaveWorkspaceRequest) -> WebChatWorkspaceResponse:
         return WebChatWorkspaceResponse(workspace=services.create_managed_workspace(payload))
+
+    @router.patch("/workspaces/order", response_model=WebChatWorkspacesResponse)
+    def reorder_workspaces(payload: ReorderWorkspacesRequest) -> WebChatWorkspacesResponse:
+        return WebChatWorkspacesResponse(workspaces=services.reorder_managed_workspaces(payload), activeWorkspace=None)
 
     @router.patch("/workspaces/{workspace_id}", response_model=WebChatWorkspaceResponse)
     def update_workspace(workspace_id: str, payload: SaveWorkspaceRequest) -> WebChatWorkspaceResponse:

@@ -265,6 +265,32 @@ async function refreshWorkspacesAndSessions() {
   await refresh()
 }
 
+function applyWorkspaceOrder(workspaces: WebChatWorkspace[], workspaceIds: string[]) {
+  const workspacesById = new Map(workspaces.map(workspace => [workspace.id, workspace]))
+  const requestedIds = new Set(workspaceIds)
+  return [
+    ...workspaceIds.map(id => workspacesById.get(id)).filter((workspace): workspace is WebChatWorkspace => Boolean(workspace)),
+    ...workspaces.filter(workspace => !requestedIds.has(workspace.id))
+  ]
+}
+
+async function reorderWorkspaces(workspaceIds: string[]) {
+  const previousWorkspaces = context.workspaces.value
+  context.workspaces.value = applyWorkspaceOrder(previousWorkspaces, workspaceIds)
+
+  try {
+    const response = await api.reorderWorkspaces({ workspaceIds })
+    context.workspaces.value = response.workspaces
+  } catch (err) {
+    context.workspaces.value = previousWorkspaces
+    toast.add({
+      title: 'Failed to reorder workspaces',
+      description: getHermesErrorMessage(err, 'Could not save workspace order.'),
+      color: 'error'
+    })
+  }
+}
+
 async function loadUpdateStatus() {
   if (updateStatusCheckPending || updatePending.value || appUpdatePending.value) return
 
@@ -750,6 +776,7 @@ provide('appUpdateControl', {
           :has-local-unread="hasLocalUnread"
           @edit-workspace="beginEditWorkspace"
           @start-workspace-chat="startWorkspaceChat"
+          @reorder-workspaces="reorderWorkspaces"
           @open-session="openSession"
           @prefetch-session="prefetchSession"
           @rename-session="beginRename"
