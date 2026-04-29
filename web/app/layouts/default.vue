@@ -629,7 +629,7 @@ provide('appUpdateControl', {
 
 <template>
   <UDashboardGroup :persistent="false">
-    <UDashboardSidebar collapsible :default-size="22">
+    <UDashboardSidebar collapsible :default-size="22" class="bg-elevated/25">
       <template #header>
         <NuxtLink to="/" class="flex h-8 w-full shrink-0 items-center px-0.5">
           <img
