@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { CommandPaletteGroup } from '@nuxt/ui'
 import { installNotificationSoundUnlock } from '~/utils/notificationSound'
 import { readMessageCountForVisibleSession, syncInitialReadMessageCounts } from '~/utils/chatReadReceipts'
 import type { SessionGroup } from '~/utils/sessionGroups'
@@ -24,6 +25,19 @@ const groupedSessions = computed<SessionGroup[]>(() => buildSessionGroups({
   workspaces: context.workspaces.value,
   selectedWorkspace: context.selectedWorkspace.value
 }))
+const searchGroups = computed<CommandPaletteGroup[]>(() => {
+  const sessionItems = sessions.value.map(session => ({
+    label: sessionTitle(session),
+    suffix: session.workspace || undefined,
+    icon: session.pinned ? 'i-lucide-pin' : 'i-lucide-message-square',
+    active: isActiveSession(session),
+    onSelect: () => openSession(session)
+  }))
+
+  return sessionItems.length
+    ? [{ id: 'chats', label: 'Chats', items: sessionItems }]
+    : []
+})
 const profileOptions = computed(() => (profilesData.value?.profiles || []).map(profile => ({
   label: profile.label,
   value: profile.id,
@@ -683,6 +697,13 @@ provide('appUpdateControl', {
               @click="beginCreateWorkspace"
             />
           </div>
+
+          <UDashboardSearchButton
+            label="Search chats"
+            variant="soft"
+            size="xs"
+            class="w-full justify-start"
+          />
         </div>
 
         <SidebarSessionGroups
@@ -704,6 +725,13 @@ provide('appUpdateControl', {
         />
       </template>
     </UDashboardSidebar>
+
+    <UDashboardSearch
+      placeholder="Search chats..."
+      :groups="searchGroups"
+      :fuse="{ resultLimit: 20 }"
+      :color-mode="false"
+    />
 
     <slot />
 
