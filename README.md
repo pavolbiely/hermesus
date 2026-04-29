@@ -76,49 +76,24 @@ If someone lands on this repository, they should immediately understand that Her
 
 ### Backend
 
-Core web-chat routes include:
+The backend makes the chat feel responsive and dependable instead of exposing Hermes as a loose collection of commands.
 
-- `GET /api/web-chat/sessions`
-- `POST /api/web-chat/sessions`
-- `GET /api/web-chat/sessions/{session_id}`
-- `PATCH /api/web-chat/sessions/{session_id}`
-- `PATCH /api/web-chat/sessions/{session_id}/messages/{message_id}`
-- `DELETE /api/web-chat/sessions/{session_id}`
-- `POST /api/web-chat/sessions/{session_id}/duplicate`
-- `POST /api/web-chat/runs`
-- `GET /api/web-chat/runs/{run_id}/events`
-- `POST /api/web-chat/runs/{run_id}/steer`
-- `POST /api/web-chat/runs/{run_id}/stop`
-- `POST /api/web-chat/runs/{run_id}/prompts/{prompt_id}/response`
-- `GET /api/web-chat/commands`
-- `POST /api/web-chat/commands/execute`
-- `GET /api/web-chat/capabilities`
-- `GET /api/web-chat/profiles`
-- `POST /api/web-chat/profiles/active`
-- `GET /api/web-chat/workspaces`
-- `POST /api/web-chat/workspaces`
-- `PATCH /api/web-chat/workspaces/{workspace_id}`
-- `DELETE /api/web-chat/workspaces/{workspace_id}`
-- `GET /api/web-chat/workspace-directories`
-- `GET /api/web-chat/workspace-changes`
-- `GET /api/web-chat/git/status`
-- `POST /api/web-chat/git/commit-message`
-- `POST /api/web-chat/file-preview`
-- `POST /api/web-chat/attachments`
-- `GET /api/web-chat/attachments/{attachment_id}`
-- `GET /api/web-chat/attachments/{attachment_id}/content`
-- `GET /api/web-chat/update`
-- `POST /api/web-chat/update`
-- `GET /api/web-chat/app-update`
-- `POST /api/web-chat/app-update`
+It handles:
 
-The backend is built around explicit run management, SSE event streaming, queue-backed prompts, typed Pydantic responses, workspace validation, and modular route domains so interactive runs can be stopped, continued, inspected, and coordinated predictably.
+- conversation history, pinned sessions, unread state, and duplicated sessions
+- live agent runs with streaming updates, stop, continue, steer, and regenerate controls
+- command execution, profile switching, model capabilities, and workspace selection
+- attachments, pasted files, and safe local file previews
+- code-change tracking and commit-message generation from the selected workspace
+- update checks for the Hermes runtime and the web app shell
 
-Git integration is used for code-change history and lightweight commit-message generation from chat. The chat navbar exposes `Generate commit`, which reads the selected workspace's current Git changes, asks Hermes privately for a commit message using the current chat context plus the Git diff, and opens the generated message in a small modal with an explicit `Copy` action. The hidden generation prompt and answer are not persisted to visible chat history. Generation follows project commit-message rules, uses Conventional Commits only when no project rules are found, and fails with an error instead of falling back to a heuristic message.
+The important user benefit is predictability: a run can be watched as it happens, interrupted when needed, continued with more context, inspected afterward, and tied back to the workspace files it changed.
 
-Attachments uploaded from the UI are stored under `.hermes/attachments/` in the selected project, ignored by git in this prototype. Images render inline, other files use the authenticated content endpoint when supported by the browser, and deleted files remain visible in history as unavailable placeholders.
+Git integration is intentionally lightweight. It helps users review what changed during a session and generate a commit message from the current chat plus the selected workspace diff. The generated message opens in a small modal with an explicit `Copy` action, and the hidden generation prompt is not added to the visible chat history.
 
-Local file previews are resolved against the selected workspace or its git root, limited to safe text preview sizes, and include language/media metadata for better code reading in the UI.
+Attachments uploaded from the UI are stored under `.hermes/attachments/` in the selected project and ignored by git in this prototype. Images render inline, supported files open through authenticated previews, and deleted files remain visible in history as unavailable placeholders.
+
+Local file previews are resolved against the selected workspace or its git root, limited to safe text preview sizes, and include language/media metadata for easier code reading in the UI.
 
 ## Safety Model
 
