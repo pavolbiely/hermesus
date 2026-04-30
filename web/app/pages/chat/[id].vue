@@ -1069,24 +1069,25 @@ onBeforeUnmount(() => {
 
             <div v-else class="relative">
               <div
-                v-if="latestTaskPlan"
+                v-if="latestTaskPlan || queuedForSession.length"
                 ref="chatTaskPlanOverlay"
-                class="pointer-events-none absolute inset-x-0 bottom-full z-10"
+                class="pointer-events-none absolute inset-x-0 bottom-full z-10 space-y-2"
               >
+                <div v-if="queuedForSession.length" class="pointer-events-auto">
+                  <ChatQueuedMessages
+                    :messages="queuedForSession"
+                    :steering-id="steeringQueuedMessageId"
+                    :disabled="isLoadingSession || !hasSession"
+                    @edit="editQueuedMessage"
+                    @delete="deleteQueuedMessage"
+                    @steer="steerQueuedMessage"
+                  />
+                </div>
+
                 <ChatTaskPlanCard
+                  v-if="latestTaskPlan"
                   :task-plan="latestTaskPlan"
                   class="pointer-events-auto mx-4 sm:mx-6"
-                />
-              </div>
-
-              <div v-if="queuedForSession.length" class="mb-2">
-                <ChatQueuedMessages
-                  :messages="queuedForSession"
-                  :steering-id="steeringQueuedMessageId"
-                  :disabled="isLoadingSession || !hasSession"
-                  @edit="editQueuedMessage"
-                  @delete="deleteQueuedMessage"
-                  @steer="steerQueuedMessage"
                 />
               </div>
 
