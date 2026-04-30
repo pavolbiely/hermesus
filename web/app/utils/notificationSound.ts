@@ -64,9 +64,10 @@ function tonesForVariant(variant: NotificationSoundVariant): Tone[] {
 
   if (variant === 'attention') {
     return [
-      { offset: 0, frequency: 740, duration: 0.16 },
-      { offset: 0.15, frequency: 988, duration: 0.18 },
-      { offset: 0.33, frequency: 1319, duration: 0.22 }
+      { offset: 0, frequency: 1568, duration: 0.34 },
+      { offset: 0.018, frequency: 2093, duration: 0.28 },
+      { offset: 0.046, frequency: 2637, duration: 0.22 },
+      { offset: 0.082, frequency: 3136, duration: 0.16 }
     ]
   }
 
@@ -166,7 +167,7 @@ async function scheduleNotificationSound(variant: NotificationSoundVariant) {
 
   for (const tone of tones) {
     const oscillator = context.createOscillator()
-    oscillator.type = variant === 'attention' ? 'triangle' : 'sine'
+    oscillator.type = 'sine'
     oscillator.frequency.setValueAtTime(tone.frequency, start + tone.offset)
     oscillator.connect(gain)
     oscillator.start(start + tone.offset)
