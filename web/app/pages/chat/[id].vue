@@ -170,6 +170,7 @@ const {
   activeChatRuns,
   connectRun,
   rememberLastUsedSelection: composer.rememberLastUsedSelection,
+  scrollSubmittedMessageToBottom,
   showError
 })
 

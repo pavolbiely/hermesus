@@ -16,6 +16,7 @@ type UseChatMessageEditingOptions = {
   activeChatRuns: ReturnType<typeof useActiveChatRuns>
   connectRun: (runId: string, sessionId: string) => void
   rememberLastUsedSelection: () => void
+  scrollSubmittedMessageToBottom?: () => void
   showError: (err: unknown, fallback: string) => void
 }
 
@@ -156,6 +157,7 @@ export function useChatMessageEditing(options: UseChatMessageEditingOptions) {
       editingMessageId.value = null
       editingText.value = ''
       options.submitStatus.value = 'submitted'
+      options.scrollSubmittedMessageToBottom?.()
 
       const attachmentIds = messageAttachmentIds(message)
       const run = await options.api.startRun(content, {
