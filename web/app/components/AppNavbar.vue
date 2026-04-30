@@ -1,16 +1,7 @@
 <script setup lang="ts">
-import type { Ref } from 'vue'
+import { getCurrentInstance } from 'vue'
+import { useHermesUpdateControls } from '~/composables/useHermesUpdateControls'
 import type { WebChatProviderUsageResponse } from '~/types/web-chat'
-
-type UpdateControl = {
-  visible: Ref<boolean>
-  pending: Ref<boolean>
-  completed: Ref<boolean>
-  label: Ref<string>
-  color: Ref<'primary' | 'success'>
-  title: Ref<string>
-  update: () => void
-}
 
 const props = defineProps<{
   title: string
@@ -35,28 +26,32 @@ const emit = defineEmits<{
   generateCommit: []
 }>()
 
-const updateControl = inject<UpdateControl | null>('hermesUpdateControl', null)
-const appUpdateControl = inject<UpdateControl | null>('appUpdateControl', null)
+const updates = useHermesUpdateControls()
+const vnodeProps = getCurrentInstance()?.vnode.props ?? {}
 
-const resolvedUpdateVisible = computed(() => props.updateVisible ?? updateControl?.visible.value ?? false)
-const resolvedUpdatePending = computed(() => props.updatePending ?? updateControl?.pending.value ?? false)
-const resolvedUpdateCompleted = computed(() => props.updateCompleted ?? updateControl?.completed.value ?? false)
-const resolvedUpdateLabel = computed(() => props.updateLabel || updateControl?.label.value || 'Update Hermes')
-const resolvedUpdateColor = computed(() => props.updateColor || updateControl?.color.value || 'primary')
-const resolvedUpdateTitle = computed(() => props.updateTitle || updateControl?.title.value || 'Update Hermes Agent')
-const resolvedAppUpdateVisible = computed(() => appUpdateControl?.visible.value ?? false)
-const resolvedAppUpdatePending = computed(() => appUpdateControl?.pending.value ?? false)
-const resolvedAppUpdateCompleted = computed(() => appUpdateControl?.completed.value ?? false)
-const resolvedAppUpdateLabel = computed(() => appUpdateControl?.label.value || 'Update app')
-const resolvedAppUpdateColor = computed(() => appUpdateControl?.color.value || 'primary')
-const resolvedAppUpdateTitle = computed(() => appUpdateControl?.title.value || 'Update Hermesum app')
+function hasProp(camelName: string, kebabName = camelName.replace(/[A-Z]/g, match => `-${match.toLowerCase()}`)) {
+  return Object.prototype.hasOwnProperty.call(vnodeProps, camelName) || Object.prototype.hasOwnProperty.call(vnodeProps, kebabName)
+}
+
+const resolvedUpdateVisible = computed(() => hasProp('updateVisible') ? props.updateVisible : updates.hermes.visible.value)
+const resolvedUpdatePending = computed(() => hasProp('updatePending') ? props.updatePending : updates.hermes.pending.value)
+const resolvedUpdateCompleted = computed(() => hasProp('updateCompleted') ? props.updateCompleted : updates.hermes.completed.value)
+const resolvedUpdateLabel = computed(() => props.updateLabel || updates.hermes.label.value)
+const resolvedUpdateColor = computed(() => props.updateColor || updates.hermes.color.value)
+const resolvedUpdateTitle = computed(() => props.updateTitle || updates.hermes.title.value)
+const resolvedAppUpdateVisible = computed(() => updates.app.visible.value)
+const resolvedAppUpdatePending = computed(() => updates.app.pending.value)
+const resolvedAppUpdateCompleted = computed(() => updates.app.completed.value)
+const resolvedAppUpdateLabel = computed(() => updates.app.label.value)
+const resolvedAppUpdateColor = computed(() => updates.app.color.value)
+const resolvedAppUpdateTitle = computed(() => updates.app.title.value)
 
 function submitUpdate() {
-  updateControl?.update()
+  updates.hermes.update()
 }
 
 function submitAppUpdate() {
-  appUpdateControl?.update()
+  updates.app.update()
 }
 </script>
 
