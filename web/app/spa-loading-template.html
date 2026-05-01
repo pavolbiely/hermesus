@@ -1,0 +1,133 @@
+<script>
+  ;(() => {
+    try {
+      const stored = localStorage.getItem('nuxt-color-mode')
+      const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches
+      const theme = stored === 'light' || stored === 'dark' ? stored : (prefersDark ? 'dark' : 'light')
+      document.documentElement.dataset.hermesStartupTheme = theme
+    } catch {
+      // Fall back to CSS prefers-color-scheme when localStorage is unavailable.
+    }
+  })()
+</script>
+
+<div class="hermes-startup-shell" role="status" aria-live="polite" aria-label="Loading Hermes">
+  <style>
+    .hermes-startup-shell {
+      --hermes-startup-muted: rgba(63, 63, 70, 0.72);
+      --hermes-startup-track: rgba(228, 228, 231, 0.88);
+      --hermes-startup-border: rgba(24, 24, 27, 0.1);
+
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      min-height: 100dvh;
+      background:
+        radial-gradient(circle at 50% 38%, rgba(14, 165, 233, 0.12), transparent 32rem),
+        #f8fafc;
+      color: rgba(24, 24, 27, 0.9);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .hermes-startup-shell {
+        --hermes-startup-muted: rgba(244, 244, 245, 0.72);
+        --hermes-startup-track: rgba(39, 39, 42, 0.86);
+        --hermes-startup-border: rgba(255, 255, 255, 0.08);
+
+        background:
+          radial-gradient(circle at 50% 38%, rgba(96, 165, 250, 0.14), transparent 32rem),
+          #09090b;
+        color: rgba(244, 244, 245, 0.9);
+      }
+    }
+
+    html[data-hermes-startup-theme="light"] .hermes-startup-shell {
+      --hermes-startup-muted: rgba(63, 63, 70, 0.72);
+      --hermes-startup-track: rgba(228, 228, 231, 0.88);
+      --hermes-startup-border: rgba(24, 24, 27, 0.1);
+
+      background:
+        radial-gradient(circle at 50% 38%, rgba(14, 165, 233, 0.12), transparent 32rem),
+        #f8fafc;
+      color: rgba(24, 24, 27, 0.9);
+    }
+
+    html[data-hermes-startup-theme="dark"] .hermes-startup-shell {
+      --hermes-startup-muted: rgba(244, 244, 245, 0.72);
+      --hermes-startup-track: rgba(39, 39, 42, 0.86);
+      --hermes-startup-border: rgba(255, 255, 255, 0.08);
+
+      background:
+        radial-gradient(circle at 50% 38%, rgba(96, 165, 250, 0.14), transparent 32rem),
+        #09090b;
+      color: rgba(244, 244, 245, 0.9);
+    }
+
+    .hermes-startup-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      transform: translateY(-4vh);
+    }
+
+    .hermes-startup-logo {
+      width: 5rem;
+      height: 5rem;
+      border-radius: 1.25rem;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+    }
+
+    html[data-hermes-startup-theme="dark"] .hermes-startup-logo {
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    }
+
+    .hermes-startup-text {
+      font-size: 0.875rem;
+      letter-spacing: 0.02em;
+      color: var(--hermes-startup-muted);
+    }
+
+    .hermes-startup-shimmer {
+      width: min(17rem, calc(100vw - 4rem));
+      height: 0.5rem;
+      overflow: hidden;
+      border: 1px solid var(--hermes-startup-border);
+      border-radius: 999px;
+      background: var(--hermes-startup-track);
+    }
+
+    .hermes-startup-shimmer::before {
+      content: "";
+      display: block;
+      width: 45%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #38bdf8, #a78bfa, #fb7185, #facc15, #38bdf8);
+      filter: blur(0.1px);
+      animation: hermes-startup-shimmer 1.15s ease-in-out infinite;
+    }
+
+    @keyframes hermes-startup-shimmer {
+      0% { transform: translateX(-110%); opacity: 0.45; }
+      45% { opacity: 0.9; }
+      100% { transform: translateX(230%); opacity: 0.45; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hermes-startup-shimmer::before {
+        width: 100%;
+        animation: none;
+        opacity: 0.65;
+      }
+    }
+  </style>
+
+  <div class="hermes-startup-card">
+    <img class="hermes-startup-logo" src="/icons/icon-512.png" alt="" width="80" height="80" decoding="async" fetchpriority="high">
+    <div class="hermes-startup-shimmer" aria-hidden="true"></div>
+    <div class="hermes-startup-text">Loading...</div>
+  </div>
+</div>
