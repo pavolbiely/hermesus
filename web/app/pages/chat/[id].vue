@@ -1190,7 +1190,7 @@ onBeforeUnmount(() => {
                 />
                 <UTooltip v-if="promptEtaLabel" :text="promptEtaTooltip" :content="{ side: 'top', sideOffset: 8, align: 'end' }">
                   <span class="inline-flex items-center gap-1 text-[11px] tabular-nums text-muted">
-                    <UIcon name="i-lucide-clock-3" class="size-3.5" />
+                    <UIcon name="i-lucide-clock-3" class="size-3" />
                     <span>ETA {{ promptEtaLabel }}</span>
                   </span>
                 </UTooltip>
