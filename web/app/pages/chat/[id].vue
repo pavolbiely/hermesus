@@ -106,6 +106,8 @@ const {
   streamError,
   chatStatus,
   currentActivityLabel,
+  currentEta,
+  currentEtaRemainingMs,
   latestTaskPlan,
   isRunning,
   connectRun,
@@ -849,6 +851,9 @@ watch(
 watch(
   () => displayedData.value?.activeRun,
   (activeRun) => {
+    if (activeRun?.sessionId === sessionId.value && activeRun.eta) {
+      currentEta.value = activeRun.eta
+    }
     recoverActiveRun({
       sessionId: sessionId.value,
       activeRun,
@@ -1129,6 +1134,8 @@ onBeforeUnmount(() => {
                     :slash-commands-open="slashCommands.isOpen.value"
                     :slash-commands-loading="slashCommands.loading.value"
                     :highlighted-slash-command-index="slashCommands.highlightedIndex.value"
+                    :eta="currentEta"
+                    :eta-remaining-ms="currentEtaRemainingMs"
                     @stop="stopRun"
                     @update-selected-workspace="context.selectWorkspace"
                     @attach-files="attachFiles"

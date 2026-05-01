@@ -23,12 +23,15 @@ from .models import (
     SteerRunResponse,
     StopRunResponse,
     WebChatPrompt,
+    WebChatRunEta,
     WebChatWorkspaceChanges,
 )
 from .run_events import MESSAGE_ITEMS_FIELD, client_message_id_from_message, system_event_part, task_plan_from_event
 from .sessions import session_provider
 
 RunExecutor = Callable[["RunContext", Callable[[dict[str, Any]], None]], str]
+EstimateRunEta = Callable[[Any, "RunContext", dict[str, Any] | None], WebChatRunEta | None]
+RecordRunEtaSample = Callable[..., None]
 
 
 @dataclass
@@ -46,6 +49,7 @@ class RunContext:
     reasoning_effort: str | None = None
     provider: str | None = None
     enabled_toolsets: list[str] | None = None
+    max_turns: int | None = 90
     baseline_git_status: str | None = None
     baseline_change_fingerprint: str | None = None
     baseline_workspace_snapshot: dict[str, dict[str, Any]] | None = None
@@ -74,6 +78,8 @@ class ActiveRun:
     prompt_wait_duration_ms: int = 0
     tool_started_at: dict[str, list[float]] = field(default_factory=dict)
     latest_task_plan: dict[str, Any] | None = None
+    latest_eta: WebChatRunEta | None = None
+    observed_commands: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -95,6 +101,8 @@ class RunManagerServices:
     workspace_file_snapshot: Callable[[str | None], dict[str, dict[str, Any]] | None]
     ensure_session_worktree: Callable[[Any, str, str | None, str | None], Any | None]
     persist_run_workspace_changes: Callable[[RunContext, int | None], WebChatWorkspaceChanges | None]
+    estimate_run_eta: EstimateRunEta
+    record_run_eta_sample: RecordRunEtaSample
     agent_executor: RunExecutor
 
 
@@ -333,6 +341,7 @@ class RunManager:
                 sessionId=active.context.session_id,
                 status=active.status,  # type: ignore[arg-type]
                 prompts=prompts,
+                eta=active.latest_eta,
             )
 
     def _get(self, run_id: str) -> ActiveRun:
@@ -365,7 +374,7 @@ class RunManager:
 
     def _emit(self, active: ActiveRun, event: dict[str, Any]) -> dict[str, Any]:
         self._track_event_duration(active, event)
-        self._track_task_plan(active, event)
+        task_plan_updated = self._track_task_plan(active, event)
         system_message_id = self._persist_system_event(active, event)
         if system_message_id is not None and not event.get("messageId"):
             event = {**event, "messageId": str(system_message_id)}
@@ -376,12 +385,42 @@ class RunManager:
             emitted_event = {"id": event_id, **emitted_event}
             active.events.append(emitted_event)
             active.event_condition.notify_all()
+        if task_plan_updated:
+            self._emit_eta_update(active)
         return emitted_event
 
-    def _track_task_plan(self, active: ActiveRun, event: dict[str, Any]) -> None:
+    def _track_task_plan(self, active: ActiveRun, event: dict[str, Any]) -> bool:
         task_plan = task_plan_from_event(event)
-        if task_plan is not None:
-            active.latest_task_plan = task_plan
+        if task_plan is None:
+            return False
+        active.latest_task_plan = task_plan
+        return True
+
+    def _emit_eta_update(self, active: ActiveRun) -> None:
+        eta = self._services.estimate_run_eta(
+            self._services.db(),
+            active.context,
+            active.latest_task_plan,
+            started_at=active.created_at,
+            now=time.time(),
+            observed_commands=active.observed_commands,
+        )
+        if eta is None:
+            active.latest_eta = None
+            return
+        active.latest_eta = eta
+        emitted_event = {
+            "runId": active.context.run_id,
+            "sessionId": active.context.session_id,
+            "type": "eta.updated",
+            "eta": eta.model_dump(),
+        }
+        with active.event_condition:
+            event_id = active.next_event_id
+            active.next_event_id += 1
+            emitted_event = {"id": event_id, **emitted_event}
+            active.events.append(emitted_event)
+            active.event_condition.notify_all()
 
     def _persist_system_event(self, active: ActiveRun, event: dict[str, Any]) -> Any | None:
         system_event = self._system_event_part(active, event)
@@ -400,6 +439,8 @@ class RunManager:
 
     def _track_event_duration(self, active: ActiveRun, event: dict[str, Any]) -> None:
         event_type = event.get("type")
+        if event_type in {"tool.started", "tool.completed"}:
+            self._track_observed_command(active, event)
         if event_type not in {"tool.started", "tool.completed"}:
             return
 
@@ -412,6 +453,21 @@ class RunManager:
         starts = active.tool_started_at.get(key)
         if starts:
             active.tool_duration_ms += max(0, round((now - starts.pop()) * 1000))
+
+    def _track_observed_command(self, active: ActiveRun, event: dict[str, Any]) -> None:
+        parts = [event.get("name"), event.get("preview"), event.get("input")]
+        for part in parts:
+            if part is None:
+                continue
+            if isinstance(part, str):
+                text = part
+            else:
+                try:
+                    text = json.dumps(part, sort_keys=True)
+                except TypeError:
+                    text = str(part)
+            if text and text not in active.observed_commands:
+                active.observed_commands.append(text)
 
     def _finish(self, active: ActiveRun, status: str) -> None:
         active.status = status
@@ -509,6 +565,19 @@ class RunManager:
 
         return items or None
 
+    def _record_eta_sample(self, active: ActiveRun, generation_duration_ms: int, changes: WebChatWorkspaceChanges | None) -> None:
+        self._services.record_run_eta_sample(
+            self._services.db(),
+            active.context,
+            active.latest_task_plan,
+            duration_ms=generation_duration_ms,
+            tool_duration_ms=active.tool_duration_ms,
+            prompt_wait_duration_ms=active.prompt_wait_duration_ms,
+            status="completed",
+            workspace_changes=changes,
+            observed_commands=active.observed_commands,
+        )
+
     def _run(self, active: ActiveRun) -> None:
         self._emit(active, {"type": "run.started"})
         assistant_message_id: int | None = None
@@ -531,6 +600,7 @@ class RunManager:
                     message_items=self._message_items(active, metrics),
                 )
                 changes = self._services.persist_run_workspace_changes(active.context, assistant_message_id)
+                self._record_eta_sample(active, generation_duration_ms, changes)
                 self._emit(
                     active,
                     {

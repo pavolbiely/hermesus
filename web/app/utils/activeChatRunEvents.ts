@@ -1,4 +1,4 @@
-import type { AgentStatusEvent, InteractivePrompt, WebChatTaskPlan } from '~/types/web-chat'
+import type { AgentStatusEvent, InteractivePrompt, WebChatRunEta, WebChatTaskPlan } from '~/types/web-chat'
 
 export type RunEventPayload = Record<string, unknown>
 
@@ -28,6 +28,18 @@ export function taskPlanFromRunPayload(payload: RunEventPayload): WebChatTaskPla
   if (!Array.isArray(items)) return null
 
   return taskPlan as WebChatTaskPlan
+}
+
+export function etaFromRunPayload(payload: RunEventPayload): WebChatRunEta | null {
+  const eta = payload.eta
+  if (!eta || typeof eta !== 'object') return null
+  const remainingMs = (eta as { remainingMs?: unknown }).remainingMs
+  const estimatedCompletionAt = (eta as { estimatedCompletionAt?: unknown }).estimatedCompletionAt
+  const updatedAt = (eta as { updatedAt?: unknown }).updatedAt
+  if (typeof remainingMs !== 'number' || !Number.isFinite(remainingMs)) return null
+  if (typeof estimatedCompletionAt !== 'string' || !estimatedCompletionAt) return null
+  if (typeof updatedAt !== 'string' || !updatedAt) return null
+  return eta as WebChatRunEta
 }
 
 export function numericMetric(metrics: Record<string, unknown>, key: string) {

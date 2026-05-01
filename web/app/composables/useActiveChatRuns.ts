@@ -1,6 +1,6 @@
-import type { AgentStatusEvent, InteractivePrompt, WebChatTaskPlan, WebChatWorkspaceChanges } from '~/types/web-chat'
+import type { AgentStatusEvent, InteractivePrompt, WebChatRunEta, WebChatTaskPlan, WebChatWorkspaceChanges } from '~/types/web-chat'
 import { reconcileRunSession } from '../utils/activeRunSession'
-import { eventTimestamp, numericMetric, parseRunEventPayload, promptFromRunPayload, statusFromRunPayload, taskPlanFromRunPayload, type RunEventPayload } from '../utils/activeChatRunEvents'
+import { etaFromRunPayload, eventTimestamp, numericMetric, parseRunEventPayload, promptFromRunPayload, statusFromRunPayload, taskPlanFromRunPayload, type RunEventPayload } from '../utils/activeChatRunEvents'
 import { notificationBodyPreview, showRunFinishedDesktopNotification } from '../utils/desktopNotifications'
 import { notificationSoundVariant, playNotificationSound } from '../utils/notificationSound'
 import { createRunEventReplay } from '../utils/runEventReplay'
@@ -34,6 +34,7 @@ type ActiveRunHandlers = {
   onToolStarted?: (payload: ToolRunPayload) => void
   onToolCompleted?: (payload: ToolRunPayload) => void
   onTaskPlanUpdated?: (payload: WebChatTaskPlan) => void
+  onEtaUpdated?: (eta: WebChatRunEta) => void
   onStatus?: (payload: AgentStatusEvent) => void
   onPromptRequested?: (prompt: InteractivePrompt) => void
   onPromptUpdated?: (prompt: InteractivePrompt) => void
@@ -278,6 +279,14 @@ export function useActiveChatRuns() {
       const taskPlan = taskPlanFromRunPayload(payload)
       if (!taskPlan) return
       recordAndNotify(run, 'onTaskPlanUpdated', taskPlan)
+    })
+
+    source.addEventListener('eta.updated', (event) => {
+      const payload = parseRunEventPayload(event)
+      retargetRunFromEvent(run, payload)
+      const eta = etaFromRunPayload(payload)
+      if (!eta) return
+      recordAndNotify(run, 'onEtaUpdated', eta)
     })
 
     source.addEventListener('agent.status', (event) => {

@@ -1,5 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
-import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatSystemEventSeverity, WebChatSystemEventType, WebChatTaskPlan, WebChatWorkspaceChanges } from '~/types/web-chat'
+import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatRunEta, WebChatSystemEventSeverity, WebChatSystemEventType, WebChatTaskPlan, WebChatWorkspaceChanges } from '~/types/web-chat'
 import { applyRunMetrics, inputTokenCount, latestTaskPlanFromMessages, type RunMetrics } from '~/utils/chatRunMessages'
 import { toolDisplayName, toolRawName } from '~/utils/toolCalls'
 import { createLocalMessage } from './useHermesRunStream'
@@ -42,6 +42,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   const streamError = ref<Error | undefined>()
   const hasAssistantResponseStarted = ref(false)
   const currentActivity = ref<RunActivity | null>(null)
+  const currentEta = ref<WebChatRunEta | null>(null)
   const now = ref(Date.now())
   const connectedRunIds = new Set<string>()
   const systemEventKeys = new Set<string>()
@@ -63,6 +64,13 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     return isRunning.value ? 'streaming' : 'ready'
   })
   const latestTaskPlan = computed(() => latestTaskPlanFromMessages(messages.value))
+  const currentEtaRemainingMs = computed(() => {
+    const eta = currentEta.value
+    if (!eta) return null
+    const target = Date.parse(eta.estimatedCompletionAt)
+    if (!Number.isFinite(target)) return eta.remainingMs
+    return Math.max(0, target - now.value)
+  })
 
   function setActivity(label: string, kind: RunActivityKind) {
     currentActivity.value = { label, kind, updatedAt: Date.now() }
@@ -73,11 +81,21 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     currentActivity.value = null
   }
 
+  function clearEta() {
+    currentEta.value = null
+  }
+
   function ensureActivityTimer() {
     if (activityTimer || typeof setInterval !== 'function') return
     activityTimer = setInterval(() => {
       now.value = Date.now()
     }, 1000)
+  }
+
+  function stopActivityTimer() {
+    if (!activityTimer || typeof clearInterval !== 'function') return
+    clearInterval(activityTimer)
+    activityTimer = undefined
   }
 
   function assistantMessage() {
@@ -356,6 +374,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     connectedRunIds.add(runId)
 
     if (targetSessionId === options.sessionId.value) {
+      currentEta.value = null
       submitStatus.value = 'streaming'
       setActivity('Starting…', 'starting')
       ensureActivityTimer()
@@ -381,6 +400,9 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       },
       onTaskPlanUpdated: (taskPlan) => {
         if (targetSessionId === options.sessionId.value) appendTaskPlan(taskPlan)
+      },
+      onEtaUpdated: (eta) => {
+        if (targetSessionId === options.sessionId.value) currentEta.value = eta
       },
       onStatus: (payload) => {
         if (targetSessionId === options.sessionId.value) appendStatus(payload)
@@ -441,6 +463,8 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
         if (targetSessionId === options.sessionId.value) {
           submitStatus.value = 'ready'
           clearActivity()
+          clearEta()
+          stopActivityTimer()
           if (options.refreshSessionOnFinish !== false) {
             await options.refresh()
           }
@@ -466,6 +490,8 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     streamError,
     chatStatus,
     currentActivityLabel,
+    currentEta,
+    currentEtaRemainingMs,
     latestTaskPlan,
     isRunning,
     connectRun,

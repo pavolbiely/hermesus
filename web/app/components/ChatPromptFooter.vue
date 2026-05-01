@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { WebChatAttachment, WebChatCommand, WebChatModelCapability, WebChatWorkspace } from '~/types/web-chat'
+import type { WebChatAttachment, WebChatCommand, WebChatModelCapability, WebChatRunEta, WebChatWorkspace } from '~/types/web-chat'
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance
 type SpeechRecognitionResultLike = { isFinal: boolean, 0: { transcript: string } }
@@ -47,6 +47,8 @@ type ChatPromptFooterProps = {
   slashCommandsOpen?: boolean
   slashCommandsLoading?: boolean
   highlightedSlashCommandIndex?: number
+  eta?: WebChatRunEta | null
+  etaRemainingMs?: number | null
 }
 
 const props = withDefaults(defineProps<ChatPromptFooterProps>(), {
@@ -64,7 +66,9 @@ const props = withDefaults(defineProps<ChatPromptFooterProps>(), {
   slashCommands: () => [],
   slashCommandsOpen: false,
   slashCommandsLoading: false,
-  highlightedSlashCommandIndex: 0
+  highlightedSlashCommandIndex: 0,
+  eta: null,
+  etaRemainingMs: null
 })
 
 const emit = defineEmits<{
@@ -133,6 +137,30 @@ function formatContextTokens(value: number) {
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
   return String(Math.round(value))
 }
+
+function formatEta(ms: number) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60)
+    const remainingMinutes = minutes % 60
+    return `${hours}h ${remainingMinutes.toString().padStart(2, '0')}m`
+  }
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
+const etaLabel = computed(() => {
+  if (!props.eta || props.etaRemainingMs === null || props.etaRemainingMs === undefined) return null
+  return formatEta(props.etaRemainingMs)
+})
+
+const etaTooltip = computed(() => {
+  if (!props.eta) return 'Estimated time remaining'
+  const slices = props.eta.totalSlices ? `${props.eta.completedSlices || 0}/${props.eta.totalSlices} slices` : null
+  const details = [props.eta.taskType, props.eta.projectArea, props.eta.validationProfile].filter(Boolean).join(' · ')
+  return ['Estimated time remaining', slices, details || props.eta.basis, props.eta.confidence].filter(Boolean).join(' · ')
+})
 
 watch(() => props.workspaceInvalidSignal, (signal) => {
   if (!signal) return
@@ -361,6 +389,13 @@ onBeforeUnmount(() => {
   </div>
 
   <div class="flex shrink-0 items-center gap-1.5">
+    <UTooltip v-if="etaLabel" :text="etaTooltip" :content="{ side: 'top', sideOffset: 8, align: 'end' }">
+      <span class="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[11px] tabular-nums text-muted ring-1 ring-default/70">
+        <UIcon name="i-lucide-clock-3" class="size-3.5" />
+        <span>ETA {{ etaLabel }}</span>
+      </span>
+    </UTooltip>
+
     <UTooltip
       v-if="contextUsage && contextUsagePercent !== null"
       :content="{ side: 'top', sideOffset: 8, align: 'end' }"

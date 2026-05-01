@@ -80,6 +80,20 @@ export type WebChatTaskPlan = {
   updatedAt?: string | null
 }
 
+export type WebChatRunEta = {
+  remainingMs: number
+  estimatedCompletionAt: string
+  confidence: 'low' | 'medium' | 'high'
+  basis: 'default' | 'profile' | 'workspace' | 'workspace_model' | 'task_type' | 'project_area' | 'validation_profile' | 'observed'
+  taskType?: string | null
+  projectArea?: string | null
+  validationProfile?: string | null
+  totalSlices?: number | null
+  completedSlices?: number | null
+  sliceMs?: number | null
+  updatedAt: string
+}
+
 export type WebChatPart = {
   type: 'text' | 'reasoning' | 'tool' | 'media' | 'interactive_prompt' | 'changes' | 'steer' | 'status' | 'event' | 'task_plan'
   text?: string | null
@@ -365,6 +379,7 @@ export type ActiveRunSummary = {
   sessionId: string
   status: 'running' | 'stopping' | 'completed' | 'stopped' | 'failed'
   prompts: InteractivePrompt[]
+  eta?: WebChatRunEta | null
 }
 
 export type SessionDetailResponse = {

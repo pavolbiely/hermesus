@@ -60,6 +60,10 @@ from .web_chat_modules.capabilities import (
     resolve_requested_reasoning_effort as _resolve_requested_reasoning_effort_impl,
 )
 from .web_chat_modules.provider_usage import provider_usage as _provider_usage_impl
+from .web_chat_modules.run_eta import (
+    estimate_run_eta as _estimate_run_eta_impl,
+    record_eta_sample as _record_eta_sample_impl,
+)
 from .web_chat_modules.git_commit import (
     generate_commit_message as _generate_commit_message_impl,
     git_status as _git_status_impl,
@@ -908,6 +912,8 @@ def _run_manager_services() -> RunManagerServices:
         workspace_file_snapshot=_workspace_file_snapshot,
         ensure_session_worktree=_ensure_session_worktree,
         persist_run_workspace_changes=_persist_run_workspace_changes,
+        estimate_run_eta=_estimate_run_eta_impl,
+        record_run_eta_sample=_record_eta_sample_impl,
         agent_executor=_agent_executor,
     )
 
