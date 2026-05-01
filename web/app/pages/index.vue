@@ -206,7 +206,7 @@ async function onSubmit() {
                 />
               </template>
             </UChatPrompt>
-            <div class="mt-2 flex justify-center">
+            <div class="mt-2 flex justify-start">
               <ProviderUsageBadge
                 display="text"
                 :usage="providerUsage.usage.value"
