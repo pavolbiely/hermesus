@@ -44,10 +44,13 @@ export function useChatPromptSelectorState(
       || null
   })
   const reasoningEfforts = computed(() => selectedModelCapability.value?.reasoningEfforts || [])
+  const selectedModelUnavailable = computed(() => {
+    return Boolean(props.selectedModel && !props.capabilitiesLoading && !selectedModelCapability.value)
+  })
   const selectedWorkspaceItem = computed(() => props.workspaces.find(workspace => workspace.path === props.selectedWorkspace) || null)
   const workspaceLabel = computed(() => selectedWorkspaceItem.value?.label || 'No workspace')
   const modelLabel = computed(() => selectedModelCapability.value?.label || props.selectedModel || 'Model')
-  const reasoningLabel = computed(() => props.selectedReasoningEffort || 'Reasoning')
+  const reasoningLabel = computed(() => selectedModelUnavailable.value ? 'Unavailable' : (props.selectedReasoningEffort || 'Reasoning'))
 
   const workspaceItems = computed<DropdownMenuItem[]>(() => [
     {
@@ -119,6 +122,7 @@ export function useChatPromptSelectorState(
     modelPickerOpen,
     modelSearch,
     selectedModelCapability,
+    selectedModelUnavailable,
     reasoningEfforts,
     selectedWorkspaceItem,
     workspaceLabel,

@@ -114,6 +114,7 @@ const contextCompressionCount = computed(() => Math.max(0, props.contextUsage?.c
 const {
   modelPickerOpen,
   modelSearch,
+  selectedModelUnavailable,
   selectedWorkspaceItem,
   workspaceLabel,
   modelLabel,
@@ -297,10 +298,11 @@ onBeforeUnmount(() => {
             aria-label="Model"
             icon="i-lucide-cpu"
             trailing-icon="i-lucide-chevron-down"
-            color="neutral"
-            variant="ghost"
+            :color="selectedModelUnavailable ? 'error' : 'neutral'"
+            :variant="selectedModelUnavailable ? 'soft' : 'ghost'"
             size="sm"
             class="max-w-56 shrink-0"
+            :title="selectedModelUnavailable ? 'Selected model is unavailable' : undefined"
             :disabled="capabilitiesLoading || !hasModelItems"
             :loading="capabilitiesLoading && !hasModelItems"
           >
@@ -351,8 +353,24 @@ onBeforeUnmount(() => {
           </template>
         </UPopover>
 
-        <UDropdownMenu :items="reasoningItems" :disabled="capabilitiesLoading || !reasoningItems.length" size="sm" :content="{ align: 'start', side: 'top', sideOffset: 8 }">
-          <UButton aria-label="Reasoning effort" icon="i-lucide-brain" trailing-icon="i-lucide-chevron-down" color="neutral" variant="ghost" size="sm" class="shrink-0" :disabled="capabilitiesLoading || !reasoningItems.length" :loading="capabilitiesLoading && !reasoningItems.length">
+        <UDropdownMenu
+          :items="reasoningItems"
+          :disabled="capabilitiesLoading || !reasoningItems.length"
+          size="sm"
+          :content="{ align: 'start', side: 'top', sideOffset: 8 }"
+        >
+          <UButton
+            aria-label="Reasoning effort"
+            icon="i-lucide-brain"
+            trailing-icon="i-lucide-chevron-down"
+            :color="selectedModelUnavailable ? 'error' : 'neutral'"
+            :variant="selectedModelUnavailable ? 'soft' : 'ghost'"
+            size="sm"
+            class="shrink-0"
+            :title="selectedModelUnavailable ? 'Selected model is unavailable' : undefined"
+            :disabled="capabilitiesLoading || !reasoningItems.length"
+            :loading="capabilitiesLoading && !reasoningItems.length"
+          >
             {{ reasoningLabel }}
           </UButton>
         </UDropdownMenu>

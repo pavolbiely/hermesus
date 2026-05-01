@@ -65,8 +65,23 @@ export function useChatComposerCapabilities() {
     return defaultReasoningForModel(modelId, providerId)
   }
 
-  function setSelection(modelId: string | null | undefined, reasoningEffort: string | null | undefined, providerId: string | null | undefined = selectedProvider.value) {
-    const capability = normalizeModel(modelId, providerId)
+  function setSelection(
+    modelId: string | null | undefined,
+    reasoningEffort: string | null | undefined,
+    providerId: string | null | undefined = selectedProvider.value,
+    options: { preserveUnknownModel?: boolean } = {}
+  ) {
+    const requestedModel = modelId?.trim() || null
+    const requestedProvider = normalizeProviderValue(providerId)
+    const requestedCapability = modelCapability(requestedModel, requestedProvider)
+    if (requestedModel && !requestedCapability && options.preserveUnknownModel) {
+      selectedModel.value = requestedModel
+      selectedProvider.value = requestedProvider
+      selectedReasoningEffort.value = normalizeReasoningValue(reasoningEffort)
+      return
+    }
+
+    const capability = requestedCapability || normalizeModel(requestedModel, requestedProvider)
     selectedModel.value = capability?.id || null
     selectedProvider.value = capability?.provider || normalizeProviderValue(providerId)
     selectedReasoningEffort.value = reconcileReasoning(selectedModel.value, reasoningEffort, selectedProvider.value)
@@ -95,7 +110,7 @@ export function useChatComposerCapabilities() {
     }
 
     const selection = resolveSessionComposerSelection(session, sessionSelections.value[session.id])
-    setSelection(selection.model, selection.reasoningEffort, selection.provider)
+    setSelection(selection.model, selection.reasoningEffort, selection.provider, { preserveUnknownModel: true })
   }
 
   async function initializeForSession(session: WebChatSession | null | undefined) {
@@ -119,6 +134,7 @@ export function useChatComposerCapabilities() {
 
   watch([selectedModel, selectedProvider], ([modelId, providerId]) => {
     if (!capabilities.value) return
+    if (!modelCapability(modelId, providerId)) return
     selectedReasoningEffort.value = reconcileReasoning(modelId, selectedReasoningEffort.value, providerId)
   })
 
