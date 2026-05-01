@@ -1,4 +1,5 @@
 import type { WebChatAppUpdateStatusResponse, WebChatUpdateStatusResponse } from '~/types/web-chat'
+import { launchUpdateFireworks } from '~/utils/updateFireworks'
 
 const UPDATE_STATUS_CHECK_INTERVAL_MS = 20 * 60 * 1000
 
@@ -80,6 +81,7 @@ export function useHermesUpdateControls() {
     try {
       updateStatus.value = await api.updateHermes()
       updateCompleted.value = true
+      launchUpdateFireworks()
       hideUpdateTimer = setTimeout(() => {
         updateCompleted.value = false
       }, 3000)
@@ -103,6 +105,7 @@ export function useHermesUpdateControls() {
     try {
       appUpdateStatus.value = await api.updateApp()
       appUpdateCompleted.value = true
+      launchUpdateFireworks()
       hideAppUpdateTimer = setTimeout(() => {
         appUpdateCompleted.value = false
       }, 3000)
