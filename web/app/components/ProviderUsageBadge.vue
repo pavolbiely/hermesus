@@ -60,16 +60,17 @@ function windowCode(window: WebChatProviderUsageWindow) {
   <div v-if="visible && display === 'text'" class="inline-flex items-center justify-center gap-1.5 text-[11px] leading-4 text-muted">
     <span>{{ badgeLabel }}</span>
     <UPopover
+      mode="hover"
+      :open-delay="500"
       :content="{ side: 'top', align: 'center', sideOffset: 8 }"
       :ui="{ content: 'w-80 p-0' }"
     >
-      <button
-        type="button"
+      <span
         aria-label="Show provider usage details"
-        class="inline-flex size-3.5 items-center justify-center rounded-full text-muted transition-colors hover:text-toned focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        class="inline-flex size-3.5 items-center justify-center rounded-full text-muted transition-colors hover:text-toned"
       >
         <UIcon name="i-lucide-info" class="size-3" />
-      </button>
+      </span>
 
       <template #content>
         <div class="w-80 space-y-3 p-3 text-left text-xs leading-relaxed">
