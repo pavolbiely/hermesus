@@ -82,7 +82,7 @@ function submitAppUpdate() {
         <ProviderUsageBadge :usage="providerUsage" :loading="providerUsageLoading" />
         <UButton
           v-if="resolvedUpdateVisible"
-          size="sm"
+          size="xs"
           variant="solid"
           icon="i-lucide-refresh-cw"
           :label="resolvedUpdateLabel"
@@ -94,7 +94,7 @@ function submitAppUpdate() {
         />
         <UButton
           v-if="resolvedAppUpdateVisible"
-          size="sm"
+          size="xs"
           variant="solid"
           icon="i-lucide-download"
           :label="resolvedAppUpdateLabel"
