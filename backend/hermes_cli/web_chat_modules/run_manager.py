@@ -34,6 +34,10 @@ RunExecutor = Callable[["RunContext", Callable[[dict[str, Any]], None]], str]
 EstimateRunEta = Callable[[Any, "RunContext", dict[str, Any] | None], WebChatRunEta | None]
 RecordRunEtaSample = Callable[..., None]
 
+ETA_MIN_REFRESH_INTERVAL_SECONDS = 15
+ETA_STALE_REFRESH_SECONDS = 45
+ETA_INITIAL_REFRESH_DELAY_SECONDS = 5
+
 
 @dataclass
 class RunContext:
@@ -254,13 +258,17 @@ class RunManager:
         def event_stream():
             nonlocal cursor
             while True:
+                self._refresh_eta_if_stale(active)
                 with active.event_condition:
                     while active.next_event_id <= cursor and not active.terminal:
                         active.event_condition.wait(timeout=15)
-                        if active.next_event_id <= cursor and not active.terminal:
-                            yield ": keepalive\n\n"
+                        break
                     events = [event for event in active.events if event["id"] >= cursor]
                     terminal = active.terminal
+
+                if not events and not terminal:
+                    yield ": keepalive\n\n"
+                    continue
 
                 for event in events:
                     cursor = int(event["id"]) + 1
@@ -402,22 +410,23 @@ class RunManager:
         active.latest_task_plan = task_plan
         return True
 
-    def _emit_eta_update(self, active: ActiveRun) -> None:
+    def _emit_eta_update(self, active: ActiveRun, *, now: float | None = None) -> bool:
+        now_ts = now or time.time()
         eta = self._services.estimate_run_eta(
             self._services.db(),
             active.context,
             active.latest_task_plan,
             started_at=active.created_at,
-            now=time.time(),
+            now=now_ts,
             observed_commands=active.observed_commands,
             progress_texts=active.progress_texts,
             tool_event_count=active.tool_event_count,
         )
         if eta is None:
             active.latest_eta = None
-            return
+            return False
         active.latest_eta = eta
-        active.last_eta_emitted_at = time.time()
+        active.last_eta_emitted_at = now_ts
         active.last_eta_tool_event_count = active.tool_event_count
         emitted_event = {
             "runId": active.context.run_id,
@@ -431,6 +440,37 @@ class RunManager:
             emitted_event = {"id": event_id, **emitted_event}
             active.events.append(emitted_event)
             active.event_condition.notify_all()
+        return True
+
+    def _refresh_eta_if_stale(self, active: ActiveRun, *, now: datetime | None = None) -> bool:
+        if active.terminal:
+            return False
+
+        now_dt = now or datetime.now(timezone.utc)
+        now_ts = now_dt.timestamp()
+        if active.last_eta_emitted_at and now_ts - active.last_eta_emitted_at < ETA_MIN_REFRESH_INTERVAL_SECONDS:
+            return False
+
+        eta = active.latest_eta
+        if eta is None:
+            if now_ts - active.created_at < ETA_INITIAL_REFRESH_DELAY_SECONDS:
+                return False
+            return self._emit_eta_update(active, now=now_ts)
+
+        expired = self._eta_completion_time(eta) <= now_dt
+        stale = bool(active.last_eta_emitted_at and now_ts - active.last_eta_emitted_at >= ETA_STALE_REFRESH_SECONDS)
+        if not expired and not stale:
+            return False
+        return self._emit_eta_update(active, now=now_ts)
+
+    def _eta_completion_time(self, eta: WebChatRunEta) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(eta.estimatedCompletionAt.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     def _persist_system_event(self, active: ActiveRun, event: dict[str, Any]) -> Any | None:
         system_event = self._system_event_part(active, event)

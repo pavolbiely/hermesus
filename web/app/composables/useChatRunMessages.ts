@@ -64,12 +64,18 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     return isRunning.value ? 'streaming' : 'ready'
   })
   const latestTaskPlan = computed(() => latestTaskPlanFromMessages(messages.value))
+  const currentEtaExpired = computed(() => {
+    const eta = currentEta.value
+    if (!eta || !isRunning.value) return false
+    const target = Date.parse(eta.estimatedCompletionAt)
+    return Number.isFinite(target) && target <= now.value
+  })
   const currentEtaRemainingMs = computed(() => {
     const eta = currentEta.value
-    if (!eta) return null
+    if (!eta || currentEtaExpired.value) return null
     const target = Date.parse(eta.estimatedCompletionAt)
     if (!Number.isFinite(target)) return eta.remainingMs
-    return Math.max(0, target - now.value)
+    return Math.max(1, target - now.value)
   })
 
   function setActivity(label: string, kind: RunActivityKind) {
@@ -491,6 +497,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     chatStatus,
     currentActivityLabel,
     currentEta,
+    currentEtaExpired,
     currentEtaRemainingMs,
     latestTaskPlan,
     isRunning,

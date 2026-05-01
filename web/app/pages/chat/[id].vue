@@ -107,6 +107,7 @@ const {
   chatStatus,
   currentActivityLabel,
   currentEta,
+  currentEtaExpired,
   currentEtaRemainingMs,
   latestTaskPlan,
   isRunning,
@@ -188,13 +189,16 @@ function formatPromptEta(ms: number) {
 }
 
 const promptEtaLabel = computed(() => {
-  if (!currentEta.value || currentEtaRemainingMs.value === null || currentEtaRemainingMs.value === undefined) return null
+  if (!currentEta.value) return null
+  if (currentEtaExpired.value) return '~updating…'
+  if (currentEtaRemainingMs.value === null || currentEtaRemainingMs.value === undefined) return null
   return `${currentEta.value.isApproximate ? '~' : ''}${formatPromptEta(currentEtaRemainingMs.value)}`
 })
 
 const promptEtaTooltip = computed(() => {
   const eta = currentEta.value
   if (!eta) return 'Estimated time remaining'
+  if (currentEtaExpired.value) return 'Estimate is stale; waiting for update'
   const slices = eta.totalSlices ? `${eta.completedSlices || 0}/${eta.totalSlices} slices` : null
   const source = eta.source === 'task_plan'
     ? 'Based on task plan progress'
@@ -1207,18 +1211,20 @@ onBeforeUnmount(() => {
                   />
                 </template>
               </UChatPrompt>
-              <div class="mt-2 flex items-center justify-between gap-3">
+              <div class="mt-2 flex items-center gap-3">
                 <ProviderUsageBadge
                   display="text"
                   :usage="providerUsage.usage.value"
                   :loading="providerUsage.loading.value"
                 />
-                <UTooltip v-if="promptEtaLabel" :text="promptEtaTooltip" :content="{ side: 'top', sideOffset: 8, align: 'end' }">
-                  <span class="inline-flex items-center gap-1 text-[11px] tabular-nums text-muted">
-                    <UIcon name="i-lucide-clock-3" class="size-3" />
-                    <span>ETA {{ promptEtaLabel }}</span>
-                  </span>
-                </UTooltip>
+                <div v-if="promptEtaLabel" class="ml-auto shrink-0">
+                  <UTooltip :text="promptEtaTooltip" :content="{ side: 'top', sideOffset: 8, align: 'end' }">
+                    <span class="inline-flex items-center gap-1 text-[11px] tabular-nums text-muted">
+                      <UIcon name="i-lucide-clock-3" class="size-3" />
+                      <span>ETA {{ promptEtaLabel }}</span>
+                    </span>
+                  </UTooltip>
+                </div>
               </div>
               <div
                 v-if="isDraggingFiles"
