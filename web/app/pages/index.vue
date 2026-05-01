@@ -146,8 +146,6 @@ async function onSubmit() {
     <template #header>
       <AppNavbar
         title="New chat"
-        :provider-usage="providerUsage.usage.value"
-        :provider-usage-loading="providerUsage.loading.value"
       />
     </template>
 
@@ -208,6 +206,13 @@ async function onSubmit() {
                 />
               </template>
             </UChatPrompt>
+            <div class="mt-2 flex justify-center">
+              <ProviderUsageBadge
+                display="text"
+                :usage="providerUsage.usage.value"
+                :loading="providerUsage.loading.value"
+              />
+            </div>
             <div
               v-if="isDraggingFiles"
               class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border border-dashed border-primary/50 bg-primary/10 text-sm font-medium text-highlighted backdrop-blur-sm"

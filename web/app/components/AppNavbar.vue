@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { getCurrentInstance } from 'vue'
 import { useHermesUpdateControls } from '~/composables/useHermesUpdateControls'
-import type { WebChatProviderUsageResponse } from '~/types/web-chat'
 
 const props = defineProps<{
   title: string
@@ -9,8 +8,6 @@ const props = defineProps<{
     label: string
     detail?: string | null
   } | null
-  providerUsage?: WebChatProviderUsageResponse | null
-  providerUsageLoading?: boolean
   commitVisible?: boolean
   commitDisabled?: boolean
   commitLoading?: boolean
@@ -79,7 +76,6 @@ function submitAppUpdate() {
           :disabled="commitDisabled || commitLoading"
           @click="emit('generateCommit')"
         />
-        <ProviderUsageBadge :usage="providerUsage" :loading="providerUsageLoading" />
         <UButton
           v-if="resolvedUpdateVisible"
           size="xs"
