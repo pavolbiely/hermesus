@@ -151,8 +151,10 @@ function eventTimestamp() {
 }
 
 export function useActiveChatRuns() {
+  const router = useRouter()
   const runningSessionIds = useState<string[]>('active-chat-run-session-ids', () => [])
   const localUnreadSessionIds = useState<string[]>('active-chat-local-unread-session-ids', () => [])
+  const notificationOpenedSessionId = useState<string | null>('chat-notification-opened-session-id', () => null)
 
   function markRunning(sessionId: string) {
     if (!runningSessionIds.value.includes(sessionId)) {
@@ -210,6 +212,11 @@ export function useActiveChatRuns() {
     markFinished(run.sessionId)
     notify(run, subscriber => subscriber.onFinished?.())
     for (const callback of finishedCallbacks) void callback(run.sessionId, run.runId)
+  }
+
+  function openSessionFromNotification(sessionId: string) {
+    notificationOpenedSessionId.value = sessionId
+    void router.push(`/chat/${sessionId}`)
   }
 
   function trackRun(sessionId: string, runId: string) {
@@ -338,7 +345,8 @@ export function useActiveChatRuns() {
       showRunFinishedDesktopNotification({
         sessionId: run.sessionId,
         runId: run.runId,
-        status: 'completed'
+        status: 'completed',
+        onClick: openSessionFromNotification
       })
       finishRun(run)
     })
@@ -377,7 +385,8 @@ export function useActiveChatRuns() {
       showRunFinishedDesktopNotification({
         sessionId: run.sessionId,
         runId: run.runId,
-        status: 'failed'
+        status: 'failed',
+        onClick: openSessionFromNotification
       })
       finishRun(run)
     })

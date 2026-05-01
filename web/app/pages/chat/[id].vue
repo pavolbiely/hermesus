@@ -25,6 +25,7 @@ const providerUsage = useProviderUsage(
   composer.selectedModel
 )
 const activeChatRuns = useActiveChatRuns()
+const notificationOpenedSessionId = useState<string | null>('chat-notification-opened-session-id', () => null)
 const context = useChatComposerContext()
 const toast = useToast()
 const generatingCommitMessage = ref(false)
@@ -226,12 +227,24 @@ watch(
     if (loadedSessionId !== sessionId.value) return
     if (initialScrollSettledSessionId.value === loadedSessionId) return
 
-    await nextTick()
-    await waitForAnimationFrame()
+    await scrollChatToBottom()
     attachReadScrollListener()
     attachOlderMessagesObserver()
     markCurrentSessionReadIfVisible()
     initialScrollSettledSessionId.value = loadedSessionId
+  },
+  { immediate: true, flush: 'post' }
+)
+
+watch(
+  () => [notificationOpenedSessionId.value, displayedData.value?.session.id] as const,
+  async ([openedSessionId, loadedSessionId]) => {
+    if (!openedSessionId || openedSessionId !== sessionId.value || loadedSessionId !== sessionId.value) return
+
+    await scrollChatToBottom()
+    markCurrentSessionReadIfVisible()
+    activeChatRuns.clearLocalUnread(sessionId.value)
+    if (notificationOpenedSessionId.value === openedSessionId) notificationOpenedSessionId.value = null
   },
   { immediate: true, flush: 'post' }
 )
@@ -610,14 +623,18 @@ async function startRunForLocalMessage(
   }
 }
 
-function scrollSubmittedMessageToBottom() {
-  void scrollElementTreeToBottomAfterRender(chatContainer.value, {
+function scrollChatToBottom() {
+  return scrollElementTreeToBottomAfterRender(chatContainer.value, {
     waitForDomUpdate: nextTick,
     waitForFrame: waitForAnimationFrame,
     frameCount: 2,
     stableFrameCount: 2,
     maxFrameCount: 16
   })
+}
+
+function scrollSubmittedMessageToBottom() {
+  void scrollChatToBottom()
 }
 
 async function sendMessageNow(message: string, options: SendMessageOptions = {}) {

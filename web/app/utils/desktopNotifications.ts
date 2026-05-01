@@ -6,6 +6,7 @@ type RunFinishedNotificationOptions = {
   sessionId: string
   runId: string
   status: RunFinishedNotificationStatus
+  onClick?: (sessionId: string) => void
 }
 
 const preferenceKey = 'hermes.desktopNotifications.enabled'
@@ -67,7 +68,11 @@ export function showRunFinishedDesktopNotification(options: RunFinishedNotificat
 
   notification.onclick = () => {
     window.focus()
-    window.location.assign(`/chat/${options.sessionId}`)
+    if (options.onClick) {
+      options.onClick(options.sessionId)
+    } else if (window.location.pathname !== `/chat/${options.sessionId}`) {
+      window.location.assign(`/chat/${options.sessionId}`)
+    }
     notification.close()
   }
 
