@@ -156,6 +156,56 @@ def test_start_run_streams_and_persists_task_plan(client, monkeypatch, tmp_path)
     assert assistant["parts"][1]["text"] == "Done"
 
 
+def test_start_run_streams_eta_from_progress_without_task_plan(client, monkeypatch, tmp_path):
+    import hermes_cli.web_chat as web_chat
+
+    repo = git_repo(tmp_path)
+
+    def fake_executor(context, emit):
+        emit({
+            "type": "agent.status",
+            "kind": "lifecycle",
+            "message": "Working through slice 2/6",
+        })
+        return "Done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+
+    response = client.post("/api/web-chat/runs", json={"input": "Continue the refactor", "workspace": str(repo)})
+    assert response.status_code == 202
+    run = response.json()
+
+    with client.stream("GET", f"/api/web-chat/runs/{run['runId']}/events") as stream:
+        body = stream.read().decode()
+
+    assert "event: eta.updated" in body
+    assert '"source":"explicit_progress"' in body
+    assert '"totalSlices":6' in body
+    assert '"completedSlices":2' in body
+
+
+def test_start_run_streams_prompt_fallback_eta_without_task_plan(client, monkeypatch, tmp_path):
+    import hermes_cli.web_chat as web_chat
+
+    repo = git_repo(tmp_path)
+
+    def fake_executor(context, emit):
+        return "Done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+
+    response = client.post("/api/web-chat/runs", json={"input": "Refactor the chat footer", "workspace": str(repo)})
+    assert response.status_code == 202
+    run = response.json()
+
+    with client.stream("GET", f"/api/web-chat/runs/{run['runId']}/events") as stream:
+        body = stream.read().decode()
+
+    assert "event: eta.updated" in body
+    assert '"source":"prompt_fallback"' in body
+    assert '"isApproximate":true' in body
+
+
 def test_task_plan_from_todo_tool_result_normalizes_items():
     from hermes_cli.web_chat_modules.agent_runner import task_plan_from_tool_result
 

@@ -85,6 +85,8 @@ export type WebChatRunEta = {
   estimatedCompletionAt: string
   confidence: 'low' | 'medium' | 'high'
   basis: 'default' | 'profile' | 'workspace' | 'workspace_model' | 'task_type' | 'project_area' | 'validation_profile' | 'observed'
+  source?: 'task_plan' | 'explicit_progress' | 'runtime_fallback' | 'prompt_fallback' | string
+  isApproximate?: boolean
   taskType?: string | null
   projectArea?: string | null
   validationProfile?: string | null

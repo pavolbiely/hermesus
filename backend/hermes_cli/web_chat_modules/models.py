@@ -435,6 +435,8 @@ class WebChatRunEta(BaseModel):
         "validation_profile",
         "observed",
     ] = "default"
+    source: Literal["task_plan", "explicit_progress", "runtime_fallback", "prompt_fallback"] = "task_plan"
+    isApproximate: bool = False
     taskType: str | None = None
     projectArea: str | None = None
     validationProfile: str | None = None

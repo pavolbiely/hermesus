@@ -152,14 +152,23 @@ function formatEta(ms: number) {
 
 const etaLabel = computed(() => {
   if (!props.eta || props.etaRemainingMs === null || props.etaRemainingMs === undefined) return null
-  return formatEta(props.etaRemainingMs)
+  return `${props.eta.isApproximate ? '~' : ''}${formatEta(props.etaRemainingMs)}`
 })
 
 const etaTooltip = computed(() => {
   if (!props.eta) return 'Estimated time remaining'
   const slices = props.eta.totalSlices ? `${props.eta.completedSlices || 0}/${props.eta.totalSlices} slices` : null
+  const source = props.eta.source === 'task_plan'
+    ? 'Based on task plan progress'
+    : props.eta.source === 'explicit_progress'
+      ? 'Approximate — inferred from runtime progress'
+      : props.eta.source === 'runtime_fallback'
+        ? 'Approximate — inferred from runtime activity'
+        : props.eta.source === 'prompt_fallback'
+          ? 'Approximate — no explicit task plan yet'
+          : 'Approximate estimate'
   const details = [props.eta.taskType, props.eta.projectArea, props.eta.validationProfile].filter(Boolean).join(' · ')
-  return ['Estimated time remaining', slices, details || props.eta.basis, props.eta.confidence].filter(Boolean).join(' · ')
+  return [source, slices, details || props.eta.basis, props.eta.confidence].filter(Boolean).join(' · ')
 })
 
 watch(() => props.workspaceInvalidSignal, (signal) => {

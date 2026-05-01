@@ -19,6 +19,7 @@ RETENTION_PER_BUCKET = 200
 RETENTION_TOTAL = 2000
 _DONE_STATUSES = {"completed", "cancelled"}
 _VALIDATION_ORDER = ("tests", "typecheck", "build", "browser_qa")
+_PROGRESS_KEYWORDS = ("slice", "slices", "batch", "batches", "file", "files", "remaining", "left")
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,16 @@ class WebChatEtaClassification:
     task_type: str = "unknown"
     project_area: str = "unknown"
     validation_profile: str = "none"
+
+
+@dataclass(frozen=True)
+class EtaWorkUnits:
+    source: str
+    total: float
+    completed: float
+    remaining: float
+    confidence: str
+    labels: tuple[str, ...] = ()
 
 
 def ensure_eta_schema(db: SessionDB) -> None:
@@ -44,6 +55,7 @@ def ensure_eta_schema(db: SessionDB) -> None:
                 task_type TEXT NOT NULL DEFAULT 'unknown',
                 project_area TEXT NOT NULL DEFAULT 'unknown',
                 validation_profile TEXT NOT NULL DEFAULT 'unknown',
+                eta_source TEXT NOT NULL DEFAULT 'task_plan',
                 task_count INTEGER NOT NULL,
                 completed_task_count INTEGER NOT NULL,
                 duration_ms INTEGER NOT NULL,
@@ -54,12 +66,13 @@ def ensure_eta_schema(db: SessionDB) -> None:
             )
             """
         )
+        _ensure_column(conn, "web_chat_eta_samples", "eta_source", "TEXT NOT NULL DEFAULT 'task_plan'")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_web_chat_eta_samples_lookup
             ON web_chat_eta_samples(
                 profile, workspace, provider, model, max_turns,
-                task_type, project_area, validation_profile, created_at DESC
+                task_type, project_area, validation_profile, eta_source, created_at DESC
             )
             """
         )
@@ -90,6 +103,99 @@ def remaining_task_weight(task_plan: dict[str, Any] | None) -> float:
     return remaining
 
 
+def work_units_from_task_plan(task_plan: dict[str, Any] | None, *, require_remaining: bool = True) -> EtaWorkUnits | None:
+    total = total_task_count(task_plan)
+    if total <= 0:
+        return None
+    remaining = remaining_task_weight(task_plan)
+    if require_remaining and remaining <= 0:
+        return None
+    labels = tuple(str(item.get("content") or "") for item in task_items(task_plan) if item.get("content"))
+    return EtaWorkUnits(
+        source="task_plan",
+        total=float(total),
+        completed=float(completed_task_count(task_plan)),
+        remaining=remaining,
+        confidence="high",
+        labels=labels,
+    )
+
+
+def looks_like_progress_text(text: str | None) -> bool:
+    if not isinstance(text, str) or not text:
+        return False
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in _PROGRESS_KEYWORDS)
+
+
+def work_units_from_progress_text(texts: Iterable[str] | None) -> EtaWorkUnits | None:
+    text = "\n".join(str(item) for item in (texts or []) if item).lower()
+    if not text:
+        return None
+
+    patterns = [
+        r"\b(?:slice|slices)\s+(\d+)\s*/\s*(\d+)\b",
+        r"\b(?:slice|slices)\s+(\d+)\s+of\s+(\d+)\b",
+        r"\b(?:batch|batches)\s+(\d+)\s*/\s*(\d+)\b",
+        r"\b(?:batch|batches)\s+(\d+)\s+of\s+(\d+)\b",
+        r"\b(?:file|files)\s+(\d+)\s*/\s*(\d+)\b",
+        r"\b(\d+)\s+of\s+(\d+)\s+(?:files|slices|batches)\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        current = max(0, int(match.group(1)))
+        total = max(1, int(match.group(2)))
+        completed = min(current, total)
+        remaining = max(0.5, float(total - completed))
+        return EtaWorkUnits(
+            source="explicit_progress",
+            total=float(total),
+            completed=float(completed),
+            remaining=remaining,
+            confidence="medium",
+        )
+
+    remaining_match = re.search(r"\b(\d+)\s+(?:files|slices|batches)\s+(?:left|remaining)\b", text)
+    if remaining_match:
+        remaining = max(1, int(remaining_match.group(1)))
+        return EtaWorkUnits(
+            source="explicit_progress",
+            total=float(remaining),
+            completed=0.0,
+            remaining=float(remaining),
+            confidence="low",
+        )
+    return None
+
+
+def work_units_from_runtime_fallback(
+    context: Any,
+    *,
+    started_at: float,
+    now: float,
+    observed_commands: Iterable[str] | None = None,
+    tool_event_count: int = 0,
+) -> EtaWorkUnits | None:
+    elapsed_ms = max(0, round((now - started_at) * 1000))
+    classification = classify_task(context, None, observed_commands=observed_commands)
+    task_type = classification.task_type
+
+    if elapsed_ms < 20_000 and tool_event_count <= 0:
+        remaining = 1.5 if task_type in {"refactor", "feature"} else 1.0
+        return EtaWorkUnits("prompt_fallback", remaining, 0.0, remaining, "low")
+
+    remaining = 2.0 if task_type in {"refactor", "feature"} else 1.0
+    if task_type in {"research", "bugfix"}:
+        remaining = 1.5
+    if tool_event_count >= 8:
+        remaining += 0.5
+    if elapsed_ms >= 10 * 60 * 1000:
+        remaining = max(0.5, remaining - 0.5)
+    return EtaWorkUnits("runtime_fallback", remaining, 0.0, remaining, "low")
+
+
 def classify_task(
     context: Any,
     task_plan: dict[str, Any] | None,
@@ -118,14 +224,28 @@ def record_eta_sample(
     status: str = "completed",
     workspace_changes: Any | None = None,
     observed_commands: Iterable[str] | None = None,
+    progress_texts: Iterable[str] | None = None,
+    tool_event_count: int = 0,
 ) -> None:
-    task_count = total_task_count(latest_task_plan)
-    if task_count <= 0:
+    units = (
+        work_units_from_task_plan(latest_task_plan, require_remaining=False)
+        or work_units_from_progress_text(progress_texts)
+        or work_units_from_runtime_fallback(
+            context,
+            started_at=time.time() - (max(0, int(duration_ms)) / 1000),
+            now=time.time(),
+            observed_commands=observed_commands,
+            tool_event_count=tool_event_count,
+        )
+    )
+    if units is None:
         return
 
     ensure_eta_schema(db)
     classification = classify_task(context, latest_task_plan, workspace_changes, observed_commands)
     active_duration_ms = max(0, int(duration_ms) - max(0, int(prompt_wait_duration_ms)))
+    task_count = max(1, round(units.total))
+    completed_count = max(0, min(task_count, round(units.completed)))
     values = (
         time.time(),
         getattr(context, "profile", None),
@@ -137,8 +257,9 @@ def record_eta_sample(
         classification.task_type,
         classification.project_area,
         classification.validation_profile,
+        units.source,
         task_count,
-        completed_task_count(latest_task_plan),
+        completed_count,
         int(duration_ms),
         active_duration_ms,
         max(0, int(tool_duration_ms)),
@@ -151,10 +272,10 @@ def record_eta_sample(
             """
             INSERT INTO web_chat_eta_samples (
                 created_at, profile, workspace, provider, model, reasoning_effort, max_turns,
-                task_type, project_area, validation_profile,
+                task_type, project_area, validation_profile, eta_source,
                 task_count, completed_task_count, duration_ms, active_duration_ms,
                 tool_duration_ms, prompt_wait_duration_ms, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             values,
         )
@@ -164,7 +285,7 @@ def record_eta_sample(
             WHERE id IN (
                 SELECT id FROM web_chat_eta_samples
                 WHERE profile IS ? AND workspace IS ? AND provider IS ? AND model IS ? AND max_turns IS ?
-                  AND task_type = ? AND project_area = ? AND validation_profile = ? AND status = 'completed'
+                  AND task_type = ? AND project_area = ? AND validation_profile = ? AND eta_source = ? AND status = 'completed'
                 ORDER BY created_at DESC
                 LIMIT -1 OFFSET ?
             )
@@ -178,6 +299,7 @@ def record_eta_sample(
                 classification.task_type,
                 classification.project_area,
                 classification.validation_profile,
+                units.source,
                 RETENTION_PER_BUCKET,
             ),
         )
@@ -204,107 +326,124 @@ def estimate_run_eta(
     started_at: float,
     now: float | None = None,
     observed_commands: Iterable[str] | None = None,
+    progress_texts: Iterable[str] | None = None,
+    tool_event_count: int = 0,
 ) -> WebChatRunEta | None:
-    total = total_task_count(task_plan)
-    if total <= 0:
-        return None
-
     now = now or time.time()
-    completed = completed_task_count(task_plan)
-    remaining_weight = remaining_task_weight(task_plan)
-    if remaining_weight <= 0:
+    units = (
+        work_units_from_task_plan(task_plan)
+        or work_units_from_progress_text(progress_texts)
+        or work_units_from_runtime_fallback(
+            context,
+            started_at=started_at,
+            now=now,
+            observed_commands=observed_commands,
+            tool_event_count=tool_event_count,
+        )
+    )
+    if units is None or units.remaining <= 0:
         return None
 
     ensure_eta_schema(db)
     classification = classify_task(context, task_plan, observed_commands=observed_commands)
-    lookup = _calibrated_slice_ms(db, context, classification)
+    lookup = _calibrated_slice_ms(db, context, classification, eta_source=units.source)
     slice_ms = lookup[0] if lookup else DEFAULT_SLICE_MS
     basis = lookup[1] if lookup else "default"
     sample_count = lookup[2] if lookup else 0
 
     elapsed_ms = max(0, round((now - started_at) * 1000))
+    completed = int(units.completed)
     if completed > 0 and elapsed_ms >= 60_000:
         observed_slice_ms = max(1, round(elapsed_ms / completed))
         slice_ms = round((0.65 * slice_ms) + (0.35 * observed_slice_ms))
         basis = "observed" if basis == "default" else basis
 
-    remaining_ms = max(1, round(remaining_weight * slice_ms))
-    confidence = "high" if sample_count >= 5 and basis in {"validation_profile", "project_area", "task_type"} else "medium" if sample_count >= 3 else "low"
+    remaining_ms = max(1, round(units.remaining * slice_ms))
+    confidence = _eta_confidence(units, basis, sample_count)
     updated_at = _iso_from_epoch(now)
     return WebChatRunEta(
         remainingMs=remaining_ms,
         estimatedCompletionAt=_iso_from_epoch(now + (remaining_ms / 1000)),
-        confidence=confidence,
-        basis=basis,
+        confidence=confidence,  # type: ignore[arg-type]
+        basis=basis,  # type: ignore[arg-type]
         taskType=classification.task_type,
         projectArea=classification.project_area,
         validationProfile=classification.validation_profile,
-        totalSlices=total,
-        completedSlices=completed,
+        totalSlices=max(1, round(units.total)),
+        completedSlices=max(0, min(max(1, round(units.total)), round(units.completed))),
         sliceMs=slice_ms,
         updatedAt=updated_at,
+        source=units.source,
+        isApproximate=units.source != "task_plan" or confidence == "low",
     )
 
 
-def _calibrated_slice_ms(db: SessionDB, context: Any, classification: WebChatEtaClassification) -> tuple[int, str, int] | None:
+def _calibrated_slice_ms(
+    db: SessionDB,
+    context: Any,
+    classification: WebChatEtaClassification,
+    *,
+    eta_source: str = "task_plan",
+) -> tuple[int, str, int] | None:
     profile = getattr(context, "profile", None)
     workspace = getattr(context, "workspace", None)
     provider = getattr(context, "provider", None)
     model = getattr(context, "model", None)
     max_turns = getattr(context, "max_turns", None)
+    source_filter = "AND eta_source = ?" if eta_source == "task_plan" else "AND eta_source != 'task_plan'"
     queries = [
         (
-            """
+            f"""
             SELECT active_duration_ms, task_count FROM web_chat_eta_samples
             WHERE status = 'completed' AND profile IS ? AND workspace IS ? AND provider IS ? AND model IS ? AND max_turns IS ?
-              AND task_type = ? AND project_area = ? AND validation_profile = ?
+              AND task_type = ? AND project_area = ? AND validation_profile = ? {source_filter}
             ORDER BY created_at DESC LIMIT 20
             """,
             (profile, workspace, provider, model, max_turns, classification.task_type, classification.project_area, classification.validation_profile),
             "validation_profile",
         ),
         (
-            """
+            f"""
             SELECT active_duration_ms, task_count FROM web_chat_eta_samples
             WHERE status = 'completed' AND profile IS ? AND workspace IS ? AND provider IS ? AND model IS ? AND max_turns IS ?
-              AND task_type = ? AND project_area = ?
+              AND task_type = ? AND project_area = ? {source_filter}
             ORDER BY created_at DESC LIMIT 20
             """,
             (profile, workspace, provider, model, max_turns, classification.task_type, classification.project_area),
             "project_area",
         ),
         (
-            """
+            f"""
             SELECT active_duration_ms, task_count FROM web_chat_eta_samples
             WHERE status = 'completed' AND profile IS ? AND workspace IS ? AND provider IS ? AND model IS ? AND max_turns IS ?
-              AND task_type = ?
+              AND task_type = ? {source_filter}
             ORDER BY created_at DESC LIMIT 20
             """,
             (profile, workspace, provider, model, max_turns, classification.task_type),
             "task_type",
         ),
         (
-            """
+            f"""
             SELECT active_duration_ms, task_count FROM web_chat_eta_samples
-            WHERE status = 'completed' AND profile IS ? AND workspace IS ? AND provider IS ? AND model IS ? AND max_turns IS ?
+            WHERE status = 'completed' AND profile IS ? AND workspace IS ? AND provider IS ? AND model IS ? AND max_turns IS ? {source_filter}
             ORDER BY created_at DESC LIMIT 20
             """,
             (profile, workspace, provider, model, max_turns),
             "workspace_model",
         ),
         (
-            """
+            f"""
             SELECT active_duration_ms, task_count FROM web_chat_eta_samples
-            WHERE status = 'completed' AND profile IS ? AND workspace IS ? AND max_turns IS ?
+            WHERE status = 'completed' AND profile IS ? AND workspace IS ? AND max_turns IS ? {source_filter}
             ORDER BY created_at DESC LIMIT 20
             """,
             (profile, workspace, max_turns),
             "workspace",
         ),
         (
-            """
+            f"""
             SELECT active_duration_ms, task_count FROM web_chat_eta_samples
-            WHERE status = 'completed' AND profile IS ? AND max_turns IS ?
+            WHERE status = 'completed' AND profile IS ? AND max_turns IS ? {source_filter}
             ORDER BY created_at DESC LIMIT 20
             """,
             (profile, max_turns),
@@ -314,11 +453,28 @@ def _calibrated_slice_ms(db: SessionDB, context: Any, classification: WebChatEta
 
     with db._lock:
         for sql, params, basis in queries:
-            rows = db._conn.execute(sql, params).fetchall()
+            full_params = (*params, eta_source) if eta_source == "task_plan" else params
+            rows = db._conn.execute(sql, full_params).fetchall()
             slice_values = [max(1, row["active_duration_ms"] // max(1, row["task_count"])) for row in rows]
             if slice_values:
                 return round(statistics.median(slice_values)), basis, len(slice_values)
     return None
+
+
+def _eta_confidence(units: EtaWorkUnits, basis: str, sample_count: int) -> str:
+    if units.source not in {"task_plan", "explicit_progress"}:
+        return "low"
+    if sample_count >= 5 and basis in {"validation_profile", "project_area", "task_type"}:
+        return "high" if units.source == "task_plan" else "medium"
+    if sample_count >= 3 or units.confidence == "medium":
+        return "medium"
+    return "low"
+
+
+def _ensure_column(conn: Any, table: str, column: str, definition: str) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _task_plan_text(task_plan: dict[str, Any] | None) -> str:
@@ -386,15 +542,15 @@ def _change_paths(workspace_changes: Any | None) -> list[str]:
 def _area_for_path(path: str) -> str:
     normalized = PurePosixPath(path.replace("\\", "/"))
     parts = normalized.parts
-    if any(part in {"tests", "test", "__tests__"} for part in parts) or normalized.name.endswith(('.test.ts', '.test.mjs', '_test.py')):
+    if any(part in {"tests", "test", "__tests__"} for part in parts) or normalized.name.endswith((".test.ts", ".test.mjs", "_test.py")):
         return "tests"
     if parts[:2] == ("web", "app") or parts[:2] == ("apps", "platform") or normalized.suffix in {".vue", ".css"}:
         return "frontend"
-    if parts and parts[0] == "backend" or normalized.suffix == ".py":
+    if (parts and parts[0] == "backend") or normalized.suffix == ".py":
         return "backend"
-    if parts and parts[0] in {"database", "migrations"} or normalized.suffix == ".sql":
+    if (parts and parts[0] in {"database", "migrations"}) or normalized.suffix == ".sql":
         return "database"
-    if parts and parts[0] == "docs" or normalized.name.lower() in {"readme.md", "agents.md"}:
+    if (parts and parts[0] == "docs") or normalized.name.lower() in {"readme.md", "agents.md"}:
         return "docs"
     if normalized.name in {"package.json", "pnpm-lock.yaml", "nuxt.config.ts", "tsconfig.json"} or normalized.suffix in {".json", ".yaml", ".yml", ".toml"}:
         return "config"

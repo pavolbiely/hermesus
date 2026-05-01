@@ -26,6 +26,7 @@ from .models import (
     WebChatRunEta,
     WebChatWorkspaceChanges,
 )
+from .run_eta import looks_like_progress_text
 from .run_events import MESSAGE_ITEMS_FIELD, client_message_id_from_message, system_event_part, task_plan_from_event
 from .sessions import session_provider
 
@@ -80,6 +81,10 @@ class ActiveRun:
     latest_task_plan: dict[str, Any] | None = None
     latest_eta: WebChatRunEta | None = None
     observed_commands: list[str] = field(default_factory=list)
+    progress_texts: list[str] = field(default_factory=list)
+    tool_event_count: int = 0
+    last_eta_emitted_at: float = 0.0
+    last_eta_tool_event_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -374,6 +379,7 @@ class RunManager:
 
     def _emit(self, active: ActiveRun, event: dict[str, Any]) -> dict[str, Any]:
         self._track_event_duration(active, event)
+        self._track_eta_signals(active, event)
         task_plan_updated = self._track_task_plan(active, event)
         system_message_id = self._persist_system_event(active, event)
         if system_message_id is not None and not event.get("messageId"):
@@ -385,7 +391,7 @@ class RunManager:
             emitted_event = {"id": event_id, **emitted_event}
             active.events.append(emitted_event)
             active.event_condition.notify_all()
-        if task_plan_updated:
+        if task_plan_updated or self._should_refresh_eta(active, event):
             self._emit_eta_update(active)
         return emitted_event
 
@@ -404,11 +410,15 @@ class RunManager:
             started_at=active.created_at,
             now=time.time(),
             observed_commands=active.observed_commands,
+            progress_texts=active.progress_texts,
+            tool_event_count=active.tool_event_count,
         )
         if eta is None:
             active.latest_eta = None
             return
         active.latest_eta = eta
+        active.last_eta_emitted_at = time.time()
+        active.last_eta_tool_event_count = active.tool_event_count
         emitted_event = {
             "runId": active.context.run_id,
             "sessionId": active.context.session_id,
@@ -436,6 +446,44 @@ class RunManager:
 
     def _system_event_part(self, active: ActiveRun, event: dict[str, Any]) -> dict[str, Any] | None:
         return system_event_part(event, self._iso_now())
+
+    def _track_eta_signals(self, active: ActiveRun, event: dict[str, Any]) -> None:
+        event_type = event.get("type")
+        if event_type in {"tool.started", "tool.completed"}:
+            active.tool_event_count += 1
+
+        text = None
+        if event_type == "agent.status":
+            text = event.get("message")
+        elif event_type == "message.delta":
+            text = event.get("content")
+
+        if isinstance(text, str) and looks_like_progress_text(text):
+            active.progress_texts.append(text[-500:])
+            active.progress_texts = active.progress_texts[-30:]
+
+    def _should_refresh_eta(self, active: ActiveRun, event: dict[str, Any]) -> bool:
+        event_type = event.get("type")
+        if event_type == "run.started":
+            return False
+
+        progress_event = (
+            event_type == "agent.status" and looks_like_progress_text(str(event.get("message") or ""))
+        ) or (
+            event_type == "message.delta" and looks_like_progress_text(str(event.get("content") or ""))
+        )
+        if progress_event and getattr(active.latest_eta, "source", None) != "explicit_progress":
+            return True
+
+        now = time.time()
+        if active.last_eta_emitted_at and now - active.last_eta_emitted_at < 15:
+            return False
+
+        if progress_event:
+            return True
+        if event_type == "tool.completed" and active.tool_event_count - active.last_eta_tool_event_count >= 4:
+            return True
+        return False
 
     def _track_event_duration(self, active: ActiveRun, event: dict[str, Any]) -> None:
         event_type = event.get("type")
@@ -576,6 +624,8 @@ class RunManager:
             status="completed",
             workspace_changes=changes,
             observed_commands=active.observed_commands,
+            progress_texts=active.progress_texts,
+            tool_event_count=active.tool_event_count,
         )
 
     def _run(self, active: ActiveRun) -> None:
@@ -584,6 +634,8 @@ class RunManager:
         try:
             active.context.request_prompt = lambda prompt, timeout_seconds=600: self._request_prompt(active, prompt, timeout_seconds)
             final_text = self._executor(active.context, lambda event: self._emit(active, event))
+            if active.latest_eta is None:
+                self._emit_eta_update(active)
             if active.context.stop_requested.is_set():
                 self._emit(active, {"type": "run.stopped"})
                 self._finish(active, "stopped")
