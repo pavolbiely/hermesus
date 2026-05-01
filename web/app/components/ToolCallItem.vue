@@ -2,7 +2,7 @@
 import type { WebChatPart } from '~/types/web-chat'
 import type { ToolDetailSection } from '~/utils/toolCallDetails'
 import { writeClipboardText } from '~/utils/clipboard'
-import { toolCallTitle, toolDisplayName, toolOutputSummary } from '~/utils/toolCalls'
+import { toolCallTitle, toolDisplayInfo, toolOutputSummary } from '~/utils/toolCalls'
 import { toolDetailOverview, toolDetailSections } from '~/utils/toolCallDetails'
 import { formatProcessPartDuration } from '~/utils/chatMessages'
 
@@ -10,7 +10,9 @@ const props = defineProps<{
   part: WebChatPart
 }>()
 
-const toolName = computed(() => toolDisplayName(props.part))
+const toolInfo = computed(() => toolDisplayInfo(props.part))
+const toolName = computed(() => toolInfo.value.label)
+const rawToolName = computed(() => toolInfo.value.rawName)
 const isRunning = computed(() => ['running', 'thinking', 'streaming', 'started'].includes(String(props.part.status || '')))
 const now = ref(new Date())
 const open = ref(false)
@@ -84,7 +86,7 @@ const actionLabel = computed(() => toolCallTitle(props.part))
       class="group flex w-full max-w-full items-center gap-1.5 overflow-hidden text-left text-sm text-muted transition-colors hover:text-default"
     >
       <UIcon
-        :name="isRunning ? 'i-lucide-loader-circle' : 'i-lucide-chevron-down'"
+        :name="isRunning ? 'i-lucide-loader-circle' : toolInfo.icon"
         class="size-3.5 shrink-0 text-dimmed"
         :class="{ 'animate-spin': isRunning }"
       />
@@ -120,7 +122,17 @@ const actionLabel = computed(() => toolCallTitle(props.part))
           <UBadge :color="isRunning ? 'primary' : 'neutral'" variant="soft" size="sm">
             {{ statusLabel }}
           </UBadge>
-          <span v-if="durationLabel" class="font-mono text-dimmed tabular-nums">
+          <UBadge color="neutral" variant="subtle" size="sm">
+            {{ toolInfo.category }}
+          </UBadge>
+          <span class="inline-flex min-w-0 items-center gap-1 text-muted">
+            <UIcon :name="toolInfo.icon" class="size-3.5 shrink-0 text-dimmed" />
+            <span class="truncate">{{ toolName }}</span>
+          </span>
+          <span class="shrink-0 rounded bg-muted/60 px-1 py-0.5 font-mono text-[11px] text-dimmed" :title="rawToolName">
+            {{ rawToolName }}
+          </span>
+          <span v-if="durationLabel" class="ml-auto font-mono text-dimmed tabular-nums">
             {{ durationLabel }}
           </span>
           <span v-if="secondarySummary" class="min-w-0 truncate text-muted">

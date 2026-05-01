@@ -1,7 +1,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatSystemEventSeverity, WebChatSystemEventType, WebChatTaskPlan, WebChatWorkspaceChanges } from '~/types/web-chat'
 import { applyRunMetrics, inputTokenCount, latestTaskPlanFromMessages, type RunMetrics } from '~/utils/chatRunMessages'
-import { toolDisplayName } from '~/utils/toolCalls'
+import { toolDisplayName, toolRawName } from '~/utils/toolCalls'
 import { createLocalMessage } from './useHermesRunStream'
 
 type SubmitStatus = 'ready' | 'submitted' | 'streaming' | 'error'
@@ -232,8 +232,8 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       startedAt: payload.occurredAt || new Date().toISOString(),
       input: payload.input ?? payload.preview ?? null
     }
-    toolPart.name = toolDisplayName(toolPart)
-    setActivity(`Running ${toolPart.name || 'tool'}…`, 'tool')
+    toolPart.name = toolRawName(toolPart)
+    setActivity(`Running ${toolDisplayName(toolPart)}…`, 'tool')
     hasAssistantResponseStarted.value = true
     let assistant = messages.value[messages.value.length - 1]
     if (!assistant || assistant.role !== 'assistant') {
@@ -292,7 +292,8 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     setActivity('Thinking…', 'thinking')
     const assistant = [...messages.value].reverse().find(message => message.role === 'assistant')
     const displayName = payload.name ? toolDisplayName({ name: payload.name }) : null
-    const toolPart = assistant?.parts.findLast(part => part.type === 'tool' && part.status === 'running' && (!payload.name || part.name === payload.name || part.name === displayName))
+    const rawName = payload.name ? toolRawName({ name: payload.name }) : null
+    const toolPart = assistant?.parts.findLast(part => part.type === 'tool' && part.status === 'running' && (!payload.name || part.name === payload.name || part.name === rawName || part.name === displayName))
     if (toolPart) {
       toolPart.status = 'completed'
       completeProcessPart(toolPart, payload.occurredAt || new Date().toISOString())
