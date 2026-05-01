@@ -17,6 +17,22 @@ watch(() => props.expandedDefault, value => {
 
 const summary = computed(() => processGroupSummary(props.parts))
 const hasFailure = computed(() => summary.value.includes('failed'))
+const blocks = computed(() => groupProcessBlocks(props.parts))
+
+function groupProcessBlocks(parts: WebChatPart[]) {
+  const groups: WebChatPart[][] = []
+
+  for (const part of parts) {
+    if (part.type === 'reasoning' || !groups.length) {
+      groups.push([part])
+      continue
+    }
+
+    groups[groups.length - 1]?.push(part)
+  }
+
+  return groups
+}
 
 function isStreamingReasoning(part: WebChatPart) {
   return part.type === 'reasoning' && part.status === 'streaming'
@@ -53,32 +69,38 @@ function reasoningDurationSeconds(part: WebChatPart) {
       </span>
     </button>
 
-    <div v-if="expanded" class="space-y-1 border-t border-default px-3 py-2">
-      <template v-for="(part, index) in parts" :key="`${part.type}-${part.name || index}-${index}`">
-        <UChatReasoning
-          v-if="part.type === 'reasoning'"
-          :text="partText(part)"
-          :streaming="isStreamingReasoning(part)"
-          :duration="reasoningDurationSeconds(part)"
-          :ui="{ body: 'max-h-[200px] pt-1 overflow-y-auto text-sm text-dimmed whitespace-pre-wrap' }"
-        >
-          <Comark :markdown="partText(part)" :plugins="markdownPlugins" class="chat-reasoning-markdown" />
-        </UChatReasoning>
+    <div v-if="expanded" class="divide-y divide-default/70 border-t border-default px-3">
+      <div
+        v-for="(block, blockIndex) in blocks"
+        :key="`block-${blockIndex}`"
+        class="space-y-1 py-2 first:pt-2 last:pb-2"
+      >
+        <template v-for="(part, index) in block" :key="`${part.type}-${part.name || index}-${blockIndex}-${index}`">
+          <UChatReasoning
+            v-if="part.type === 'reasoning'"
+            :text="partText(part)"
+            :streaming="isStreamingReasoning(part)"
+            :duration="reasoningDurationSeconds(part)"
+            :ui="{ body: 'max-h-[200px] pt-1 overflow-y-auto text-sm text-dimmed whitespace-pre-wrap' }"
+          >
+            <Comark :markdown="partText(part)" :plugins="markdownPlugins" class="chat-reasoning-markdown" />
+          </UChatReasoning>
 
-        <ToolCallItem v-else-if="part.type === 'tool'" :part="part" />
+          <ToolCallItem v-else-if="part.type === 'tool'" :part="part" />
 
-        <div
-          v-else-if="part.type === 'status'"
-          class="flex items-start gap-2 rounded-md px-2 py-1 text-xs"
-          :class="part.status === 'warn' ? 'bg-warning/10 text-warning' : 'bg-muted/30 text-muted'"
-        >
-          <UIcon
-            :name="part.status === 'warn' ? 'i-lucide-triangle-alert' : 'i-lucide-info'"
-            class="mt-0.5 size-3.5 shrink-0"
-          />
-          <span class="whitespace-pre-wrap text-toned">{{ partText(part) }}</span>
-        </div>
-      </template>
+          <div
+            v-else-if="part.type === 'status'"
+            class="flex items-start gap-2 rounded-md px-2 py-1 text-xs"
+            :class="part.status === 'warn' ? 'bg-warning/10 text-warning' : 'bg-muted/30 text-muted'"
+          >
+            <UIcon
+              :name="part.status === 'warn' ? 'i-lucide-triangle-alert' : 'i-lucide-info'"
+              class="mt-0.5 size-3.5 shrink-0"
+            />
+            <span class="whitespace-pre-wrap text-toned">{{ partText(part) }}</span>
+          </div>
+        </template>
+      </div>
     </div>
   </section>
 </template>
