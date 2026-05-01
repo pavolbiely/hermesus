@@ -237,23 +237,28 @@ class RunManager:
     def events(self, run_id: str, after: int | None = None):
         active = self._get(run_id)
         cursor = max((after or 0) + 1, 1)
-        while True:
-            with active.event_condition:
-                while active.next_event_id <= cursor and not active.terminal:
-                    active.event_condition.wait(timeout=15)
-                    if active.next_event_id <= cursor and not active.terminal:
-                        yield ": keepalive\n\n"
-                events = [event for event in active.events if event["id"] >= cursor]
-                terminal = active.terminal
 
-            for event in events:
-                cursor = int(event["id"]) + 1
-                yield f"id: {event['id']}\n"
-                yield f"event: {event['type']}\n"
-                yield f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
+        def event_stream():
+            nonlocal cursor
+            while True:
+                with active.event_condition:
+                    while active.next_event_id <= cursor and not active.terminal:
+                        active.event_condition.wait(timeout=15)
+                        if active.next_event_id <= cursor and not active.terminal:
+                            yield ": keepalive\n\n"
+                    events = [event for event in active.events if event["id"] >= cursor]
+                    terminal = active.terminal
 
-            if terminal and cursor >= active.next_event_id:
-                break
+                for event in events:
+                    cursor = int(event["id"]) + 1
+                    yield f"id: {event['id']}\n"
+                    yield f"event: {event['type']}\n"
+                    yield f"data: {json.dumps(event, separators=(',', ':'))}\n\n"
+
+                if terminal and cursor >= active.next_event_id:
+                    break
+
+        return event_stream()
 
     def stop(self, run_id: str) -> StopRunResponse:
         active = self._get(run_id)
@@ -547,4 +552,3 @@ class RunManager:
             active.context.interrupt_agent = None
             active.context.steer_agent = None
             self._finish(active, active.status)
-

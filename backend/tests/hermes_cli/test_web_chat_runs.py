@@ -68,6 +68,13 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
     assert detail.json()["session"]["workspace"] == str(repo)
 
 
+def test_run_events_unknown_run_returns_404_before_streaming(client):
+    response = client.get("/api/web-chat/runs/missing-run/events")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Run not found"
+
+
 def test_start_run_streams_agent_warning_as_system_event(client, monkeypatch, tmp_path):
     import hermes_cli.web_chat as web_chat
 
@@ -592,5 +599,4 @@ def test_run_events_can_be_replayed_from_event_id(client, monkeypatch):
     assert "event: run.started" in replayed_body
     assert "event: message.delta" in replayed_body
     assert "event: run.completed" in replayed_body
-
 
