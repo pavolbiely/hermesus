@@ -27,7 +27,8 @@ onMounted(() => {
 
 async function initializeComposer() {
   try {
-    await Promise.all([composer.initializeForNewChat(), context.initialize()])
+    composer.initializeForNewChat()
+    await context.initialize()
   } catch (err) {
     showError(err, 'Could not initialize new chat')
   }
@@ -126,6 +127,7 @@ async function onSubmit() {
       attachments: context.attachments.value.map(attachment => attachment.id)
     })
     composer.rememberLastUsedSelection()
+    composer.rememberSessionSelection(result.sessionId)
     context.clearAttachments()
     clearDraft()
     playNotificationSound('sent')
@@ -189,6 +191,8 @@ async function onSubmit() {
                   :selected-provider="composer.selectedProvider.value"
                   :selected-reasoning-effort="composer.selectedReasoningEffort.value"
                   :capabilities-loading="composer.capabilitiesLoading.value"
+                  :capabilities-refreshing="composer.capabilitiesRefreshing.value"
+                  :capabilities-error="composer.capabilitiesError.value"
                   :slash-commands="slashCommands.filteredCommands.value"
                   :slash-commands-open="slashCommands.isOpen.value"
                   :slash-commands-loading="slashCommands.loading.value"
@@ -201,6 +205,7 @@ async function onSubmit() {
                   @update-selected-model="composer.selectedModel.value = $event"
                   @update-selected-provider="composer.selectedProvider.value = $event"
                   @update-selected-reasoning-effort="composer.selectedReasoningEffort.value = $event"
+                  @refresh-models="composer.refreshCapabilities({ force: true })"
                   @select-slash-command="selectSlashCommand"
                   @highlight-slash-command="slashCommands.highlightedIndex.value = $event"
                 />

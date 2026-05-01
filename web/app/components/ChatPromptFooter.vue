@@ -43,6 +43,8 @@ type ChatPromptFooterProps = {
   selectedProvider?: string | null
   selectedReasoningEffort?: string | null
   capabilitiesLoading?: boolean
+  capabilitiesRefreshing?: boolean
+  capabilitiesError?: string | null
   slashCommands?: WebChatCommand[]
   slashCommandsOpen?: boolean
   slashCommandsLoading?: boolean
@@ -61,6 +63,8 @@ const props = withDefaults(defineProps<ChatPromptFooterProps>(), {
   selectedProvider: null,
   selectedReasoningEffort: null,
   capabilitiesLoading: false,
+  capabilitiesRefreshing: false,
+  capabilitiesError: null,
   slashCommands: () => [],
   slashCommandsOpen: false,
   slashCommandsLoading: false,
@@ -77,6 +81,7 @@ const emit = defineEmits<{
   updateSelectedModel: [model: string]
   updateSelectedProvider: [provider: string | null]
   updateSelectedReasoningEffort: [reasoningEffort: string]
+  refreshModels: []
   selectSlashCommand: [command: WebChatCommand]
   highlightSlashCommand: [index: number]
 }>()
@@ -303,15 +308,14 @@ onBeforeUnmount(() => {
             size="sm"
             class="max-w-56 shrink-0"
             :title="selectedModelUnavailable ? 'Selected model is unavailable' : undefined"
-            :disabled="capabilitiesLoading || !hasModelItems"
-            :loading="capabilitiesLoading && !hasModelItems"
           >
             <span class="min-w-0 truncate">{{ modelLabel }}</span>
+            <UIcon v-if="capabilitiesLoading || capabilitiesRefreshing" name="i-lucide-loader-2" class="ml-1 size-3 shrink-0 animate-spin text-muted" />
           </UButton>
 
           <template #content>
             <div class="w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md bg-default text-sm">
-              <div class="border-b border-default p-2">
+              <div class="flex items-center gap-2 border-b border-default p-2">
                 <UInput
                   v-model="modelSearch"
                   autofocus
@@ -319,7 +323,23 @@ onBeforeUnmount(() => {
                   placeholder="Search models..."
                   size="sm"
                   variant="none"
+                  class="min-w-0 flex-1"
                 />
+                <UTooltip text="Refresh models">
+                  <UButton
+                    aria-label="Refresh models"
+                    icon="i-lucide-refresh-cw"
+                    color="neutral"
+                    variant="ghost"
+                    size="xs"
+                    :loading="capabilitiesRefreshing"
+                    @click.stop="emit('refreshModels')"
+                  />
+                </UTooltip>
+              </div>
+
+              <div v-if="capabilitiesError" class="border-b border-default px-3 py-2 text-xs text-error">
+                {{ capabilitiesError }}
               </div>
 
               <div v-if="!filteredModelGroups.length" class="px-3 py-6 text-center text-xs text-muted">
@@ -355,7 +375,7 @@ onBeforeUnmount(() => {
 
         <UDropdownMenu
           :items="reasoningItems"
-          :disabled="capabilitiesLoading || !reasoningItems.length"
+          :disabled="!reasoningItems.length"
           size="sm"
           :content="{ align: 'start', side: 'top', sideOffset: 8 }"
         >
@@ -368,8 +388,8 @@ onBeforeUnmount(() => {
             size="sm"
             class="shrink-0"
             :title="selectedModelUnavailable ? 'Selected model is unavailable' : undefined"
-            :disabled="capabilitiesLoading || !reasoningItems.length"
-            :loading="capabilitiesLoading && !reasoningItems.length"
+            :disabled="!reasoningItems.length"
+            :loading="capabilitiesLoading && !reasoningItems.length && !selectedModel"
           >
             {{ reasoningLabel }}
           </UButton>

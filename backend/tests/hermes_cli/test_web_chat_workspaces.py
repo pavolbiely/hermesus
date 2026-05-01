@@ -59,6 +59,99 @@ def test_returns_chat_capabilities(client, monkeypatch):
     ]
 
 
+def test_authenticated_capabilities_are_cached_within_ttl(monkeypatch):
+    from hermes_cli.web_chat_modules import capabilities
+    from hermes_cli.web_chat_modules.models import WebChatModelCapability
+
+    calls = 0
+    now = 100.0
+    capability = WebChatModelCapability(
+        id="gpt-5.5",
+        label="gpt-5.5",
+        reasoningEfforts=["none"],
+        defaultReasoningEffort="none",
+        provider="openai-codex",
+        providerLabel="OpenAI",
+    )
+
+    def authenticated_model_capabilities(max_models_per_provider=200):
+        nonlocal calls
+        calls += 1
+        return [capability]
+
+    capabilities.clear_authenticated_capabilities_cache()
+    monkeypatch.setattr(capabilities, "time", SimpleNamespace(monotonic=lambda: now))
+    monkeypatch.setattr(capabilities, "authenticated_model_capabilities", authenticated_model_capabilities)
+
+    assert capabilities.cached_authenticated_model_capabilities() == [capability]
+    assert capabilities.cached_authenticated_model_capabilities() == [capability]
+    assert calls == 1
+
+    capabilities.clear_authenticated_capabilities_cache()
+
+
+def test_authenticated_capabilities_cache_expires(monkeypatch):
+    from hermes_cli.web_chat_modules import capabilities
+    from hermes_cli.web_chat_modules.models import WebChatModelCapability
+
+    calls = 0
+    now = 100.0
+
+    def authenticated_model_capabilities(max_models_per_provider=200):
+        nonlocal calls
+        calls += 1
+        return [
+            WebChatModelCapability(
+                id=f"model-{calls}",
+                label=f"model-{calls}",
+                reasoningEfforts=["none"],
+                defaultReasoningEffort="none",
+                provider="test-provider",
+                providerLabel="Test Provider",
+            )
+        ]
+
+    capabilities.clear_authenticated_capabilities_cache()
+    monkeypatch.setattr(capabilities, "time", SimpleNamespace(monotonic=lambda: now))
+    monkeypatch.setattr(capabilities, "authenticated_model_capabilities", authenticated_model_capabilities)
+
+    assert capabilities.cached_authenticated_model_capabilities()[0].id == "model-1"
+    now += capabilities._AUTHENTICATED_CAPABILITIES_TTL + 1.0
+    assert capabilities.cached_authenticated_model_capabilities()[0].id == "model-2"
+    assert calls == 2
+
+    capabilities.clear_authenticated_capabilities_cache()
+
+
+def test_authenticated_capabilities_return_stale_cache_on_error(monkeypatch):
+    from hermes_cli.web_chat_modules import capabilities
+    from hermes_cli.web_chat_modules.models import WebChatModelCapability
+
+    now = 100.0
+    cached = WebChatModelCapability(
+        id="cached-model",
+        label="cached-model",
+        reasoningEfforts=["none"],
+        defaultReasoningEffort="none",
+        provider="test-provider",
+        providerLabel="Test Provider",
+    )
+
+    capabilities.clear_authenticated_capabilities_cache()
+    capabilities._AUTHENTICATED_CAPABILITIES_CACHE["value"] = [cached]
+    capabilities._AUTHENTICATED_CAPABILITIES_CACHE["expires_at"] = 0.0
+    monkeypatch.setattr(capabilities, "time", SimpleNamespace(monotonic=lambda: now))
+    monkeypatch.setattr(
+        capabilities,
+        "authenticated_model_capabilities",
+        lambda max_models_per_provider=200: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    assert capabilities.cached_authenticated_model_capabilities() == [cached]
+
+    capabilities.clear_authenticated_capabilities_cache()
+
+
 def test_returns_provider_usage(client, monkeypatch):
     import hermes_cli.web_chat as web_chat
     from hermes_cli.web_chat_modules.models import (

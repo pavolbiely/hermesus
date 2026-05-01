@@ -2,6 +2,8 @@ import type { WebChatCapabilitiesResponse, WebChatModelCapability, WebChatSessio
 import type { ChatComposerSelection } from '~/utils/chatComposerSelections'
 import { rememberChatComposerSelection, resolveSessionComposerSelection } from '~/utils/chatComposerSelections'
 
+let capabilitiesRefreshPromise: Promise<void> | null = null
+
 function normalizeReasoningValue(value: string | null | undefined) {
   const normalized = value?.trim().toLowerCase()
   return normalized || null
@@ -16,7 +18,9 @@ export function useChatComposerCapabilities() {
   const api = useHermesApi()
 
   const capabilities = useState<WebChatCapabilitiesResponse | null>('chat-composer-capabilities', () => null)
-  const capabilitiesLoading = useState('chat-composer-capabilities-loading', () => false)
+  const capabilitiesStatus = useState<'idle' | 'loading' | 'refreshing' | 'ready' | 'error'>('chat-composer-capabilities-status', () => 'idle')
+  const capabilitiesError = useState<string | null>('chat-composer-capabilities-error', () => null)
+  const capabilitiesFetchedAt = useState<number | null>('chat-composer-capabilities-fetched-at', () => null)
   const selectedModel = useState<string | null>('chat-composer-selected-model', () => null)
   const selectedProvider = useState<string | null>('chat-composer-selected-provider', () => null)
   const selectedReasoningEffort = useState<string | null>('chat-composer-selected-reasoning', () => null)
@@ -26,6 +30,9 @@ export function useChatComposerCapabilities() {
   const lastUsedReasoningEffort = useState<string | null>('chat-composer-last-used-reasoning', () => null)
 
   const models = computed(() => capabilities.value?.models || [])
+  const hasCapabilities = computed(() => models.value.length > 0)
+  const capabilitiesLoading = computed(() => capabilitiesStatus.value === 'loading')
+  const capabilitiesRefreshing = computed(() => capabilitiesStatus.value === 'refreshing')
   const defaultModel = computed(() => capabilities.value?.defaultModel || models.value[0]?.id || null)
   const defaultProvider = computed(() => capabilities.value?.defaultProvider || models.value[0]?.provider || null)
 
@@ -82,25 +89,55 @@ export function useChatComposerCapabilities() {
     }
 
     const capability = requestedCapability || normalizeModel(requestedModel, requestedProvider)
-    selectedModel.value = capability?.id || null
-    selectedProvider.value = capability?.provider || normalizeProviderValue(providerId)
-    selectedReasoningEffort.value = reconcileReasoning(selectedModel.value, reasoningEffort, selectedProvider.value)
+    selectedModel.value = capability?.id || requestedModel || null
+    selectedProvider.value = capability?.provider || requestedProvider
+    selectedReasoningEffort.value = capability
+      ? reconcileReasoning(selectedModel.value, reasoningEffort, selectedProvider.value)
+      : normalizeReasoningValue(reasoningEffort)
+  }
+
+  function applyLastUsedOrDefaultSelection() {
+    setSelection(
+      lastUsedModel.value || defaultModel.value,
+      lastUsedReasoningEffort.value,
+      lastUsedProvider.value || defaultProvider.value,
+      { preserveUnknownModel: Boolean(lastUsedModel.value) }
+    )
+  }
+
+  async function refreshCapabilities(options: { force?: boolean } = {}) {
+    if (capabilitiesRefreshPromise) return capabilitiesRefreshPromise
+    if (!options.force && capabilities.value && capabilitiesStatus.value === 'ready') return
+
+    const hadCapabilities = hasCapabilities.value
+    capabilitiesStatus.value = hadCapabilities ? 'refreshing' : 'loading'
+    capabilitiesError.value = null
+
+    capabilitiesRefreshPromise = api.getCapabilities()
+      .then((next) => {
+        capabilities.value = next
+        capabilitiesFetchedAt.value = Date.now()
+        capabilitiesStatus.value = 'ready'
+        if (!selectedModel.value) applyLastUsedOrDefaultSelection()
+      })
+      .catch((err) => {
+        capabilitiesError.value = getHermesErrorMessage(err, 'Could not load model capabilities')
+        capabilitiesStatus.value = hadCapabilities ? 'ready' : 'error'
+      })
+      .finally(() => {
+        capabilitiesRefreshPromise = null
+      })
+
+    return capabilitiesRefreshPromise
   }
 
   async function ensureCapabilities() {
-    if (capabilitiesLoading.value) return
-
-    capabilitiesLoading.value = true
-    try {
-      capabilities.value = await api.getCapabilities()
-    } finally {
-      capabilitiesLoading.value = false
-    }
+    return refreshCapabilities({ force: true })
   }
 
-  async function initializeForNewChat() {
-    await ensureCapabilities()
-    setSelection(lastUsedModel.value, lastUsedReasoningEffort.value, lastUsedProvider.value)
+  function initializeForNewChat() {
+    applyLastUsedOrDefaultSelection()
+    void refreshCapabilities()
   }
 
   function applySessionSelection(session: WebChatSession | null | undefined) {
@@ -113,9 +150,9 @@ export function useChatComposerCapabilities() {
     setSelection(selection.model, selection.reasoningEffort, selection.provider, { preserveUnknownModel: true })
   }
 
-  async function initializeForSession(session: WebChatSession | null | undefined) {
-    await ensureCapabilities()
+  function initializeForSession(session: WebChatSession | null | undefined) {
     applySessionSelection(session)
+    void refreshCapabilities()
   }
 
   function rememberSessionSelection(sessionId: string | null | undefined) {
@@ -140,14 +177,20 @@ export function useChatComposerCapabilities() {
 
   return {
     capabilities,
+    capabilitiesStatus,
     capabilitiesLoading,
+    capabilitiesRefreshing,
+    capabilitiesError,
+    capabilitiesFetchedAt,
     defaultModel,
     defaultProvider,
+    hasCapabilities,
     models,
     selectedModel,
     selectedProvider,
     selectedReasoningEffort,
     supportedReasoningEfforts,
+    refreshCapabilities,
     ensureCapabilities,
     initializeForNewChat,
     applySessionSelection,

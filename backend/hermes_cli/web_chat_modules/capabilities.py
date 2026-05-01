@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import time
 from typing import Any
 
 from .models import WebChatModelCapability
@@ -16,6 +17,12 @@ FALLBACK_CODEX_MODELS = [
     "gpt-5.1-codex-max",
     "gpt-5.1-codex-mini",
 ]
+
+_AUTHENTICATED_CAPABILITIES_TTL = 60.0
+_AUTHENTICATED_CAPABILITIES_CACHE: dict[str, Any] = {
+    "expires_at": 0.0,
+    "value": None,
+}
 
 
 def resolve_codex_access_token() -> str | None:
@@ -265,7 +272,7 @@ def _live_provider_model_ids(provider: dict[str, Any], max_models: int) -> list[
         if not base_url or not api_key:
             return []
 
-        return fetch_api_models(api_key, base_url, timeout=4.0, api_mode=api_mode)[:max_models]
+        return fetch_api_models(api_key, base_url, timeout=1.5, api_mode=api_mode)[:max_models]
     except Exception:
         return []
 
@@ -307,8 +314,31 @@ def authenticated_model_capabilities(max_models_per_provider: int = 200) -> list
     return capabilities
 
 
+def cached_authenticated_model_capabilities(max_models_per_provider: int = 200) -> list[WebChatModelCapability]:
+    cached = _AUTHENTICATED_CAPABILITIES_CACHE.get("value")
+    expires_at = float(_AUTHENTICATED_CAPABILITIES_CACHE.get("expires_at") or 0.0)
+    now = time.monotonic()
+    if cached is not None and now < expires_at:
+        return list(cached)
+
+    try:
+        capabilities = authenticated_model_capabilities(max_models_per_provider=max_models_per_provider)
+    except Exception:
+        return list(cached) if cached is not None else []
+
+    if capabilities:
+        _AUTHENTICATED_CAPABILITIES_CACHE["value"] = list(capabilities)
+        _AUTHENTICATED_CAPABILITIES_CACHE["expires_at"] = now + _AUTHENTICATED_CAPABILITIES_TTL
+    return capabilities
+
+
+def clear_authenticated_capabilities_cache() -> None:
+    _AUTHENTICATED_CAPABILITIES_CACHE["value"] = None
+    _AUTHENTICATED_CAPABILITIES_CACHE["expires_at"] = 0.0
+
+
 def model_capabilities(available_ids: Callable[[], list[str]] = available_model_ids) -> list[WebChatModelCapability]:
-    authenticated_capabilities = authenticated_model_capabilities()
+    authenticated_capabilities = cached_authenticated_model_capabilities()
     if authenticated_capabilities:
         return authenticated_capabilities
     return [_capability_for_model(model_id, active_provider_id()) for model_id in available_ids()]

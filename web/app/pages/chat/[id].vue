@@ -225,10 +225,12 @@ const {
   submitStatus,
   selectedWorkspace: context.selectedWorkspace,
   selectedModel: composer.selectedModel,
+  selectedProvider: composer.selectedProvider,
   selectedReasoningEffort: composer.selectedReasoningEffort,
   activeChatRuns,
   connectRun,
   rememberLastUsedSelection: composer.rememberLastUsedSelection,
+  rememberSessionSelection: composer.rememberSessionSelection,
   scrollSubmittedMessageToBottom,
   showError
 })
@@ -301,20 +303,13 @@ watch(
     if (!session || session.id !== sessionId.value) return
 
     const targetSessionId = session.id
-    await Promise.all([composer.ensureCapabilities(), context.initializeForSession(session)])
+    composer.initializeForSession(session)
+    await context.initializeForSession(session)
     if (targetSessionId !== sessionId.value) return
 
     composer.applySessionSelection(session)
   },
   { immediate: true }
-)
-
-watch(
-  [composer.selectedModel, composer.selectedProvider, composer.selectedReasoningEffort],
-  () => {
-    if (displayedData.value?.session.id !== sessionId.value) return
-    composer.rememberSessionSelection(sessionId.value)
-  }
 )
 
 const {
@@ -356,6 +351,31 @@ function showError(err: unknown, fallback: string) {
 
 function showVoiceError(message: string) {
   showError(new Error(message), 'Voice input failed')
+}
+
+function rememberCurrentSessionSelection() {
+  if (displayedData.value?.session.id !== sessionId.value) return
+  composer.rememberSessionSelection(sessionId.value)
+}
+
+function updateSelectedModel(model: string) {
+  composer.selectedModel.value = model
+  rememberCurrentSessionSelection()
+}
+
+function updateSelectedProvider(provider: string | null) {
+  composer.selectedProvider.value = provider
+  rememberCurrentSessionSelection()
+}
+
+function updateSelectedReasoningEffort(reasoningEffort: string) {
+  composer.selectedReasoningEffort.value = reasoningEffort
+  rememberCurrentSessionSelection()
+}
+
+function rememberSubmittedSelection(submittedSessionId: string | null | undefined = sessionId.value) {
+  composer.rememberLastUsedSelection()
+  composer.rememberSessionSelection(submittedSessionId)
 }
 
 function showCommitMessageCopied() {
@@ -597,9 +617,10 @@ async function startRunForLocalMessage(
   clientMessageId: string,
   attachmentIds: string[]
 ) {
+  const targetSessionId = sessionId.value
   try {
     const run = await api.startRun(text, {
-      sessionId: sessionId.value,
+      sessionId: targetSessionId,
       model: composer.selectedModel.value,
       provider: composer.selectedProvider.value,
       reasoningEffort: composer.selectedReasoningEffort.value,
@@ -618,10 +639,10 @@ async function startRunForLocalMessage(
     }
     Object.assign(userMessage, sentMessage)
     messages.value = messages.value.map(message => message.id === userMessage.id || message.clientMessageId === clientMessageId ? sentMessage : message)
-    composer.rememberLastUsedSelection()
+    rememberSubmittedSelection(targetSessionId)
     playNotificationSound('sent')
     void refreshSessions?.()
-    connectRun(run.runId, sessionId.value)
+    connectRun(run.runId, targetSessionId)
   } catch (err) {
     const errorMessage = getHermesErrorMessage(err, 'Not sent')
     messages.value = markLocalMessageFailed(messages.value, userMessage.id, errorMessage)
@@ -700,19 +721,20 @@ async function regenerateResponse(message: WebChatMessage) {
     return
   }
 
+  const targetSessionId = sessionId.value
   const previousData = data.value || displayedData.value || undefined
   const previousMessages = [...messages.value]
   void prepareNotificationSound()
   submitStatus.value = 'submitted'
 
   try {
-    const updated = await api.editMessage(sessionId.value, userMessage.id, content)
+    const updated = await api.editMessage(targetSessionId, userMessage.id, content)
     data.value = updated
     sessionCache.set(updated)
     messages.value = [...updated.messages]
 
     const run = await api.startRun(content, {
-      sessionId: sessionId.value,
+      sessionId: targetSessionId,
       model: composer.selectedModel.value,
       provider: composer.selectedProvider.value,
       reasoningEffort: composer.selectedReasoningEffort.value,
@@ -720,10 +742,10 @@ async function regenerateResponse(message: WebChatMessage) {
       attachments: attachmentIdsForMessage(userMessage),
       editedMessageId: userMessage.id
     })
-    composer.rememberLastUsedSelection()
+    rememberSubmittedSelection(targetSessionId)
     playNotificationSound('sent')
     void refreshSessions?.()
-    connectRun(run.runId, sessionId.value)
+    connectRun(run.runId, targetSessionId)
   } catch (err) {
     data.value = previousData
     sessionCache.set(previousData)
@@ -1164,6 +1186,8 @@ onBeforeUnmount(() => {
                     :selected-provider="composer.selectedProvider.value"
                     :selected-reasoning-effort="composer.selectedReasoningEffort.value"
                     :capabilities-loading="composer.capabilitiesLoading.value"
+                    :capabilities-refreshing="composer.capabilitiesRefreshing.value"
+                    :capabilities-error="composer.capabilitiesError.value"
                     :slash-commands="slashCommands.filteredCommands.value"
                     :slash-commands-open="slashCommands.isOpen.value"
                     :slash-commands-loading="slashCommands.loading.value"
@@ -1174,9 +1198,10 @@ onBeforeUnmount(() => {
                     @remove-attachment="context.removeAttachment"
                     @voice-text="appendVoiceText"
                     @voice-error="showVoiceError"
-                    @update-selected-model="composer.selectedModel.value = $event"
-                    @update-selected-provider="composer.selectedProvider.value = $event"
-                    @update-selected-reasoning-effort="composer.selectedReasoningEffort.value = $event"
+                    @update-selected-model="updateSelectedModel"
+                    @update-selected-provider="updateSelectedProvider"
+                    @update-selected-reasoning-effort="updateSelectedReasoningEffort"
+                    @refresh-models="composer.refreshCapabilities({ force: true })"
                     @select-slash-command="selectSlashCommand"
                     @highlight-slash-command="slashCommands.highlightedIndex.value = $event"
                   />

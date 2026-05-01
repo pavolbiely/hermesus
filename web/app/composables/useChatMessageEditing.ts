@@ -12,10 +12,12 @@ type UseChatMessageEditingOptions = {
   submitStatus: Ref<'ready' | 'submitted' | 'streaming' | 'error'>
   selectedWorkspace: Ref<string | null>
   selectedModel: Ref<string | null>
+  selectedProvider: Ref<string | null>
   selectedReasoningEffort: Ref<string | null>
   activeChatRuns: ReturnType<typeof useActiveChatRuns>
   connectRun: (runId: string, sessionId: string) => void
   rememberLastUsedSelection: () => void
+  rememberSessionSelection: (sessionId: string | null | undefined) => void
   scrollSubmittedMessageToBottom?: () => void
   showError: (err: unknown, fallback: string) => void
 }
@@ -150,7 +152,8 @@ export function useChatMessageEditing(options: UseChatMessageEditingOptions) {
         await stopActiveRunBeforeSavingEdit()
       }
 
-      const updated = await options.api.editMessage(options.sessionId.value, message.id, content)
+      const targetSessionId = options.sessionId.value
+      const updated = await options.api.editMessage(targetSessionId, message.id, content)
       options.data.value = updated
       options.messages.value = [...updated.messages]
       resetEditingTextareaLayout()
@@ -161,16 +164,18 @@ export function useChatMessageEditing(options: UseChatMessageEditingOptions) {
 
       const attachmentIds = messageAttachmentIds(message)
       const run = await options.api.startRun(content, {
-        sessionId: options.sessionId.value,
+        sessionId: targetSessionId,
         model: options.selectedModel.value,
+        provider: options.selectedProvider.value,
         reasoningEffort: options.selectedReasoningEffort.value,
         workspace: options.selectedWorkspace.value || undefined,
         attachments: attachmentIds,
         editedMessageId: message.id
       })
       options.rememberLastUsedSelection()
+      options.rememberSessionSelection(targetSessionId)
       playNotificationSound('sent')
-      options.connectRun(run.runId, options.sessionId.value)
+      options.connectRun(run.runId, targetSessionId)
     } catch (err) {
       options.messages.value = previousMessages
       options.submitStatus.value = 'error'

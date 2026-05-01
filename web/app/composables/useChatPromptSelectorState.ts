@@ -10,6 +10,8 @@ type ChatPromptSelectorProps = {
   selectedProvider?: string | null
   selectedReasoningEffort?: string | null
   capabilitiesLoading: boolean
+  capabilitiesRefreshing?: boolean
+  capabilitiesError?: string | null
 }
 
 type ChatPromptSelectorEmit = {
@@ -111,12 +113,25 @@ export function useChatPromptSelectorState(
     modelSearch.value = ''
   }
 
-  const reasoningItems = computed<DropdownMenuItem[]>(() => reasoningEfforts.value.map(reasoningEffort => ({
-    label: reasoningEffort,
-    checked: reasoningEffort === props.selectedReasoningEffort,
-    onSelect: () => emit('updateSelectedReasoningEffort', reasoningEffort),
-    trailingIcon: reasoningEffort === props.selectedReasoningEffort ? 'i-lucide-check' : undefined
-  })))
+  const reasoningItems = computed<DropdownMenuItem[]>(() => {
+    if (reasoningEfforts.value.length) {
+      return reasoningEfforts.value.map(reasoningEffort => ({
+        label: reasoningEffort,
+        checked: reasoningEffort === props.selectedReasoningEffort,
+        onSelect: () => emit('updateSelectedReasoningEffort', reasoningEffort),
+        trailingIcon: reasoningEffort === props.selectedReasoningEffort ? 'i-lucide-check' : undefined
+      }))
+    }
+
+    return props.selectedReasoningEffort
+      ? [{
+          label: props.selectedReasoningEffort,
+          checked: true,
+          onSelect: () => emit('updateSelectedReasoningEffort', props.selectedReasoningEffort || ''),
+          trailingIcon: 'i-lucide-check'
+        }]
+      : []
+  })
 
   return {
     modelPickerOpen,
