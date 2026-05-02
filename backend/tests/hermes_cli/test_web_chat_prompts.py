@@ -193,10 +193,13 @@ def test_agent_executor_forwards_runtime_status_events(monkeypatch):
         def __init__(self, **kwargs):
             agent_kwargs.update(kwargs)
             self.status_callback = kwargs.get("status_callback")
+            self.session_id = kwargs.get("session_id")
 
         def run_conversation(self, prompt, *, conversation_history, task_id):
             assert self.status_callback is not None
             self.status_callback("warn", "test warning")
+            session_db = agent_kwargs["session_db"]
+            session_db.append_message(self.session_id, "assistant", "runtime duplicate")
             return {"final_response": "done", "last_prompt_tokens": 12345}
 
     monkeypatch.setitem(sys.modules, "run_agent", types.SimpleNamespace(AIAgent=FakeAgent))
@@ -217,12 +220,63 @@ def test_agent_executor_forwards_runtime_status_events(monkeypatch):
     assert agent_executor(context, events.append, conversation_history=lambda _: []) == "done"
     assert context.usage_metrics == {"contextTokens": 12345}
     assert "persist_session" not in agent_kwargs
-    assert agent_kwargs["session_db"] is None
+    assert agent_kwargs["session_db"] is not None
+    assert agent_kwargs["session_db"].append_message("session-status", "assistant", "duplicate") is None
     assert events == [{
         "type": "agent.status",
         "kind": "warn",
         "message": "test warning",
     }]
+
+
+def test_agent_executor_records_compression_lineage_without_message_duplicates(monkeypatch):
+    from hermes_cli.web_chat_modules.agent_runner import agent_executor
+    from hermes_cli.web_chat_modules.run_manager import RunContext
+    from hermes_state import SessionDB
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            self.session_id = kwargs["session_id"]
+            self.session_db = kwargs["session_db"]
+
+        def run_conversation(self, prompt, *, conversation_history, task_id):
+            self.session_db.create_session(self.session_id, source="web-chat", model="test-model")
+            self.session_db.append_message(self.session_id, "assistant", "should not persist")
+            self.session_db.end_session(self.session_id, "compression")
+            old_session_id = self.session_id
+            self.session_id = "session-compressed-tip"
+            self.session_db.create_session(
+                self.session_id,
+                source="web-chat",
+                model="test-model",
+                parent_session_id=old_session_id,
+            )
+            return {"final_response": "done", "last_prompt_tokens": 12345}
+
+    monkeypatch.setitem(sys.modules, "run_agent", types.SimpleNamespace(AIAgent=FakeAgent))
+    monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
+    monkeypatch.setattr(
+        "hermes_cli.runtime_provider.resolve_runtime_provider",
+        lambda **_: {"provider": "test", "model": "test-model", "base_url": "http://localhost"},
+    )
+
+    context = RunContext(
+        run_id="run-compression",
+        session_id="session-compression-root",
+        input="trigger compression",
+        model="test-model",
+        reasoning_effort="none",
+    )
+
+    assert agent_executor(context, lambda event: None, conversation_history=lambda _: []) == "done"
+    assert context.session_id == "session-compressed-tip"
+
+    db = SessionDB()
+    root = db.get_session("session-compression-root")
+    tip = db.get_session("session-compressed-tip")
+    assert root["end_reason"] == "compression"
+    assert tip["parent_session_id"] == "session-compression-root"
+    assert db.get_messages("session-compression-root") == []
 
 
 def test_agent_executor_does_not_treat_config_base_url_as_explicit_override(monkeypatch):

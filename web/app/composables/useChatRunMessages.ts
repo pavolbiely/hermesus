@@ -37,6 +37,8 @@ type UseChatRunMessagesOptions = {
 }
 
 export function useChatRunMessages(options: UseChatRunMessagesOptions) {
+  const router = useRouter()
+  const route = useRoute()
   const messages = ref<WebChatMessage[]>([])
   const submitStatus: Ref<SubmitStatus> = ref('ready')
   const streamError = ref<Error | undefined>()
@@ -468,6 +470,11 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
           messageId: payload.messageId,
           dedupeKey: `run_steered:${payload.messageId || payload.text || runId}`
         })
+      },
+      onSessionChanged: (nextSessionId) => {
+        if (targetSessionId !== options.sessionId.value || nextSessionId === options.sessionId.value) return
+        connectedRunIds.delete(runId)
+        void router.replace({ path: `/chat/${nextSessionId}`, query: { ...route.query, run: runId } })
       },
       onError: (err) => {
         if (targetSessionId !== options.sessionId.value) return

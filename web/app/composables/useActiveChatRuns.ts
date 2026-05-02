@@ -44,6 +44,7 @@ type ActiveRunHandlers = {
   onRunCompleted?: (payload: RunLifecyclePayload) => void
   onRunFailed?: (payload: RunFailedPayload) => void
   onRunSteered?: (payload: RunSteeredPayload) => void
+  onSessionChanged?: (sessionId: string) => void
   onError?: (error: Error) => void
   onFinished?: () => void
 }
@@ -143,6 +144,7 @@ export function useActiveChatRuns() {
     })
     if (!reconciled.clearSubscribers) return
 
+    notify(run, subscriber => subscriber.onSessionChanged?.(reconciled.sessionId))
     run.sessionId = reconciled.sessionId
     runningSessionIds.value = reconciled.runningSessionIds
     run.subscribers.clear()

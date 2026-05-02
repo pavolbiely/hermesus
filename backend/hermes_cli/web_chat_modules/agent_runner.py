@@ -20,6 +20,19 @@ _APPROVAL_BRIDGE_CALLBACKS: list[Callable[..., str]] = []
 _APPROVAL_BRIDGE_ORIGINAL_GETTER: Callable[[], Any] | None = None
 
 
+class AgentSessionLineageDB:
+    """Let the runtime record compression lineage without duplicating chat messages."""
+
+    def __init__(self, db: Any):
+        self._db = db
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._db, name)
+
+    def append_message(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
 def _set_web_approval_env(session_id: str) -> Callable[[], None]:
     """Force runtime approval checks into interactive gateway mode for this run.
 
@@ -135,6 +148,7 @@ def agent_executor(
     from hermes_constants import parse_reasoning_effort
     from hermes_cli.config import load_config
     from hermes_cli.runtime_provider import resolve_runtime_provider
+    from hermes_state import SessionDB
     from run_agent import AIAgent
     try:
         from tools.terminal_tool import set_approval_callback
@@ -299,7 +313,7 @@ def agent_executor(
             quiet_mode=True,
             platform=WEB_CHAT_SOURCE,
             session_id=context.session_id,
-            session_db=None,
+            session_db=AgentSessionLineageDB(SessionDB()),
             fallback_model=cfg.get("fallback_providers") or cfg.get("fallback_model") or None,
             providers_allowed=provider_routing.get("only"),
             providers_ignored=provider_routing.get("ignore"),
@@ -328,6 +342,8 @@ def agent_executor(
             conversation_history=conversation_history(context.session_id),
             task_id=context.run_id,
         )
+        if getattr(agent, "session_id", context.session_id) != context.session_id:
+            context.session_id = agent.session_id
         context.usage_metrics = {
             key: value for key, value in {
                 "tokenCount": result.get("total_tokens"),

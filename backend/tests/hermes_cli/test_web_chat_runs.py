@@ -69,6 +69,41 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
     assert detail.json()["session"]["workspace"] == str(repo)
 
 
+def test_run_completion_uses_compression_tip_session(client, monkeypatch):
+    import hermes_cli.web_chat as web_chat
+    from hermes_state import SessionDB
+
+    def fake_executor(context, emit):
+        db = SessionDB()
+        db.end_session(context.session_id, "compression")
+        old_session_id = context.session_id
+        context.session_id = "compressed-tip"
+        db.create_session("compressed-tip", source="web-chat", model="test-model", parent_session_id=old_session_id)
+        context.usage_metrics = {"contextTokens": 1024}
+        return "Done after compression"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
+
+    response = client.post("/api/web-chat/runs", json={"input": "Trigger compression", "model": "test-model"})
+    assert response.status_code == 202
+    run = response.json()
+
+    with client.stream("GET", f"/api/web-chat/runs/{run['runId']}/events") as stream:
+        body = stream.read().decode()
+
+    assert '"sessionId":"compressed-tip"' in body
+    assert '"contextTokens":1024' in body
+
+    root_detail = client.get(f"/api/web-chat/sessions/{run['sessionId']}")
+    tip_detail = client.get("/api/web-chat/sessions/compressed-tip")
+    assert root_detail.status_code == 200
+    assert tip_detail.status_code == 200
+    assert root_detail.json()["messages"][-1]["role"] == "user"
+    assert [message["role"] for message in tip_detail.json()["messages"]] == ["assistant"]
+    assert tip_detail.json()["messages"][0]["contextTokens"] == 1024
+    assert tip_detail.json()["compressionCount"] == 1
+
+
 def test_run_events_unknown_run_returns_404_before_streaming(client):
     response = client.get("/api/web-chat/runs/missing-run/events")
 
