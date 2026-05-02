@@ -39,6 +39,8 @@ const suppressNextWorkspaceClick = ref(false)
 const contextMenuReference = shallowRef<{ getBoundingClientRect: () => DOMRect } | null>(null)
 const collapsedGroupIds = ref(new Set<string>([OTHER_CHATS_GROUP_ID]))
 const expandedSessionGroupIds = ref(new Set<string>())
+// Keep chats that were promoted by unread state stable after opening them.
+const promotedUnreadSessionIds = ref(new Set<string>())
 let clearDroppedPreviewTimer: number | undefined
 
 function sessionTime(updatedAt: string) {
@@ -158,8 +160,12 @@ function isUnreadSession(session: WebChatSession) {
   )
 }
 
+function isPromotedUnreadSession(session: WebChatSession) {
+  return isUnreadSession(session) || promotedUnreadSessionIds.value.has(session.id)
+}
+
 function sortedSessions(group: SessionGroup) {
-  return sortedGroupSessions(group, isUnreadSession)
+  return sortedGroupSessions(group, isPromotedUnreadSession)
 }
 
 function isSessionGroupExpanded(group: SessionGroup) {
@@ -167,7 +173,7 @@ function isSessionGroupExpanded(group: SessionGroup) {
 }
 
 function displayedSessions(group: SessionGroup) {
-  return displayedGroupSessions(group, isSessionGroupExpanded(group), isUnreadSession)
+  return displayedGroupSessions(group, isSessionGroupExpanded(group), isPromotedUnreadSession)
 }
 
 function hiddenSessionCount(group: SessionGroup) {
@@ -219,6 +225,31 @@ function toggleGroupCollapsed(group: SessionGroup) {
   collapsedGroupIds.value = nextCollapsedGroupIds
 }
 
+function syncPromotedUnreadSessions() {
+  const visibleSessionIds = new Set<string>()
+  const nextPromotedSessionIds = new Set(promotedUnreadSessionIds.value)
+  let changed = false
+
+  for (const group of props.groups) {
+    for (const session of group.sessions) {
+      visibleSessionIds.add(session.id)
+      if (isUnreadSession(session) && !nextPromotedSessionIds.has(session.id)) {
+        nextPromotedSessionIds.add(session.id)
+        changed = true
+      }
+    }
+  }
+
+  for (const sessionId of nextPromotedSessionIds) {
+    if (!visibleSessionIds.has(sessionId)) {
+      nextPromotedSessionIds.delete(sessionId)
+      changed = true
+    }
+  }
+
+  if (changed) promotedUnreadSessionIds.value = nextPromotedSessionIds
+}
+
 watch(
   () => props.groups,
   () => {
@@ -236,6 +267,12 @@ watch(
 watch(
   collapsedGroupIds,
   ids => saveCollapsedGroupIds(ids)
+)
+
+watch(
+  () => [props.groups, props.readMessageCounts, props.readMessageCountsLoaded] as const,
+  syncPromotedUnreadSessions,
+  { immediate: true }
 )
 
 function expandActiveSessionGroup(activeSessionId = props.activeSessionId) {
