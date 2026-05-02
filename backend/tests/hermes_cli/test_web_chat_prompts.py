@@ -7,6 +7,54 @@ import threading
 import types
 
 
+def test_hidden_agent_response_routes_explicit_session_model_with_auto_provider(monkeypatch):
+    from hermes_cli.web_chat_modules.agent_runner import hidden_agent_response
+
+    captured: dict[str, object] = {}
+
+    def fake_load_config():
+        return {
+            "model": {"provider": "custom", "default": "local-default"},
+            "agent": {"commit_message_max_turns": 2},
+        }
+
+    def fake_resolve_runtime_provider(*, requested, target_model):
+        captured["requested_provider"] = requested
+        captured["target_model"] = target_model
+        return {"provider": "openai-codex", "model": target_model, "api_key": "test-key"}
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            captured["agent_kwargs"] = kwargs
+
+        def run_conversation(self, prompt, *, conversation_history, task_id):
+            captured["prompt"] = prompt
+            captured["conversation_history"] = conversation_history
+            captured["task_id"] = task_id
+            return {"final_response": "fix: generate commit message"}
+
+    monkeypatch.setitem(sys.modules, "hermes_cli.config", types.SimpleNamespace(load_config=fake_load_config))
+    monkeypatch.setitem(
+        sys.modules,
+        "hermes_cli.runtime_provider",
+        types.SimpleNamespace(resolve_runtime_provider=fake_resolve_runtime_provider),
+    )
+    monkeypatch.setitem(sys.modules, "run_agent", types.SimpleNamespace(AIAgent=FakeAgent))
+    monkeypatch.setitem(sys.modules, "hermes_constants", types.SimpleNamespace(parse_reasoning_effort=lambda _value: None))
+
+    result = hidden_agent_response(
+        "Generate commit",
+        conversation_history=[],
+        session_id="session-1",
+        model="gpt-5.5",
+    )
+
+    assert result == "fix: generate commit message"
+    assert captured["requested_provider"] == "auto"
+    assert captured["target_model"] == "gpt-5.5"
+    assert captured["agent_kwargs"]["provider"] == "openai-codex"
+
+
 def test_run_prompt_response_resumes_blocking_executor(client, monkeypatch):
     import hermes_cli.web_chat as web_chat
     from hermes_cli.web_chat_modules.models import WebChatPrompt

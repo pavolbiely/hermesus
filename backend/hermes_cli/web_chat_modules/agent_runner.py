@@ -404,8 +404,9 @@ def hidden_agent_response(
     agent_cfg = cfg.get("agent") or {}
     provider_routing = cfg.get("provider_routing") or {}
     requested_model = model or model_cfg.get("default") or model_cfg.get("model") or ""
+    requested_provider = provider or ("auto" if model else model_cfg.get("provider") or "auto")
     runtime = resolve_runtime_provider(
-        requested=provider or model_cfg.get("provider") or "auto",
+        requested=requested_provider,
         target_model=requested_model,
     )
     resolved_model = model or runtime.get("model") or model_cfg.get("default") or model_cfg.get("model") or ""
