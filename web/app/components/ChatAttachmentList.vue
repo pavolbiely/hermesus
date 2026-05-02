@@ -131,7 +131,7 @@ onBeforeUnmount(() => {
               >
               <UIcon
                 v-else-if="loadingPreviewIds.has(attachment.id)"
-                name="i-lucide-loader-circle"
+                name="i-lucide-cpu"
                 class="size-4 animate-spin text-muted"
               />
               <div v-else class="flex flex-col items-center gap-1 px-3 text-center text-muted">

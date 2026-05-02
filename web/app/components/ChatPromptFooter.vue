@@ -312,7 +312,7 @@ onBeforeUnmount(() => {
             :title="selectedModelUnavailable ? 'Selected model is unavailable' : undefined"
           >
             <span class="min-w-0 truncate">{{ modelLabel }}</span>
-            <UIcon v-if="capabilitiesLoading || capabilitiesRefreshing" name="i-lucide-loader-2" class="ml-1 size-3 shrink-0 animate-spin text-muted" />
+            <UIcon v-if="capabilitiesLoading || capabilitiesRefreshing" name="i-lucide-cpu" class="ml-1 size-3 shrink-0 animate-spin text-muted" />
           </UButton>
 
           <template #content>
@@ -331,6 +331,7 @@ onBeforeUnmount(() => {
                   <UButton
                     aria-label="Refresh models"
                     icon="i-lucide-refresh-cw"
+                    loading-icon="i-lucide-cpu"
                     color="neutral"
                     variant="ghost"
                     size="xs"
@@ -383,7 +384,7 @@ onBeforeUnmount(() => {
         >
           <UButton
             aria-label="Reasoning effort"
-            icon="i-lucide-brain"
+            icon="i-lucide-cpu"
             loading-icon="i-lucide-cpu"
             trailing-icon="i-lucide-chevron-down"
             :color="selectedModelUnavailable ? 'error' : 'neutral'"

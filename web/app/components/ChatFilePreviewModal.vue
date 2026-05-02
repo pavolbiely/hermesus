@@ -181,7 +181,7 @@ function formatBytes(bytes: number) {
         <div class="min-h-[60vh] flex-1 overflow-auto p-4">
 
           <div v-if="loading" class="flex min-h-[60vh] items-center justify-center gap-2 text-sm text-muted">
-            <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+            <UIcon name="i-lucide-cpu" class="size-4 animate-spin" />
             <span>Loading preview…</span>
           </div>
 

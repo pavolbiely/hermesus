@@ -86,7 +86,7 @@ const actionLabel = computed(() => toolCallTitle(props.part))
       class="group flex w-full max-w-full items-center gap-1.5 overflow-hidden text-left text-sm text-muted transition-colors hover:text-default"
     >
       <UIcon
-        :name="isRunning ? 'i-lucide-loader-circle' : toolInfo.icon"
+        :name="isRunning ? 'i-lucide-cpu' : toolInfo.icon"
         class="size-3.5 shrink-0 text-dimmed"
         :class="{ 'animate-spin': isRunning }"
       />

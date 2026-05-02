@@ -27,7 +27,7 @@ const emit = defineEmits<{
     class="absolute inset-x-0 bottom-full z-30 mb-2 max-h-56 overflow-y-auto rounded-lg border border-default bg-default p-1 shadow-xl"
   >
     <div v-if="loading" class="flex items-center gap-2 px-2 py-1.5 text-sm text-muted">
-      <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+      <UIcon name="i-lucide-cpu" class="size-4 animate-spin" />
       <span>Loading commands…</span>
     </div>
     <template v-else>

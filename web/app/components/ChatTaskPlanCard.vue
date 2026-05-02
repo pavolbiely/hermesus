@@ -15,7 +15,7 @@ const statusMeta: Record<WebChatTaskPlanItemStatus, { icon: string, class: strin
     label: 'Pending'
   },
   in_progress: {
-    icon: 'i-lucide-loader-circle',
+    icon: 'i-lucide-cpu',
     class: 'text-primary',
     label: 'In progress'
   },

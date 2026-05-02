@@ -1,5 +1,8 @@
 export default defineAppConfig({
   ui: {
+    icons: {
+      loading: 'i-lucide-cpu'
+    },
     colors: {
       primary: 'blue',
       neutral: 'zinc'

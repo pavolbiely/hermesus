@@ -41,7 +41,8 @@ const actionIconClass = 'size-3.5'
             variant="ghost"
             size="xs"
             square
-            :icon="steeringId === message.id ? 'i-lucide-loader-circle' : 'i-lucide-ship-wheel'"
+            :icon="steeringId === message.id ? 'i-lucide-cpu' : 'i-lucide-ship-wheel'"
+            loading-icon="i-lucide-cpu"
             :loading="steeringId === message.id"
             :ui="{ leadingIcon: actionIconClass }"
             :class="actionButtonClass"

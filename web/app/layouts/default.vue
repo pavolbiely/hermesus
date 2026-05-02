@@ -695,7 +695,7 @@ provide('requestedSessionId', readonly(requestedSessionId))
             </template>
             <template #leading>
               <UIcon
-                :name="profileSwitchPending ? 'i-lucide-loader-circle' : 'i-lucide-user-round'"
+                :name="profileSwitchPending ? 'i-lucide-cpu' : 'i-lucide-user-round'"
                 class="size-3.5"
                 :class="profileSwitchPending ? 'animate-spin' : undefined"
               />

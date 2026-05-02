@@ -45,7 +45,7 @@ const TOOL_DISPLAY_NAMES: Record<string, ToolDisplayDefinition> = {
   skills_list: { label: 'List skills', category: 'Hermes', icon: 'i-lucide-library' },
   skill_view: { label: 'Load skill', category: 'Hermes', icon: 'i-lucide-book-open' },
   skill_manage: { label: 'Manage skill', category: 'Hermes', icon: 'i-lucide-book-marked' },
-  memory: { label: 'Update memory', category: 'Memory', icon: 'i-lucide-brain' },
+  memory: { label: 'Update memory', category: 'Memory', icon: 'i-lucide-cpu' },
   session_search: { label: 'Search past sessions', category: 'Memory', icon: 'i-lucide-history' },
 
   clarify: { label: 'Ask user', category: 'User input', icon: 'i-lucide-circle-help' },

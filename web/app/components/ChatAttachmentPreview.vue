@@ -69,7 +69,7 @@ onBeforeUnmount(clearObjectUrl)
 
   <div v-else-if="loading && isImage" class="w-64 overflow-hidden rounded-lg border border-default bg-muted">
     <div class="flex h-40 w-64 items-center justify-center">
-      <UIcon name="i-lucide-loader-circle" class="size-5 animate-spin text-muted" />
+      <UIcon name="i-lucide-cpu" class="size-5 animate-spin text-muted" />
     </div>
     <div class="flex w-64 items-center gap-2 px-2 py-1.5 text-xs text-muted">
       <UIcon name="i-lucide-image" class="size-3.5 shrink-0" />
@@ -79,7 +79,7 @@ onBeforeUnmount(clearObjectUrl)
 
   <UCard v-else-if="loading" variant="subtle" class="w-56" :ui="{ body: 'p-3' }">
     <div class="flex items-center gap-2 text-sm text-muted">
-      <UIcon name="i-lucide-loader-circle" class="size-4 shrink-0 animate-spin" />
+      <UIcon name="i-lucide-cpu" class="size-4 shrink-0 animate-spin" />
       <span class="min-w-0 truncate">{{ attachment.name }}</span>
     </div>
     <p class="mt-1 text-xs text-muted">
