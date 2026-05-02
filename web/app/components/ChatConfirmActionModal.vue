@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const props = defineProps<{
   open: boolean
-  action: 'duplicate' | 'delete' | null
+  action: 'duplicate' | 'archive' | 'delete' | null
   title: string
   description: string
   pending: boolean
@@ -14,7 +14,11 @@ const emit = defineEmits<{
 }>()
 
 const confirmColor = computed(() => props.action === 'delete' ? 'error' : 'primary')
-const confirmLabel = computed(() => props.action === 'delete' ? 'Delete' : 'Duplicate')
+const confirmLabel = computed(() => {
+  if (props.action === 'delete') return 'Delete'
+  if (props.action === 'archive') return 'Archive'
+  return 'Duplicate'
+})
 
 function updateOpen(open: boolean) {
   emit('update:open', open)

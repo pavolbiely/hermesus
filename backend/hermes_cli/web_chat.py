@@ -889,8 +889,14 @@ def _resolve_requested_reasoning_effort(
     )
 
 
-def _list_non_empty_sessions(db: SessionDB, limit: int, offset: int) -> list[dict[str, Any]]:
-    return _list_non_empty_sessions_impl(db, limit, offset, max_session_limit=MAX_SESSION_LIMIT)
+def _list_non_empty_sessions(db: SessionDB, limit: int, offset: int, include_archived: bool = False) -> list[dict[str, Any]]:
+    return _list_non_empty_sessions_impl(
+        db,
+        limit,
+        offset,
+        max_session_limit=MAX_SESSION_LIMIT,
+        include_archived=include_archived,
+    )
 
 
 def _run_manager_services() -> RunManagerServices:

@@ -28,7 +28,7 @@ from .models import (
 )
 from .run_eta import looks_like_progress_text
 from .run_events import MESSAGE_ITEMS_FIELD, client_message_id_from_message, system_event_part, task_plan_from_event
-from .sessions import session_provider
+from .sessions import session_archived, session_provider
 
 RunExecutor = Callable[["RunContext", Callable[[dict[str, Any]], None]], str]
 EstimateRunEta = Callable[[Any, "RunContext", dict[str, Any] | None], WebChatRunEta | None]
@@ -130,6 +130,8 @@ class RunManager:
             session = db.get_session(request.sessionId)
             if not session:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+            if session_archived(session):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Restore archived chat before sending a message.")
             db.reopen_session(request.sessionId)
         else:
             session = None

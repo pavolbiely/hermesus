@@ -6,6 +6,8 @@ import type { SessionGroup } from '~/utils/sessionGroups'
 import type { WebChatMessage, WebChatProfile, WebChatSession, WebChatWorkspace } from '~/types/web-chat'
 import { buildSessionGroups } from '~/utils/sessionGroups'
 
+type ConfirmSessionAction = 'duplicate' | 'archive' | 'delete'
+
 const api = useHermesApi()
 const sessionCache = useWebChatSessionCache(api)
 const route = useRoute()
@@ -15,7 +17,8 @@ const activeChatRuns = useActiveChatRuns()
 const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
 
-const { data, refresh } = await useAsyncData('web-chat-sessions', () => api.listSessions())
+const dataRefreshKey = 'web-chat-sessions'
+const { data, refresh } = await useAsyncData(dataRefreshKey, () => api.listSessions({ includeArchived: true }))
 const { data: profilesData, pending: profilesPending } = await useAsyncData('web-chat-profiles', () => api.getProfiles())
 await context.initialize()
 
@@ -58,7 +61,7 @@ const readMessageCountsLoaded = ref(false)
 const readMessageCountsSynced = ref(false)
 const renameSession = ref<WebChatSession | null>(null)
 const renameTitle = ref('')
-const confirmAction = ref<'duplicate' | 'delete' | null>(null)
+const confirmAction = ref<ConfirmSessionAction | null>(null)
 const confirmSession = ref<WebChatSession | null>(null)
 const pendingSessionId = ref<string | null>(null)
 const workspaceModalOpen = ref(false)
@@ -106,7 +109,9 @@ const canSaveWorkspace = computed(() => Boolean(workspaceLabel.value.trim() && w
 const confirmTitle = computed(() => {
   if (!confirmAction.value || !confirmSession.value) return ''
 
-  return confirmAction.value === 'duplicate' ? 'Duplicate chat' : 'Delete chat'
+  if (confirmAction.value === 'duplicate') return 'Duplicate chat'
+  if (confirmAction.value === 'archive') return 'Archive chat'
+  return 'Delete chat'
 })
 
 const confirmDescription = computed(() => {
@@ -114,9 +119,9 @@ const confirmDescription = computed(() => {
 
   const title = sessionTitle(confirmSession.value)
 
-  return confirmAction.value === 'duplicate'
-    ? `Create a copy of “${title}”?`
-    : `Delete “${title}”? This cannot be undone.`
+  if (confirmAction.value === 'duplicate') return `Create a copy of “${title}”?`
+  if (confirmAction.value === 'archive') return `Archive “${title}”? It will move to the Archived section.`
+  return `Permanently delete “${title}”? This cannot be undone.`
 })
 
 function sessionTitle(session: WebChatSession) {
@@ -484,7 +489,7 @@ async function saveRename() {
   }
 }
 
-function beginConfirmAction(action: 'duplicate' | 'delete', session: WebChatSession) {
+function beginConfirmAction(action: ConfirmSessionAction, session: WebChatSession) {
   confirmAction.value = action
   confirmSession.value = session
 }
@@ -501,6 +506,8 @@ async function confirmSessionAction() {
 
   if (action === 'duplicate') {
     await duplicateSession(session)
+  } else if (action === 'archive') {
+    await archiveSession(session)
   } else {
     await deleteSession(session)
   }
@@ -539,6 +546,33 @@ async function toggleSessionPinned(session: WebChatSession) {
   } finally {
     pendingSessionId.value = null
   }
+}
+
+async function setSessionArchived(session: WebChatSession, archived: boolean) {
+  pendingSessionId.value = session.id
+  try {
+    const response = await api.setSessionArchived(session.id, archived)
+    sessionCache.set(response)
+    await refresh()
+    if (archived && isActiveSession(session)) await router.push('/')
+  } catch (err) {
+    toast.add({
+      title: archived ? 'Failed to archive chat' : 'Failed to restore chat',
+      description: err instanceof Error ? err.message : String(err),
+      color: 'error'
+    })
+  } finally {
+    pendingSessionId.value = null
+  }
+}
+
+async function archiveSession(session: WebChatSession) {
+  await setSessionArchived(session, true)
+  cancelConfirmAction()
+}
+
+async function restoreSession(session: WebChatSession) {
+  await setSessionArchived(session, false)
 }
 
 async function deleteSession(session: WebChatSession) {
@@ -664,6 +698,7 @@ provide('requestedSessionId', readonly(requestedSessionId))
           @prefetch-session="prefetchSession"
           @rename-session="beginRename"
           @toggle-session-pinned="toggleSessionPinned"
+          @restore-session="restoreSession"
           @confirm-session-action="beginConfirmAction"
         />
       </template>

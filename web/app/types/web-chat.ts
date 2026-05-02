@@ -156,6 +156,7 @@ export type WebChatSession = {
   reasoningEffort: string | null
   workspace: string | null
   pinned: boolean
+  archived: boolean
   messageCount: number
   createdAt: string
   updatedAt: string

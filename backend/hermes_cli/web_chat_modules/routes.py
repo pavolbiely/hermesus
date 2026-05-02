@@ -65,7 +65,7 @@ class WebChatRouteServices:
     web_chat_source: str
     max_session_limit: int
     max_attachments_per_request: int
-    list_non_empty_sessions: Callable[[SessionDB, int, int], list[dict[str, Any]]]
+    list_non_empty_sessions: Callable[[SessionDB, int, int, bool], list[dict[str, Any]]]
     serialize_session: Callable[[dict[str, Any]], WebChatSession]
     serialize_messages: Callable[..., list[WebChatMessage]]
     web_chat_commands: Callable[[], list[WebChatCommand]]
@@ -108,11 +108,13 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
     def list_sessions(
         limit: int = Query(default=50, ge=1, le=services.max_session_limit),
         offset: int = Query(default=0, ge=0),
+        includeArchived: bool = Query(default=False),
     ) -> SessionListResponse:
         return session_handlers.list_sessions_response(
             services.db(),
             limit=limit,
             offset=offset,
+            include_archived=includeArchived,
             list_non_empty_sessions=services.list_non_empty_sessions,
             serialize_session=services.serialize_session,
         )

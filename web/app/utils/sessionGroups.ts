@@ -16,14 +16,17 @@ type BuildSessionGroupsOptions = {
 }
 
 const OTHER_WORKSPACE_KEY = '__other__'
+const ARCHIVED_WORKSPACE_KEY = '__archived__'
 
 export function workspaceKey(workspace: string | null): string {
   return workspace || OTHER_WORKSPACE_KEY
 }
 
 export function buildSessionGroups(options: BuildSessionGroupsOptions): SessionGroup[] {
+  const archivedSessions = options.sessions.filter(session => session.archived)
+  const visibleSessions = options.sessions.filter(session => !session.archived)
   const sessionsByWorkspace = new Map<string, WebChatSession[]>()
-  for (const session of options.sessions) {
+  for (const session of visibleSessions) {
     const key = workspaceKey(session.workspace)
     sessionsByWorkspace.set(key, [...(sessionsByWorkspace.get(key) || []), session])
   }
@@ -52,6 +55,16 @@ export function buildSessionGroups(options: BuildSessionGroupsOptions): SessionG
       label: 'Other chats',
       path: null,
       sessions: sortedSessions(otherSessions),
+      active: false
+    })
+  }
+
+  if (archivedSessions.length) {
+    groups.push({
+      id: ARCHIVED_WORKSPACE_KEY,
+      label: 'Archived',
+      path: null,
+      sessions: sortedSessions(archivedSessions),
       active: false
     })
   }

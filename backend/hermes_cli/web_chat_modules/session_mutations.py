@@ -66,6 +66,7 @@ def duplicate_session(
         if isinstance(parsed, dict):
             model_config = parsed
             model_config.pop("pinned", None)
+            model_config.pop("archived", None)
 
     db.create_session(
         new_session_id,
@@ -132,6 +133,7 @@ def list_non_empty_sessions(
     offset: int,
     *,
     max_session_limit: int,
+    include_archived: bool = False,
 ) -> list[dict[str, Any]]:
     sessions: list[dict[str, Any]] = []
     db_offset = 0
@@ -144,7 +146,10 @@ def list_non_empty_sessions(
         for session in batch:
             if session.get("message_count", 0) <= 0:
                 continue
-            sessions.append(session_with_tip_config(db, session))
+            session = session_with_tip_config(db, session)
+            if not include_archived and _session_archived(session):
+                continue
+            sessions.append(session)
             if len(sessions) >= max_session_limit:
                 break
         db_offset += len(batch)
@@ -166,12 +171,20 @@ def _numeric_timestamp(value: Any) -> float:
     return value if isinstance(value, (int, float)) else 0.0
 
 
-def _session_pinned(session: dict[str, Any]) -> bool:
+def _session_model_config(session: dict[str, Any]) -> dict[str, Any]:
     raw = session.get("model_config")
     if not isinstance(raw, str) or not raw:
-        return False
+        return {}
     try:
         parsed = json.loads(raw)
     except (TypeError, json.JSONDecodeError):
-        return False
-    return isinstance(parsed, dict) and parsed.get("pinned") is True
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _session_pinned(session: dict[str, Any]) -> bool:
+    return _session_model_config(session).get("pinned") is True
+
+
+def _session_archived(session: dict[str, Any]) -> bool:
+    return _session_model_config(session).get("archived") is True

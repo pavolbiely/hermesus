@@ -11,6 +11,7 @@ const session = (overrides) => ({
   reasoningEffort: null,
   workspace: overrides.workspace ?? null,
   pinned: overrides.pinned ?? false,
+  archived: overrides.archived ?? false,
   messageCount: 0,
   createdAt: overrides.createdAt ?? '2026-01-01T00:00:00Z',
   updatedAt: overrides.updatedAt ?? '2026-01-01T00:00:00Z'
@@ -23,7 +24,7 @@ const workspace = (overrides) => ({
   active: overrides.active ?? false
 })
 
-test('keeps empty managed workspaces visible and sorts them alphabetically', () => {
+test('keeps empty managed workspaces visible in configured order', () => {
   const groups = buildSessionGroups({
     sessions: [session({ id: 's1', workspace: '/repo/beta' })],
     workspaces: [
@@ -34,8 +35,8 @@ test('keeps empty managed workspaces visible and sorts them alphabetically', () 
   })
 
   assert.deepEqual(groups.map(group => ({ label: group.label, sessions: group.sessions.map(s => s.id) })), [
-    { label: 'Alpha', sessions: [] },
-    { label: 'Beta', sessions: ['s1'] }
+    { label: 'Beta', sessions: ['s1'] },
+    { label: 'Alpha', sessions: [] }
   ])
 })
 
@@ -47,6 +48,23 @@ test('keeps other chats after managed workspace groups', () => {
   })
 
   assert.deepEqual(groups.map(group => group.label), ['Alpha', 'Other chats'])
+})
+
+test('keeps archived chats in a separate group after other chats', () => {
+  const groups = buildSessionGroups({
+    sessions: [
+      session({ id: 'visible', workspace: null }),
+      session({ id: 'archived', workspace: '/repo/alpha', archived: true })
+    ],
+    workspaces: [workspace({ id: 'alpha', label: 'Alpha', path: '/repo/alpha' })],
+    selectedWorkspace: null
+  })
+
+  assert.deepEqual(groups.map(group => ({ label: group.label, sessions: group.sessions.map(s => s.id) })), [
+    { label: 'Alpha', sessions: [] },
+    { label: 'Other chats', sessions: ['visible'] },
+    { label: 'Archived', sessions: ['archived'] }
+  ])
 })
 
 test('keeps pinned chats first within workspace groups', () => {

@@ -100,6 +100,8 @@ const olderMessagesLabel = computed(() => {
 const isSwitchingSession = computed(() => Boolean(requestedSessionId?.value && requestedSessionId.value !== sessionId.value))
 const isLoadingSession = computed(() => isSwitchingSession.value || ((sessionStatus.value === 'idle' || sessionStatus.value === 'pending') && !displayedData.value))
 const hasSession = computed(() => Boolean(displayedData.value?.session))
+const currentSessionArchived = computed(() => displayedData.value?.session.archived === true)
+const restoringArchivedSession = ref(false)
 const {
   messages,
   submitStatus,
@@ -671,7 +673,29 @@ function scrollSubmittedMessageToBottom() {
   void scrollChatToBottom()
 }
 
+async function restoreArchivedSession() {
+  const session = displayedData.value?.session
+  if (!session || restoringArchivedSession.value) return
+
+  restoringArchivedSession.value = true
+  try {
+    const response = await api.setSessionArchived(session.id, false)
+    data.value = response
+    sessionCache.set(response)
+    await refreshSessions?.()
+    toast.add({ title: 'Chat restored' })
+  } catch (err) {
+    showError(err, 'Failed to restore chat')
+  } finally {
+    restoringArchivedSession.value = false
+  }
+}
+
 async function sendMessageNow(message: string, options: SendMessageOptions = {}) {
+  if (currentSessionArchived.value) {
+    toast.add({ color: 'warning', title: 'Restore this chat before sending a message.' })
+    return
+  }
   const pendingAttachments = options.includeCurrentAttachments === false ? [] : [...context.attachments.value]
   void prepareNotificationSound()
   if (options.clearInput !== false) input.value = ''
@@ -715,6 +739,10 @@ function previousUserMessage(message: WebChatMessage) {
 }
 
 async function regenerateResponse(message: WebChatMessage) {
+  if (currentSessionArchived.value) {
+    toast.add({ color: 'warning', title: 'Restore this chat before regenerating.' })
+    return
+  }
   if (message.role !== 'assistant') return
   if (activeChatRuns.isRunning(sessionId.value) || submitStatus.value === 'submitted') return
 
@@ -761,6 +789,10 @@ async function regenerateResponse(message: WebChatMessage) {
 }
 
 async function retryFailedMessage(message: WebChatMessage) {
+  if (currentSessionArchived.value) {
+    toast.add({ color: 'warning', title: 'Restore this chat before retrying.' })
+    return
+  }
   if (message.localStatus !== 'failed') return
   const text = messageText(message).trim()
   if (!text || !message.clientMessageId) return
@@ -787,6 +819,10 @@ async function retryFailedMessage(message: WebChatMessage) {
 }
 
 function editFailedMessage(message: WebChatMessage) {
+  if (currentSessionArchived.value) {
+    toast.add({ color: 'warning', title: 'Restore this chat before editing.' })
+    return
+  }
   input.value = messageText(message)
   context.attachments.value = attachmentsForMessage(message)
   messages.value = removeLocalMessage(messages.value, message.id)
@@ -794,6 +830,10 @@ function editFailedMessage(message: WebChatMessage) {
 }
 
 async function onSubmit() {
+  if (currentSessionArchived.value) {
+    toast.add({ color: 'warning', title: 'Restore this chat before sending a message.' })
+    return
+  }
   const message = input.value.trim()
   if (!message) return
   if (!context.selectedWorkspace.value) {
@@ -1163,7 +1203,29 @@ onBeforeUnmount(() => {
                 />
               </div>
 
+              <div
+                v-if="currentSessionArchived"
+                class="rounded-xl border border-dashed border-default bg-elevated/30 px-4 py-3"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-highlighted">This chat is archived</p>
+                    <p class="text-xs text-muted">Restore it before sending new messages.</p>
+                  </div>
+                  <UButton
+                    color="neutral"
+                    variant="soft"
+                    size="sm"
+                    icon="i-lucide-archive-restore"
+                    label="Restore"
+                    :loading="restoringArchivedSession"
+                    @click="restoreArchivedSession"
+                  />
+                </div>
+              </div>
+
               <UChatPrompt
+                v-else
                 v-model="input"
                 :aria-hidden="isLoadingSession"
                 :class="isLoadingSession ? 'pointer-events-none invisible' : undefined"

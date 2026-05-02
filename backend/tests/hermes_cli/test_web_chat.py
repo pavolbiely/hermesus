@@ -31,6 +31,7 @@ def test_lists_sessions_for_chat_sidebar(client):
         "reasoningEffort": None,
         "workspace": None,
         "pinned": False,
+        "archived": False,
         "messageCount": 2,
         "createdAt": data["sessions"][0]["createdAt"],
         "updatedAt": data["sessions"][0]["updatedAt"],
@@ -342,6 +343,28 @@ def test_pins_and_unpins_session(client):
     assert unpinned.json()["session"]["pinned"] is False
 
 
+def test_archives_and_restores_session(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("session-archive", source="web-chat")
+    db.append_message("session-archive", "user", "Archive me")
+
+    archived = client.patch("/api/web-chat/sessions/session-archive", json={"archived": True})
+    default_list = client.get("/api/web-chat/sessions")
+    archived_list = client.get("/api/web-chat/sessions?includeArchived=true")
+    restored = client.patch("/api/web-chat/sessions/session-archive", json={"archived": False})
+
+    assert archived.status_code == 200
+    assert archived.json()["session"]["archived"] is True
+    assert [session["id"] for session in default_list.json()["sessions"]] == []
+    assert archived_list.json()["sessions"][0]["id"] == "session-archive"
+    assert archived_list.json()["sessions"][0]["archived"] is True
+    assert restored.status_code == 200
+    assert restored.json()["session"]["archived"] is False
+    assert db.get_session("session-archive") is not None
+
+
 def test_deletes_session(client):
     from hermes_state import SessionDB
 
@@ -428,6 +451,37 @@ def test_edit_user_message_updates_content_and_deletes_following_history(client)
     assert len(persisted) == 1
     assert persisted[0]["id"] == first_id
     assert persisted[0]["content"] == "Edited prompt"
+
+
+def test_edit_archived_session_message_is_rejected(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("session-edit-archived", source="web-chat", model_config={"archived": True})
+    message_id = db.append_message("session-edit-archived", "user", "Original")
+
+    response = client.patch(
+        f"/api/web-chat/sessions/session-edit-archived/messages/{message_id}",
+        json={"content": "Edited"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Restore archived chat before editing a message."
+
+
+def test_start_run_for_archived_session_is_rejected(client, monkeypatch):
+    import hermes_cli.web_chat as web_chat
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("session-run-archived", source="web-chat", model_config={"archived": True})
+    db.append_message("session-run-archived", "user", "Original")
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(lambda context, emit: "Done"))
+
+    response = client.post("/api/web-chat/runs", json={"sessionId": "session-run-archived", "input": "Continue"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Restore archived chat before sending a message."
 
 
 def test_edit_message_rejects_non_user_messages(client):

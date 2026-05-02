@@ -23,7 +23,8 @@ const emit = defineEmits<{
   prefetchSession: [session: WebChatSession]
   renameSession: [session: WebChatSession]
   toggleSessionPinned: [session: WebChatSession]
-  confirmSessionAction: [action: 'duplicate' | 'delete', session: WebChatSession]
+  restoreSession: [session: WebChatSession]
+  confirmSessionAction: [action: 'duplicate' | 'archive' | 'delete', session: WebChatSession]
   reorderWorkspaces: [workspaceIds: string[]]
 }>()
 
@@ -330,13 +331,35 @@ function toggleSessionPinned(session: WebChatSession) {
   emit('toggleSessionPinned', session)
 }
 
-function confirmSessionAction(action: 'duplicate' | 'delete', session: WebChatSession) {
+function restoreSession(session: WebChatSession) {
+  openMenuSessionId.value = null
+  contextMenuReference.value = null
+  emit('restoreSession', session)
+}
+
+function confirmSessionAction(action: 'duplicate' | 'archive' | 'delete', session: WebChatSession) {
   openMenuSessionId.value = null
   contextMenuReference.value = null
   emit('confirmSessionAction', action, session)
 }
 
 function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
+  if (session.archived) {
+    return [
+      {
+        label: 'Restore',
+        icon: 'i-lucide-archive-restore',
+        onSelect: () => restoreSession(session)
+      },
+      {
+        label: 'Delete permanently',
+        icon: 'i-lucide-trash-2',
+        color: 'error',
+        onSelect: () => confirmSessionAction('delete', session)
+      }
+    ]
+  }
+
   return [
     {
       label: session.pinned ? 'Unpin' : 'Pin',
@@ -354,10 +377,9 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
       onSelect: () => confirmSessionAction('duplicate', session)
     },
     {
-      label: 'Delete',
-      icon: 'i-lucide-trash-2',
-      color: 'error',
-      onSelect: () => confirmSessionAction('delete', session)
+      label: 'Archive',
+      icon: 'i-lucide-archive',
+      onSelect: () => confirmSessionAction('archive', session)
     }
   ]
 }

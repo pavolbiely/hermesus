@@ -82,6 +82,10 @@ def session_pinned(session: dict[str, Any] | None) -> bool:
     return session_model_config(session).get("pinned") is True
 
 
+def session_archived(session: dict[str, Any] | None) -> bool:
+    return session_model_config(session).get("archived") is True
+
+
 def serialize_session(session: dict[str, Any]) -> WebChatSession:
     created_at = iso_from_epoch(session.get("started_at"))
     updated_at = iso_from_epoch(session.get("last_active") or session.get("started_at"))
@@ -95,6 +99,7 @@ def serialize_session(session: dict[str, Any]) -> WebChatSession:
         reasoningEffort=session_reasoning_effort(session),
         workspace=session_workspace(session),
         pinned=session_pinned(session),
+        archived=session_archived(session),
         messageCount=session.get("message_count", 0),
         createdAt=created_at,
         updatedAt=updated_at,

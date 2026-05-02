@@ -20,6 +20,7 @@ from .models import (
     WebChatMessage,
     WebChatWorkspaceChanges,
 )
+from .sessions import session_archived
 
 
 def list_sessions_response(
@@ -27,10 +28,11 @@ def list_sessions_response(
     *,
     limit: int,
     offset: int,
-    list_non_empty_sessions: Callable[[SessionDB, int, int], list[dict[str, Any]]],
+    include_archived: bool,
+    list_non_empty_sessions: Callable[[SessionDB, int, int, bool], list[dict[str, Any]]],
     serialize_session: Callable[[dict[str, Any]], WebChatSession],
 ) -> SessionListResponse:
-    sessions = list_non_empty_sessions(db, limit, offset)
+    sessions = list_non_empty_sessions(db, limit, offset, include_archived)
     return SessionListResponse(sessions=[serialize_session(session) for session in sessions])
 
 
@@ -70,7 +72,7 @@ def rename_session_response(
     serialize_messages: Callable[..., list[WebChatMessage]],
 ) -> SessionDetailResponse:
     get_session_or_404(db, session_id)
-    if payload.title is None and payload.pinned is None:
+    if payload.title is None and payload.pinned is None and payload.archived is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No session changes provided")
 
     if payload.title is not None:
@@ -81,6 +83,9 @@ def rename_session_response(
 
     if payload.pinned is not None:
         _update_session_model_config(db, session_id, {"pinned": True if payload.pinned else None})
+
+    if payload.archived is not None:
+        _update_session_model_config(db, session_id, {"archived": True if payload.archived else None})
 
     session = get_session_or_404(db, session_id)
     return SessionDetailResponse(
@@ -162,7 +167,9 @@ def edit_message_response(
     serialize_session: Callable[[dict[str, Any]], WebChatSession],
     serialize_messages: Callable[..., list[WebChatMessage]],
 ) -> SessionDetailResponse:
-    get_session_or_404(db, session_id)
+    session = get_session_or_404(db, session_id)
+    if session_archived(session):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Restore archived chat before editing a message.")
     edit_user_message(db, session_id, message_id, payload.content)
     session = get_session_or_404(db, session_id)
     return SessionDetailResponse(

@@ -38,6 +38,10 @@ function hermesToken() {
   return window.__HERMES_SESSION_TOKEN__ || (typeof runtimeToken === 'string' ? runtimeToken : undefined)
 }
 
+type ListSessionsOptions = {
+  includeArchived?: boolean
+}
+
 type SessionDetailOptions = {
   includeWorkspaceChanges?: boolean
   messageLimit?: number
@@ -135,13 +139,21 @@ export function useHermesApi() {
       method: 'POST',
       body: payload
     }),
-    listSessions: () => request<SessionListResponse>('/api/web-chat/sessions'),
+    listSessions: (options: ListSessionsOptions = {}) => request<SessionListResponse>('/api/web-chat/sessions', {
+      query: {
+        includeArchived: options.includeArchived || undefined
+      }
+    }),
     getSession: (id: string, options?: SessionDetailOptions) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
       query: sessionDetailQuery(options)
     }),
     renameSession: (id: string, title: string) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
       method: 'PATCH',
       body: { title }
+    }),
+    setSessionArchived: (id: string, archived: boolean) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
+      method: 'PATCH',
+      body: { archived }
     }),
     setSessionPinned: (id: string, pinned: boolean) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
       method: 'PATCH',
