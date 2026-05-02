@@ -1,6 +1,6 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatRunEta, WebChatSystemEventSeverity, WebChatSystemEventType, WebChatTaskPlan, WebChatWorkspaceChanges } from '~/types/web-chat'
-import { applyRunMetrics, inputTokenCount, latestTaskPlanFromMessages, type RunMetrics } from '~/utils/chatRunMessages'
+import { applyRunMetrics, finalizeTaskPlansInMessages, inputTokenCount, latestTaskPlanFromMessages, type RunMetrics } from '~/utils/chatRunMessages'
 import { toolDisplayName, toolRawName } from '~/utils/toolCalls'
 import { createLocalMessage } from './useHermesRunStream'
 
@@ -312,6 +312,10 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     assistant.parts.push({ type: 'task_plan', taskPlan })
   }
 
+  function finishTaskPlans(finalStatus: 'completed' | 'cancelled') {
+    finalizeTaskPlansInMessages(messages.value, finalStatus)
+  }
+
   function markToolCompleted(payload: { name?: string, occurredAt?: string }) {
     setActivity('Thinking…', 'thinking')
     const assistant = [...messages.value].reverse().find(message => message.role === 'assistant')
@@ -397,6 +401,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       onCompleted: (payload) => {
         if (targetSessionId !== options.sessionId.value) return
         replaceAssistantMessage(payload)
+        finishTaskPlans('completed')
       },
       onToolStarted: (payload) => {
         if (targetSessionId === options.sessionId.value) appendToolStarted(payload)
@@ -425,8 +430,12 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       onPromptCancelled: (prompt) => {
         if (targetSessionId === options.sessionId.value) appendPromptCancelled(prompt)
       },
+      onRunCompleted: () => {
+        if (targetSessionId === options.sessionId.value) finishTaskPlans('completed')
+      },
       onRunStopped: (payload) => {
         if (targetSessionId !== options.sessionId.value) return
+        finishTaskPlans('cancelled')
         appendSystemEvent({
           eventType: 'run_stopped',
           title: 'Run stopped',
@@ -438,6 +447,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       },
       onRunFailed: (payload) => {
         if (targetSessionId !== options.sessionId.value) return
+        finishTaskPlans('cancelled')
         appendSystemEvent({
           eventType: 'run_failed',
           severity: 'error',

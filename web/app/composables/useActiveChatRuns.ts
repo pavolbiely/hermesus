@@ -41,6 +41,7 @@ type ActiveRunHandlers = {
   onPromptExpired?: (prompt: InteractivePrompt) => void
   onPromptCancelled?: (prompt: InteractivePrompt) => void
   onRunStopped?: (payload: RunLifecyclePayload) => void
+  onRunCompleted?: (payload: RunLifecyclePayload) => void
   onRunFailed?: (payload: RunFailedPayload) => void
   onRunSteered?: (payload: RunSteeredPayload) => void
   onError?: (error: Error) => void
@@ -328,7 +329,13 @@ export function useActiveChatRuns() {
     })
 
     source.addEventListener('run.completed', (event) => {
-      retargetRunFromEvent(run, parseRunEventPayload(event))
+      const payload = parseRunEventPayload(event)
+      retargetRunFromEvent(run, payload)
+      recordAndNotify(run, 'onRunCompleted', {
+        message: typeof payload.message === 'string' ? payload.message : undefined,
+        messageId: typeof payload.messageId === 'string' ? payload.messageId : undefined,
+        occurredAt: eventTimestamp()
+      })
       showRunFinishedDesktopNotification({
         sessionId: run.sessionId,
         runId: run.runId,

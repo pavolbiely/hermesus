@@ -1,6 +1,56 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { finalizeTaskPlansInMessages } from '../app/utils/chatRunMessages.ts'
 import { formatMessageGenerationDuration, formatMessageTimestamp, formatMessageTokenCount, formatProcessPartDuration, groupMessageParts, latestChangePartKey, messageDurationDetails, messagePartKey, messageText, messageTokenDetails, processGroupSummary } from '../app/utils/chatMessages.ts'
+
+test('finalizes in-progress task plan items after the current run ends', () => {
+  const messages = [
+    {
+      id: 'old-assistant',
+      role: 'assistant',
+      createdAt: '2026-01-01T09:59:00.000Z',
+      parts: [{ type: 'task_plan', taskPlan: { items: [{ id: 'old', content: 'Old task', status: 'in_progress' }] } }]
+    },
+    {
+      id: 'user',
+      role: 'user',
+      createdAt: '2026-01-01T10:00:00.000Z',
+      parts: [{ type: 'text', text: 'Do it' }]
+    },
+    {
+      id: 'assistant',
+      role: 'assistant',
+      createdAt: '2026-01-01T10:01:00.000Z',
+      parts: [{
+        type: 'task_plan',
+        taskPlan: {
+          items: [
+            { id: 'done', content: 'Done', status: 'completed' },
+            { id: 'active', content: 'Active', status: 'in_progress' },
+            { id: 'pending', content: 'Pending', status: 'pending' }
+          ]
+        }
+      }]
+    }
+  ]
+
+  assert.equal(finalizeTaskPlansInMessages(messages, 'completed'), true)
+  assert.equal(messages[0].parts[0].taskPlan.items[0].status, 'in_progress')
+  assert.deepEqual(messages[2].parts[0].taskPlan.items.map(item => item.status), ['completed', 'completed', 'pending'])
+  assert.match(messages[2].parts[0].taskPlan.updatedAt, /^\d{4}-\d{2}-\d{2}T/)
+})
+
+test('cancels in-progress task plan items for stopped or failed runs', () => {
+  const messages = [{
+    id: 'assistant',
+    role: 'assistant',
+    createdAt: '2026-01-01T10:01:00.000Z',
+    parts: [{ type: 'task_plan', taskPlan: { items: [{ id: 'active', content: 'Active', status: 'in_progress' }] } }]
+  }]
+
+  assert.equal(finalizeTaskPlansInMessages(messages, 'cancelled'), true)
+  assert.equal(messages[0].parts[0].taskPlan.items[0].status, 'cancelled')
+})
 
 test('groups consecutive process parts together', () => {
   const groups = groupMessageParts([

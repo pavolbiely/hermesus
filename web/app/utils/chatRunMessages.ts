@@ -1,4 +1,4 @@
-import type { WebChatMessage } from '~/types/web-chat'
+import type { WebChatMessage, WebChatTaskPlanItemStatus } from '~/types/web-chat'
 
 export type RunMetrics = Partial<Pick<WebChatMessage,
   | 'tokenCount'
@@ -35,6 +35,35 @@ export function applyRunMetrics(message: WebChatMessage, metrics: RunMetrics) {
   message.modelDurationMs = metrics.modelDurationMs ?? null
   message.toolDurationMs = metrics.toolDurationMs ?? null
   message.promptWaitDurationMs = metrics.promptWaitDurationMs ?? null
+}
+
+export function finalizeTaskPlansInMessages(messages: WebChatMessage[], finalStatus: Extract<WebChatTaskPlanItemStatus, 'completed' | 'cancelled'>) {
+  let changed = false
+  const updatedAt = new Date().toISOString()
+
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex]
+    if (!message || message.role === 'user') break
+
+    for (const part of message.parts) {
+      const taskPlan = part.taskPlan
+      if (!taskPlan?.items.length) continue
+
+      let planChanged = false
+      const items = taskPlan.items.map((item) => {
+        if (item.status !== 'in_progress') return item
+        changed = true
+        planChanged = true
+        return { ...item, status: finalStatus }
+      })
+
+      if (planChanged) {
+        part.taskPlan = { ...taskPlan, items, updatedAt }
+      }
+    }
+  }
+
+  return changed
 }
 
 export function latestTaskPlanFromMessages(messages: WebChatMessage[]) {
