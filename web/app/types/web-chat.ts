@@ -374,11 +374,19 @@ export type WebChatIsolatedWorkspace = {
   dirty: boolean
 }
 
-export type SessionListResponse = {
+export interface SessionListResponse {
   sessions: WebChatSession[]
 }
 
-export type ActiveRunSummary = {
+export interface WebChatSessionPreviewResponse {
+  sessionId: string
+  summary?: string | null
+  summaryStatus: 'missing' | 'ready' | 'error'
+  messageCount: number
+  updatedAt?: string | null
+}
+
+export interface ActiveRunSummary {
   runId: string
   sessionId: string
   status: 'running' | 'stopping' | 'completed' | 'stopped' | 'failed'

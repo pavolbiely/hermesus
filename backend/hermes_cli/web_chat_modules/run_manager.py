@@ -114,6 +114,7 @@ class RunManagerServices:
     estimate_run_eta: EstimateRunEta
     record_run_eta_sample: RecordRunEtaSample
     agent_executor: RunExecutor
+    refresh_session_preview: Callable[[str], None] | None = None
 
 
 class RunManager:
@@ -680,6 +681,13 @@ class RunManager:
             tool_event_count=active.tool_event_count,
         )
 
+    def _refresh_session_preview_async(self, session_id: str) -> None:
+        refresh = self._services.refresh_session_preview
+        if not refresh:
+            return
+        thread = threading.Thread(target=refresh, args=(session_id,), daemon=True)
+        thread.start()
+
     def _run(self, active: ActiveRun) -> None:
         self._emit(active, {"type": "run.started"})
         assistant_message_id: int | None = None
@@ -717,6 +725,7 @@ class RunManager:
                     },
                 )
             self._emit(active, {"type": "run.completed"})
+            self._refresh_session_preview_async(active.context.session_id)
             self._finish(active, "completed")
         except Exception as exc:
             active.context.session_id = visible_session_id

@@ -24,6 +24,7 @@ import type {
   WebChatFilePreviewReference,
   WebChatProfilesResponse,
   WebChatProviderUsageResponse,
+  WebChatSessionPreviewResponse,
   WebChatAppUpdateStatusResponse,
   WebChatUpdateStatusResponse,
   SwitchProfileResponse,
@@ -150,6 +151,10 @@ export function useHermesApi() {
     }),
     getSession: (id: string, options?: SessionDetailOptions) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
       query: sessionDetailQuery(options)
+    }),
+    getSessionPreview: (id: string) => request<WebChatSessionPreviewResponse>(`/api/web-chat/sessions/${id}/preview`),
+    generateSessionPreviewSummary: (id: string) => request<WebChatSessionPreviewResponse>(`/api/web-chat/sessions/${id}/preview-summary`, {
+      method: 'POST'
     }),
     renameSession: (id: string, title: string) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
       method: 'PATCH',

@@ -422,6 +422,14 @@ class SessionListResponse(BaseModel):
     sessions: list[WebChatSession]
 
 
+class WebChatSessionPreviewResponse(BaseModel):
+    sessionId: str
+    summary: str | None = None
+    summaryStatus: Literal["missing", "ready", "error"] = "missing"
+    messageCount: int
+    updatedAt: str | None = None
+
+
 class WebChatRunEta(BaseModel):
     remainingMs: int
     estimatedCompletionAt: str

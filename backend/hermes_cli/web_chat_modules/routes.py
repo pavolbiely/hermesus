@@ -50,6 +50,7 @@ from .models import (
     WebChatProviderUsageResponse,
     WebChatProfilesResponse,
     WebChatSession,
+    WebChatSessionPreviewResponse,
     WebChatUpdateStatusResponse,
     WebChatWorkspace,
     WebChatWorkspaceChanges,
@@ -95,6 +96,8 @@ class WebChatRouteServices:
     delete_session_git_changes: Callable[[SessionDB, str], None]
     remove_session_worktree: Callable[[SessionDB, str], None]
     duplicate_session: Callable[[SessionDB, str], SessionDetailResponse]
+    get_session_preview: Callable[[SessionDB, str], WebChatSessionPreviewResponse]
+    generate_session_preview: Callable[[SessionDB, str], WebChatSessionPreviewResponse]
     session_git_changes_by_message: Callable[[SessionDB, str], dict[str, WebChatWorkspaceChanges]]
     isolated_worktree_for_session: Callable[[SessionDB, str], Any | None]
     update_status: Callable[[], WebChatUpdateStatusResponse]
@@ -298,6 +301,14 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
     @router.post("/sessions/{session_id}/duplicate", status_code=status.HTTP_201_CREATED, response_model=SessionDetailResponse)
     def duplicate_session(session_id: str) -> SessionDetailResponse:
         return services.duplicate_session(services.db(), session_id)
+
+    @router.get("/sessions/{session_id}/preview", response_model=WebChatSessionPreviewResponse)
+    def get_session_preview(session_id: str) -> WebChatSessionPreviewResponse:
+        return services.get_session_preview(services.db(), session_id)
+
+    @router.post("/sessions/{session_id}/preview-summary", response_model=WebChatSessionPreviewResponse)
+    def generate_session_preview(session_id: str) -> WebChatSessionPreviewResponse:
+        return services.generate_session_preview(services.db(), session_id)
 
     @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
     def get_session(

@@ -5,7 +5,7 @@ Use this before broad repository search.
 ## Canonical source
 
 - `backend/hermes_cli/web_chat.py`: backend entrypoint and compatibility wrappers.
-- `backend/hermes_cli/web_chat_modules/`: backend domain modules.
+- `backend/hermes_cli/web_chat_modules/`: backend domain modules, including `session_summaries.py` for cached out-of-band sidebar chat previews.
 - `backend/tests/hermes_cli/test_web_chat*.py`: backend tests split by domain.
 - `web/app/pages/chat/[id].vue`: main chat route/page orchestrator.
 - `web/app/components/`: chat UI components.

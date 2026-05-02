@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { DropdownMenuItem } from '@nuxt/ui'
 import type { SessionGroup } from '~/utils/sessionGroups'
-import type { WebChatSession, WebChatWorkspace } from '~/types/web-chat'
+import type { WebChatSession, WebChatSessionPreviewResponse, WebChatWorkspace } from '~/types/web-chat'
 import { isSessionUnread } from '~/utils/chatReadReceipts'
-import { displayedGroupSessions, hiddenGroupSessionCount, MAX_COLLAPSED_SESSION_COUNT, sessionTimestampTitle, sessionTitle, sortedGroupSessions } from '~/utils/sidebarSessions'
+import { displayedGroupSessions, hiddenGroupSessionCount, MAX_COLLAPSED_SESSION_COUNT, sessionTitle, sortedGroupSessions } from '~/utils/sidebarSessions'
 
 const props = defineProps<{
   groups: SessionGroup[]
@@ -32,6 +32,14 @@ const OTHER_CHATS_GROUP_ID = '__other__'
 const COLLAPSED_GROUPS_STORAGE_KEY = 'hermes-chat-collapsed-session-groups'
 
 const openMenuSessionId = ref<string | null>(null)
+const api = useHermesApi()
+type PreviewState = {
+  data?: WebChatSessionPreviewResponse
+  loading?: boolean
+  generating?: boolean
+  error?: string
+}
+const previewStates = ref<Record<string, PreviewState>>({})
 const draggingWorkspaceId = ref<string | null>(null)
 const dragPreviewWorkspaceIds = ref<string[] | null>(null)
 const preserveDroppedPreview = ref(false)
@@ -49,6 +57,53 @@ function sessionTime(updatedAt: string) {
 
 function isActiveSession(session: WebChatSession) {
   return props.activeSessionId === session.id
+}
+
+function previewState(session: WebChatSession) {
+  return previewStates.value[session.id] || {}
+}
+
+function setPreviewState(sessionId: string, state: PreviewState) {
+  previewStates.value = {
+    ...previewStates.value,
+    [sessionId]: {
+      ...previewStates.value[sessionId],
+      ...state
+    }
+  }
+}
+
+function sessionPreviewSummary(session: WebChatSession) {
+  const state = previewState(session)
+  return state.data?.summary?.trim() || ''
+}
+
+function loadSessionPreviewOnOpen(session: WebChatSession, open: boolean) {
+  if (!open) return
+  emit('prefetchSession', session)
+  if (!previewState(session).data && !previewState(session).loading) {
+    void loadSessionPreview(session.id)
+  }
+}
+
+async function loadSessionPreview(sessionId: string) {
+  setPreviewState(sessionId, { loading: true, error: undefined })
+  try {
+    const data = await api.getSessionPreview(sessionId)
+    setPreviewState(sessionId, { data, loading: false, error: undefined })
+  } catch (error) {
+    setPreviewState(sessionId, { loading: false, error: error instanceof Error ? error.message : 'Failed to load summary' })
+  }
+}
+
+async function generateSessionPreview(session: WebChatSession) {
+  setPreviewState(session.id, { generating: true, error: undefined })
+  try {
+    const data = await api.generateSessionPreviewSummary(session.id)
+    setPreviewState(session.id, { data, generating: false, loading: false, error: undefined })
+  } catch (error) {
+    setPreviewState(session.id, { generating: false, loading: false, error: error instanceof Error ? error.message : 'Failed to generate summary' })
+  }
 }
 
 function isSortableWorkspaceGroup(group: SessionGroup) {
@@ -452,7 +507,7 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
         @keydown.enter.prevent="toggleWorkspaceGroup(group)"
         @keydown.space.prevent="toggleWorkspaceGroup(group)"
       >
-        <span class="flex min-w-0 items-center gap-1.5 truncate" :title="group.path || undefined">
+        <span class="flex min-w-0 items-center gap-1.5 truncate">
           <UIcon
             :key="isGroupCollapsed(group) ? 'folder' : 'folder-open'"
             :name="isGroupCollapsed(group) ? 'i-lucide-folder' : 'i-lucide-folder-open'"
@@ -491,77 +546,111 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
       </div>
 
       <div v-if="group.sessions.length && !isGroupCollapsed(group)" class="space-y-1">
-        <div
+        <UPopover
           v-for="session in displayedSessions(group)"
           :key="session.id"
-          role="button"
-          tabindex="0"
-          class="group relative flex h-8 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-left text-sm outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-within:bg-elevated"
-          :class="[
-            isActiveSession(session) ? 'bg-elevated text-highlighted' : 'text-default',
-            isUnreadSession(session) ? 'font-bold text-black dark:text-white' : 'font-normal'
-          ]"
-          @click="emit('openSession', session)"
-          @pointerenter="emit('prefetchSession', session)"
-          @focus="emit('prefetchSession', session)"
-          @keydown.enter.prevent="emit('openSession', session)"
-          @keydown.space.prevent="emit('openSession', session)"
-          @dblclick.stop.prevent="isActiveSession(session) && renameSession(session)"
-          @contextmenu.prevent="openSessionContextMenu(session, $event)"
+          mode="hover"
+          class="block w-full"
+          :open-delay="1000"
+          :close-delay="100"
+          :content="{ side: 'right', align: 'start', sideOffset: 8 }"
+          @update:open="loadSessionPreviewOnOpen(session, $event)"
         >
-          <span
-            class="flex size-3.5 shrink-0 items-center justify-center"
-            aria-hidden="true"
+          <div
+            role="button"
+            tabindex="0"
+            class="group relative flex h-8 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-left text-sm outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-within:bg-elevated"
+            :class="[
+              isActiveSession(session) ? 'bg-elevated text-highlighted' : 'text-default',
+              isUnreadSession(session) ? 'font-bold text-black dark:text-white' : 'font-normal'
+            ]"
+            @click="emit('openSession', session)"
+            @keydown.enter.prevent="emit('openSession', session)"
+            @keydown.space.prevent="emit('openSession', session)"
+            @dblclick.stop.prevent="isActiveSession(session) && renameSession(session)"
+            @contextmenu.prevent="openSessionContextMenu(session, $event)"
           >
-            <span v-if="isUnreadSession(session)" class="block size-1.5 rounded-full bg-primary" />
-            <UIcon
-              v-else-if="session.pinned"
-              name="i-lucide-pin"
-              class="size-3.5 text-muted"
-            />
-          </span>
-          <span class="min-w-0 flex-1 truncate">
-            {{ sessionTitle(session) }}
-          </span>
-
-          <div class="relative flex h-6 w-10 shrink-0 items-center justify-end">
-            <UDropdownMenu
-              :items="sessionActionItems(session)"
-              :content="sessionMenuContent(session)"
-              size="sm"
-              :open="openMenuSessionId === session.id"
-              @update:open="closeSessionMenu($event, session)"
-            >
-              <UButton
-                aria-label="Chat actions"
-                icon="i-lucide-ellipsis-vertical"
-                loading-icon="i-lucide-cpu"
-                color="neutral"
-                variant="ghost"
-                size="xs"
-                square
-                class="absolute right-0 z-10 transition-opacity"
-                :class="actionButtonClass(session)"
-                :loading="pendingSessionId === session.id"
-                @click.stop="openSessionMenu(session)"
-              />
-            </UDropdownMenu>
-
-            <UIcon
-              v-if="isSessionRunning(session) && openMenuSessionId !== session.id"
-              name="i-lucide-cpu"
-              class="absolute right-1 size-3.5 animate-spin text-muted group-hover:opacity-0 group-focus-within:opacity-0"
-            />
-
             <span
-              v-else-if="openMenuSessionId !== session.id"
-              class="absolute right-1 text-xs text-muted group-hover:opacity-0 group-focus-within:opacity-0"
-              :title="sessionTimestampTitle(session.updatedAt)"
+              class="flex size-3.5 shrink-0 items-center justify-center"
+              aria-hidden="true"
             >
-              {{ sessionTime(session.updatedAt) }}
+              <span v-if="isUnreadSession(session)" class="block size-1.5 rounded-full bg-primary" />
+              <UIcon
+                v-else-if="session.pinned"
+                name="i-lucide-pin"
+                class="size-3.5 text-muted"
+              />
             </span>
+            <span class="min-w-0 flex-1 truncate">
+              {{ sessionTitle(session) }}
+            </span>
+
+            <div class="relative flex h-6 w-10 shrink-0 items-center justify-end">
+              <UDropdownMenu
+                :items="sessionActionItems(session)"
+                :content="sessionMenuContent(session)"
+                size="sm"
+                :open="openMenuSessionId === session.id"
+                @update:open="closeSessionMenu($event, session)"
+              >
+                <UButton
+                  aria-label="Chat actions"
+                  icon="i-lucide-ellipsis-vertical"
+                  loading-icon="i-lucide-cpu"
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  square
+                  class="absolute right-0 z-10 transition-opacity"
+                  :class="actionButtonClass(session)"
+                  :loading="pendingSessionId === session.id"
+                  @click.stop="openSessionMenu(session)"
+                />
+              </UDropdownMenu>
+
+              <UIcon
+                v-if="isSessionRunning(session) && openMenuSessionId !== session.id"
+                name="i-lucide-cpu"
+                class="absolute right-1 size-3.5 animate-spin text-muted group-hover:opacity-0 group-focus-within:opacity-0"
+              />
+
+              <span
+                v-else-if="openMenuSessionId !== session.id"
+                class="absolute right-1 text-xs text-muted group-hover:opacity-0 group-focus-within:opacity-0"
+              >
+                {{ sessionTime(session.updatedAt) }}
+              </span>
+            </div>
           </div>
-        </div>
+
+          <template #content>
+            <div class="w-80 p-3 text-sm">
+              <div class="truncate font-medium text-highlighted">
+                {{ sessionTitle(session) }}
+              </div>
+              <p v-if="sessionPreviewSummary(session)" class="mt-2 text-sm leading-5 text-muted">
+                {{ sessionPreviewSummary(session) }}
+              </p>
+              <div v-else class="mt-2 space-y-2">
+                <p class="text-sm leading-5 text-muted">
+                  {{ previewState(session).loading ? 'Loading summary…' : 'No summary cached yet.' }}
+                </p>
+                <p v-if="previewState(session).error" class="text-xs text-error">
+                  {{ previewState(session).error }}
+                </p>
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="soft"
+                  loading-icon="i-lucide-cpu"
+                  :loading="previewState(session).generating"
+                  :label="previewState(session).error ? 'Retry summary' : 'Generate summary'"
+                  @click.stop="generateSessionPreview(session)"
+                />
+              </div>
+            </div>
+          </template>
+        </UPopover>
 
         <UButton
           v-if="group.sessions.length > MAX_COLLAPSED_SESSION_COUNT"

@@ -60,6 +60,11 @@ from .web_chat_modules.capabilities import (
     resolve_requested_reasoning_effort as _resolve_requested_reasoning_effort_impl,
 )
 from .web_chat_modules.provider_usage import provider_usage as _provider_usage_impl
+from .web_chat_modules.session_summaries import (
+    generate_session_preview as _generate_session_preview_impl,
+    get_session_preview as _get_session_preview_impl,
+    refresh_session_preview_best_effort as _refresh_session_preview_best_effort_impl,
+)
 from .web_chat_modules.run_eta import (
     estimate_run_eta as _estimate_run_eta_impl,
     record_eta_sample as _record_eta_sample_impl,
@@ -136,6 +141,7 @@ from .web_chat_modules.models import (
     WebChatProfilesResponse,
     WebChatProviderUsageResponse,
     WebChatSession,
+    WebChatSessionPreviewResponse,
     WebChatUpdateStatusResponse,
     WebChatWorkspace,
     WebChatWorkspaceChanges,
@@ -798,6 +804,49 @@ def _git_status(workspace: str | None = None) -> GitStatusResponse:
 
 
 
+def _hidden_session_summary_agent(
+    prompt: str,
+    *,
+    conversation_history: list[dict[str, str]],
+    session_id: str | None = None,
+    workspace: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+    reasoning_effort: str | None = None,
+) -> str:
+    return _hidden_agent_response_impl(
+        prompt,
+        conversation_history=conversation_history,
+        session_id=session_id,
+        workspace=workspace,
+        model=model,
+        provider=provider,
+        reasoning_effort=reasoning_effort,
+    )
+
+
+def _get_session_preview(db: SessionDB, session_id: str) -> WebChatSessionPreviewResponse:
+    return _get_session_preview_impl(db, session_id, get_session_or_404=_get_session_or_404)
+
+
+def _generate_session_preview(db: SessionDB, session_id: str) -> WebChatSessionPreviewResponse:
+    return _generate_session_preview_impl(
+        db,
+        session_id,
+        get_session_or_404=_get_session_or_404,
+        hidden_agent=_hidden_session_summary_agent,
+    )
+
+
+def _refresh_session_preview_best_effort(session_id: str) -> None:
+    return _refresh_session_preview_best_effort_impl(
+        _db(),
+        session_id,
+        get_session_or_404=_get_session_or_404,
+        hidden_agent=_hidden_session_summary_agent,
+    )
+
+
 def _generate_commit_message(payload: GenerateCommitMessageRequest) -> CommitMessageSuggestion:
     session = None
     history: list[dict[str, str]] = []
@@ -921,6 +970,7 @@ def _run_manager_services() -> RunManagerServices:
         estimate_run_eta=_estimate_run_eta_impl,
         record_run_eta_sample=_record_eta_sample_impl,
         agent_executor=_agent_executor,
+        refresh_session_preview=_refresh_session_preview_best_effort,
     )
 
 
@@ -968,6 +1018,8 @@ register_web_chat_routes(
         delete_session_git_changes=_delete_session_git_changes,
         remove_session_worktree=_remove_session_worktree,
         duplicate_session=_duplicate_session,
+        get_session_preview=_get_session_preview,
+        generate_session_preview=_generate_session_preview,
         session_git_changes_by_message=_session_git_changes_by_message,
         isolated_worktree_for_session=_isolated_worktree_for_session,
         update_status=_update_status,

@@ -40,6 +40,62 @@ def test_lists_sessions_for_chat_sidebar(client):
     assert_iso_timestamp(data["sessions"][0]["updatedAt"])
 
 
+def test_session_preview_reports_missing_summary(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("preview-missing", source="web-chat")
+    db.append_message("preview-missing", "user", "What is this chat about?")
+
+    response = client.get("/api/web-chat/sessions/preview-missing/preview")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "sessionId": "preview-missing",
+        "summary": None,
+        "summaryStatus": "missing",
+        "messageCount": 1,
+        "updatedAt": None,
+    }
+
+
+def test_generates_session_preview_outside_chat_history(client, monkeypatch):
+    from hermes_cli import web_chat
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("preview-generate", source="web-chat", model="test-model")
+    db.append_message("preview-generate", "user", "Implement a sidebar popover")
+    db.append_message("preview-generate", "assistant", "Implemented cached chat previews")
+    calls = []
+
+    def hidden_agent(prompt, *, conversation_history, **kwargs):
+        calls.append({"prompt": prompt, "conversation_history": conversation_history, "kwargs": kwargs})
+        return "Chat rieši sidebar preview sumarizáciu cez cacheovaný out-of-band Hermes prompt."
+
+    monkeypatch.setattr(web_chat, "_hidden_session_summary_agent", hidden_agent)
+
+    response = client.post("/api/web-chat/sessions/preview-generate/preview-summary")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summaryStatus"] == "ready"
+    assert data["summary"] == "Chat rieši sidebar preview sumarizáciu cez cacheovaný out-of-band Hermes prompt."
+    assert data["messageCount"] == 2
+    assert len(db.get_messages("preview-generate")) == 2
+    assert calls[0]["conversation_history"] == [
+        {"role": "user", "content": "Implement a sidebar popover"},
+        {"role": "assistant", "content": "Implemented cached chat previews"},
+    ]
+    stored_config = db.get_session("preview-generate")["model_config"]
+    if isinstance(stored_config, str):
+        stored_config = json.loads(stored_config)
+    stored = stored_config["sidebar_summary"]
+    assert stored["text"] == data["summary"]
+    assert stored["source"] == "hidden_hermes"
+    assert_iso_timestamp(stored["updatedAt"])
+
+
 def test_omits_empty_sessions_from_chat_sidebar(client):
     from hermes_state import SessionDB
 
