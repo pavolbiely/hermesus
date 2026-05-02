@@ -14,6 +14,7 @@ import { latestContextUsageTokens } from '~/utils/contextUsage'
 
 const INITIAL_SESSION_MESSAGE_LIMIT = 60
 const OLDER_SESSION_MESSAGE_LIMIT = 80
+const CHAT_PROMPT_MAX_ROWS = 6
 const STREAM_AUTO_SCROLL_PAUSE_DISTANCE = 160
 const STREAM_AUTO_SCROLL_RESUME_DISTANCE = 80
 const STREAM_AUTO_SCROLL_FOLLOWING_MS = 220
@@ -1366,6 +1367,7 @@ onBeforeUnmount(() => {
               <UChatPrompt
                 v-else
                 v-model="input"
+                :maxrows="CHAT_PROMPT_MAX_ROWS"
                 :aria-hidden="isLoadingSession"
                 :class="isLoadingSession ? 'pointer-events-none invisible' : undefined"
                 :error="error || context.contextError.value"

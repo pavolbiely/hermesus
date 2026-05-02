@@ -150,7 +150,34 @@ def test_session_detail_reports_compression_count(client):
     response = client.get("/api/web-chat/sessions/third-session")
 
     assert response.status_code == 200
-    assert response.json()["compressionCount"] == 2
+    data = response.json()
+    assert data["compressionCount"] == 2
+    assert [message["parts"][0]["text"] for message in data["messages"]] == [
+        "Before compression",
+        "After first compression",
+        "After second compression",
+    ]
+    assert data["messagesTotal"] == 3
+
+
+def test_agent_history_includes_compressed_parent_messages(client):
+    from hermes_cli.web_chat_modules.agent_runner import conversation_history_for_agent
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("root-session", source="web-chat")
+    db.append_message("root-session", "user", "Before compression")
+    db.append_message("root-session", "assistant", "Root answer")
+    db.end_session("root-session", "compression")
+    db.create_session("tip-session", source="web-chat", parent_session_id="root-session")
+    db.append_message("tip-session", "user", "Latest prompt")
+
+    history = conversation_history_for_agent(lambda: db, "tip-session")
+
+    assert history == [
+        {"role": "user", "content": "Before compression"},
+        {"role": "assistant", "content": "Root answer"},
+    ]
 
 
 def test_rejects_unsafe_session_limit(client):

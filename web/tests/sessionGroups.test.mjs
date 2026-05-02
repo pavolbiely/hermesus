@@ -40,14 +40,17 @@ test('keeps empty managed workspaces visible in configured order', () => {
   ])
 })
 
-test('keeps other chats after managed workspace groups', () => {
+test('keeps unknown workspace chats in their workspace group instead of other chats', () => {
   const groups = buildSessionGroups({
-    sessions: [session({ id: 's1', workspace: null })],
+    sessions: [session({ id: 's1', workspace: '/repo/unknown' })],
     workspaces: [workspace({ id: 'alpha', label: 'Alpha', path: '/repo/alpha' })],
     selectedWorkspace: null
   })
 
-  assert.deepEqual(groups.map(group => group.label), ['Alpha', 'Other chats'])
+  assert.deepEqual(groups.map(group => ({ label: group.label, sessions: group.sessions.map(s => s.id) })), [
+    { label: 'Alpha', sessions: [] },
+    { label: '/repo/unknown', sessions: ['s1'] }
+  ])
 })
 
 test('keeps archived chats in a separate group after other chats', () => {
@@ -102,7 +105,9 @@ test('sorts chats within workspace groups by last message time', () => {
     'newer-start-older-message'
   ])
   assert.deepEqual(groups[1].sessions.map(s => s.id), [
-    'other-newer-message',
     'other-older-message'
+  ])
+  assert.deepEqual(groups[2].sessions.map(s => s.id), [
+    'other-newer-message'
   ])
 })

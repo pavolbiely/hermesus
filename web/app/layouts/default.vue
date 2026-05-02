@@ -184,6 +184,7 @@ async function indexSessionsForSearch() {
 
 function startWorkspaceChat(workspacePath: string) {
   requestedSessionId.value = null
+  context.selectWorkspace(workspacePath)
   newChatRequest.openNewChat(workspacePath)
   void router.push('/')
 }

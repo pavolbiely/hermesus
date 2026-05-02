@@ -99,8 +99,9 @@ def test_run_completion_uses_compression_tip_session(client, monkeypatch):
     assert root_detail.status_code == 200
     assert tip_detail.status_code == 200
     assert root_detail.json()["messages"][-1]["role"] == "user"
-    assert [message["role"] for message in tip_detail.json()["messages"]] == ["assistant"]
-    assert tip_detail.json()["messages"][0]["contextTokens"] == 1024
+    assert [message["role"] for message in tip_detail.json()["messages"]] == ["user", "assistant"]
+    assert tip_detail.json()["messages"][0]["parts"][0]["text"] == "Trigger compression"
+    assert tip_detail.json()["messages"][1]["contextTokens"] == 1024
     assert tip_detail.json()["compressionCount"] == 1
 
 

@@ -15,6 +15,7 @@ const providerUsage = useProviderUsage(
   composer.selectedProvider,
   composer.selectedModel
 )
+const CHAT_PROMPT_MAX_ROWS = 6
 const activeChatRuns = useActiveChatRuns()
 const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
@@ -169,6 +170,7 @@ async function onSubmit() {
           >
             <UChatPrompt
               v-model="input"
+              :maxrows="CHAT_PROMPT_MAX_ROWS"
               :error="error || context.contextError.value"
               @submit="onSubmit"
               @paste="onPromptPaste"

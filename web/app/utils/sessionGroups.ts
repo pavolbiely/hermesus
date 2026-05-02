@@ -45,9 +45,18 @@ export function buildSessionGroups(options: BuildSessionGroupsOptions): SessionG
     })
 
   const knownKeys = new Set(groups.map(group => group.id))
-  const otherSessions = Array.from(sessionsByWorkspace.entries())
-    .filter(([key]) => key === OTHER_WORKSPACE_KEY || !knownKeys.has(key))
-    .flatMap(([, workspaceSessions]) => workspaceSessions)
+  const unknownWorkspaceGroups = Array.from(sessionsByWorkspace.entries())
+    .filter(([key]) => key !== OTHER_WORKSPACE_KEY && !knownKeys.has(key))
+    .map(([path, workspaceSessions]) => ({
+      id: path,
+      label: path,
+      path,
+      sessions: sortedSessions(workspaceSessions),
+      active: options.selectedWorkspace === path
+    }))
+  groups.push(...unknownWorkspaceGroups)
+
+  const otherSessions = sessionsByWorkspace.get(OTHER_WORKSPACE_KEY) || []
 
   if (otherSessions.length) {
     groups.push({

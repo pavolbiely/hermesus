@@ -132,30 +132,55 @@ def rename_session_response(
 def compression_count(db: SessionDB, session: dict[str, Any]) -> int:
     """Count compression continuations from the logical conversation root to this session."""
     count = 0
+    for parent, child in compression_lineage_pairs(db, session):
+        parent_ended_at = parent.get("ended_at")
+        child_started_at = child.get("started_at")
+        if (
+            parent.get("end_reason") == "compression"
+            and isinstance(parent_ended_at, (int, float))
+            and isinstance(child_started_at, (int, float))
+            and child_started_at >= parent_ended_at
+        ):
+            count += 1
+
+    return count
+
+
+def compression_lineage_pairs(db: SessionDB, session: dict[str, Any]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Return parent/child pairs from the current session back to its root."""
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
     current = session
+    seen = {str(session.get("id"))}
     for _ in range(100):
         parent_id = current.get("parent_session_id")
-        if not parent_id:
-            return count
+        if not parent_id or str(parent_id) in seen:
+            return pairs
 
         parent = db._get_session_rich_row(parent_id)
         if not parent:
-            return count
+            return pairs
 
-        parent_ended_at = parent.get("ended_at")
-        current_started_at = current.get("started_at")
-        is_compression_child = (
-            parent.get("end_reason") == "compression"
-            and isinstance(parent_ended_at, (int, float))
-            and isinstance(current_started_at, (int, float))
-            and current_started_at >= parent_ended_at
-        )
-        if is_compression_child:
-            count += 1
-
+        pairs.append((parent, current))
+        seen.add(str(parent_id))
         current = parent
 
-    return count
+    return pairs
+
+
+def session_lineage(db: SessionDB, session: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return root-to-tip sessions for a compressed conversation."""
+    parents = [parent for parent, _child in compression_lineage_pairs(db, session)]
+    return [*reversed(parents), session]
+
+
+def session_lineage_messages(db: SessionDB, session: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return messages across compressed parent sessions, preserving chat history in the UI."""
+    messages: list[dict[str, Any]] = []
+    for lineage_session in session_lineage(db, session):
+        lineage_session_id = lineage_session.get("id")
+        if lineage_session_id:
+            messages.extend(db.get_messages(str(lineage_session_id)))
+    return messages
 
 
 def _update_session_model_config(db: SessionDB, session_id: str, updates: dict[str, Any]) -> None:
@@ -246,10 +271,16 @@ def get_session_response(
     active_run = active_run_for_session(session_id) if active_run_for_session else None
     if active_run is None and recover_interrupted_run_for_session:
         recover_interrupted_run_for_session(session_id)
-    all_messages = db.get_messages(session_id)
+    all_messages = session_lineage_messages(db, session)
     messages_total = len(all_messages)
     messages = window_session_messages(all_messages, limit=message_limit, before_message_id=message_before)
-    changes_by_message = session_git_changes_by_message(db, session_id) if include_workspace_changes else None
+    changes_by_message: dict[str, WebChatWorkspaceChanges] | None = None
+    if include_workspace_changes:
+        changes_by_message = {}
+        for lineage_session in session_lineage(db, session):
+            lineage_session_id = lineage_session.get("id")
+            if lineage_session_id:
+                changes_by_message.update(session_git_changes_by_message(db, str(lineage_session_id)))
     return SessionDetailResponse(
         session=serialize_session(session),
         messages=serialize_messages(messages, changes_by_message=changes_by_message),

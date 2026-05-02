@@ -436,8 +436,35 @@ def hidden_agent_response(
     return str(result.get("final_response") or "").strip()
 
 
+def _session_lineage_messages(db: Any, session_id: str) -> list[dict[str, Any]]:
+    session = db.get_session(session_id)
+    if not session:
+        return db.get_messages(session_id)
+
+    sessions: list[dict[str, Any]] = [session]
+    current = session
+    seen = {str(session.get("id") or session_id)}
+    for _ in range(100):
+        parent_id = current.get("parent_session_id")
+        if not parent_id or str(parent_id) in seen:
+            break
+        parent = db.get_session(str(parent_id))
+        if not parent:
+            break
+        sessions.append(parent)
+        seen.add(str(parent_id))
+        current = parent
+
+    messages: list[dict[str, Any]] = []
+    for lineage_session in reversed(sessions):
+        lineage_session_id = lineage_session.get("id")
+        if lineage_session_id:
+            messages.extend(db.get_messages(str(lineage_session_id)))
+    return messages
+
+
 def conversation_history_for_agent(db_factory: Callable[[], Any], session_id: str) -> list[dict[str, str]]:
-    messages = db_factory().get_messages(session_id)
+    messages = _session_lineage_messages(db_factory(), session_id)
     if messages and messages[-1].get("role") == "user":
         messages = messages[:-1]
 

@@ -8,28 +8,39 @@ function draftStorage() {
 
 export function useChatDraft(draftId: MaybeRefOrGetter<string>) {
   const currentDraftId = computed(() => toValue(draftId))
+  const draftMemory = useState<Record<string, string>>('web-chat-draft-memory', () => ({}))
   const input = ref('')
+
+  function readDraft(draftId: string) {
+    return draftMemory.value[draftId] ?? readChatDraft(draftStorage(), draftId)
+  }
+
+  function writeDraft(draftId: string, text: string) {
+    if (text) draftMemory.value[draftId] = text
+    else delete draftMemory.value[draftId]
+    writeChatDraft(draftStorage(), draftId, text)
+  }
 
   watch(
     currentDraftId,
     (nextDraftId, previousDraftId) => {
-      if (previousDraftId) writeChatDraft(draftStorage(), previousDraftId, input.value)
-      input.value = readChatDraft(draftStorage(), nextDraftId)
+      if (previousDraftId) writeDraft(previousDraftId, input.value)
+      input.value = readDraft(nextDraftId)
     },
     { immediate: true, flush: 'sync' }
   )
 
   watch(input, (text) => {
-    writeChatDraft(draftStorage(), currentDraftId.value, text)
-  })
+    writeDraft(currentDraftId.value, text)
+  }, { flush: 'sync' })
 
   onBeforeUnmount(() => {
-    writeChatDraft(draftStorage(), currentDraftId.value, input.value)
+    writeDraft(currentDraftId.value, input.value)
   })
 
   function clearDraft() {
     input.value = ''
-    writeChatDraft(draftStorage(), currentDraftId.value, '')
+    writeDraft(currentDraftId.value, '')
   }
 
   return {
