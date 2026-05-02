@@ -14,6 +14,9 @@ import { latestContextUsageTokens } from '~/utils/contextUsage'
 
 const INITIAL_SESSION_MESSAGE_LIMIT = 60
 const OLDER_SESSION_MESSAGE_LIMIT = 80
+const STREAM_AUTO_SCROLL_PAUSE_DISTANCE = 160
+const STREAM_AUTO_SCROLL_RESUME_DISTANCE = 80
+const STREAM_AUTO_SCROLL_FOLLOWING_MS = 220
 
 const { route, sessionId } = useChatRouteState()
 const api = useHermesApi()
@@ -59,6 +62,12 @@ let readScrollRoot: Element | null = null
 let readScrollAnimationFrame: number | undefined
 let previousScrollRestoration: ScrollRestoration | undefined
 let chatFooterResizeObserver: ResizeObserver | undefined
+let streamAutoScrollObserver: MutationObserver | undefined
+let streamAutoScrollRoot: Element | null = null
+let streamAutoScrollFrame: number | undefined
+let streamAutoScrollFollowingTimer: ReturnType<typeof setTimeout> | undefined
+let streamAutoScrollPaused = false
+let streamAutoScrollFollowing = false
 
 type SendMessageOptions = {
   clearInput?: boolean
@@ -686,6 +695,85 @@ function scrollSubmittedMessageToBottom() {
   void scrollChatToBottom()
 }
 
+function scrollDistanceFromBottom(root: Element) {
+  return Math.max(0, root.scrollHeight - root.clientHeight - root.scrollTop)
+}
+
+function updateStreamAutoScrollPaused() {
+  if (!streamAutoScrollRoot) return
+
+  const distance = scrollDistanceFromBottom(streamAutoScrollRoot)
+  if (distance <= STREAM_AUTO_SCROLL_RESUME_DISTANCE) {
+    streamAutoScrollPaused = false
+    return
+  }
+
+  if (!streamAutoScrollFollowing && distance >= STREAM_AUTO_SCROLL_PAUSE_DISTANCE) {
+    streamAutoScrollPaused = true
+  }
+}
+
+function stopFollowingStreamAutoScroll() {
+  streamAutoScrollFollowing = false
+}
+
+function markFollowingStreamAutoScroll() {
+  streamAutoScrollFollowing = true
+  if (streamAutoScrollFollowingTimer) clearTimeout(streamAutoScrollFollowingTimer)
+  streamAutoScrollFollowingTimer = setTimeout(stopFollowingStreamAutoScroll, STREAM_AUTO_SCROLL_FOLLOWING_MS)
+}
+
+function handleStreamAutoScrollUserInput() {
+  streamAutoScrollFollowing = false
+  if (streamAutoScrollFollowingTimer) clearTimeout(streamAutoScrollFollowingTimer)
+  requestAnimationFrame(updateStreamAutoScrollPaused)
+}
+
+function attachStreamAutoScrollRoot() {
+  const nextRoot = nearestScrollableAncestor(chatContainer.value)
+  if (nextRoot === streamAutoScrollRoot) return
+
+  streamAutoScrollRoot?.removeEventListener('scroll', updateStreamAutoScrollPaused)
+  streamAutoScrollRoot?.removeEventListener('wheel', handleStreamAutoScrollUserInput)
+  streamAutoScrollRoot?.removeEventListener('touchstart', handleStreamAutoScrollUserInput)
+  streamAutoScrollRoot = nextRoot
+  streamAutoScrollPaused = false
+  streamAutoScrollRoot?.addEventListener('scroll', updateStreamAutoScrollPaused, { passive: true })
+  streamAutoScrollRoot?.addEventListener('wheel', handleStreamAutoScrollUserInput, { passive: true })
+  streamAutoScrollRoot?.addEventListener('touchstart', handleStreamAutoScrollUserInput, { passive: true })
+}
+
+function scheduleSmoothStreamAutoScroll() {
+  if (!isRunning.value || loadingOlderMessages.value || streamAutoScrollPaused) return
+  if (streamAutoScrollFrame !== undefined) return
+
+  streamAutoScrollFrame = requestAnimationFrame(() => {
+    streamAutoScrollFrame = undefined
+    attachStreamAutoScrollRoot()
+    const root = streamAutoScrollRoot
+    if (!root || streamAutoScrollPaused) return
+
+    markFollowingStreamAutoScroll()
+    root.scrollTo({
+      top: root.scrollHeight,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+    })
+  })
+}
+
+function observeSmoothStreamAutoScroll() {
+  streamAutoScrollObserver?.disconnect()
+  if (!chatContainer.value || typeof MutationObserver !== 'function') return
+
+  attachStreamAutoScrollRoot()
+  streamAutoScrollObserver = new MutationObserver(scheduleSmoothStreamAutoScroll)
+  streamAutoScrollObserver.observe(chatContainer.value, {
+    childList: true,
+    characterData: true,
+    subtree: true
+  })
+}
+
 async function restoreArchivedSession() {
   const session = displayedData.value?.session
   if (!session || restoringArchivedSession.value) return
@@ -1046,6 +1134,7 @@ onMounted(() => {
   }
 
   attachReadScrollListener()
+  observeSmoothStreamAutoScroll()
   observeChatFooter()
 
   stopQueuedAutoSend = activeChatRuns.onFinished(async (finishedSessionId) => {
@@ -1061,6 +1150,12 @@ onBeforeUnmount(() => {
   bottomReadObserver?.disconnect()
   olderMessagesObserver?.disconnect()
   chatFooterResizeObserver?.disconnect()
+  streamAutoScrollObserver?.disconnect()
+  streamAutoScrollRoot?.removeEventListener('scroll', updateStreamAutoScrollPaused)
+  streamAutoScrollRoot?.removeEventListener('wheel', handleStreamAutoScrollUserInput)
+  streamAutoScrollRoot?.removeEventListener('touchstart', handleStreamAutoScrollUserInput)
+  if (streamAutoScrollFrame !== undefined) cancelAnimationFrame(streamAutoScrollFrame)
+  if (streamAutoScrollFollowingTimer) clearTimeout(streamAutoScrollFollowingTimer)
   window.removeEventListener('resize', updateAutoScrollOffset)
   document.documentElement.style.removeProperty('--chat-auto-scroll-bottom')
   document.documentElement.style.removeProperty('--chat-auto-scroll-left')
@@ -1141,7 +1236,7 @@ onBeforeUnmount(() => {
           <UChatMessages
             :messages="messages"
             :status="chatMessagesStatus"
-            :shouldAutoScroll="true"
+            :shouldAutoScroll="false"
             :shouldScrollToBottom="true"
             :autoScroll="true"
             :ui="{
@@ -1181,6 +1276,7 @@ onBeforeUnmount(() => {
             id="run-activity-indicator"
             role="assistant"
             variant="naked"
+            :parts="[]"
             class="px-2.5"
           >
             <template #content>
