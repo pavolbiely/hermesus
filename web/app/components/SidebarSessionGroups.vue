@@ -475,6 +475,7 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
               <UButton
                 aria-label="Chat actions"
                 icon="i-lucide-ellipsis-vertical"
+                loading-icon="i-lucide-cpu"
                 color="neutral"
                 variant="ghost"
                 size="xs"
@@ -488,7 +489,7 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
 
             <UIcon
               v-if="isSessionRunning(session) && openMenuSessionId !== session.id"
-              name="i-lucide-loader-circle"
+              name="i-lucide-cpu"
               class="absolute right-1 size-3.5 animate-spin text-muted group-hover:opacity-0 group-focus-within:opacity-0"
             />
 

@@ -1178,6 +1178,7 @@ onBeforeUnmount(() => {
                 <template #footer>
                   <ChatPromptFooter
                     :submit-status="chatStatus"
+                    :submit-disabled="!input.trim()"
                     :context-usage="promptContextUsage"
                     :workspaces="context.workspaces.value"
                     :selected-workspace="context.selectedWorkspace.value"

@@ -31,6 +31,7 @@ type ChatContextUsage = {
 
 type ChatPromptFooterProps = {
   submitStatus: 'ready' | 'submitted' | 'streaming' | 'error'
+  submitDisabled?: boolean
   contextUsage?: ChatContextUsage | null
   workspaces?: WebChatWorkspace[]
   selectedWorkspace?: string | null
@@ -52,6 +53,7 @@ type ChatPromptFooterProps = {
 }
 
 const props = withDefaults(defineProps<ChatPromptFooterProps>(), {
+  submitDisabled: false,
   workspaces: () => [],
   selectedWorkspace: null,
   workspaceInvalidSignal: 0,
@@ -382,6 +384,7 @@ onBeforeUnmount(() => {
           <UButton
             aria-label="Reasoning effort"
             icon="i-lucide-brain"
+            loading-icon="i-lucide-cpu"
             trailing-icon="i-lucide-chevron-down"
             :color="selectedModelUnavailable ? 'error' : 'neutral'"
             :variant="selectedModelUnavailable ? 'soft' : 'ghost'"
@@ -430,7 +433,15 @@ onBeforeUnmount(() => {
       </template>
     </UTooltip>
 
-    <UChatPromptSubmit :status="submitStatus" @stop="emit('stop')" />
+    <UChatPromptSubmit
+      :status="submitStatus"
+      :disabled="submitDisabled"
+      submitted-color="error"
+      submitted-variant="solid"
+      streaming-color="error"
+      streaming-variant="solid"
+      @stop="emit('stop')"
+    />
   </div>
 </template>
 

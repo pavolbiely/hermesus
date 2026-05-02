@@ -180,6 +180,7 @@ async function onSubmit() {
               <template #footer>
                 <ChatPromptFooter
                   :submit-status="loading ? 'submitted' : 'ready'"
+                  :submit-disabled="!input.trim()"
                   :workspaces="context.workspaces.value"
                   :selected-workspace="context.selectedWorkspace.value"
                   :workspace-invalid-signal="workspaceInvalidSignal"
