@@ -239,9 +239,13 @@ def get_session_response(
     serialize_session: Callable[[dict[str, Any]], WebChatSession],
     serialize_messages: Callable[..., list[WebChatMessage]],
     active_run_for_session: Callable[[str], Any | None] | None = None,
+    recover_interrupted_run_for_session: Callable[[str], None] | None = None,
     isolated_worktree_for_session: Callable[[SessionDB, str], Any | None] | None = None,
 ) -> SessionDetailResponse:
     session = get_session_or_404(db, session_id)
+    active_run = active_run_for_session(session_id) if active_run_for_session else None
+    if active_run is None and recover_interrupted_run_for_session:
+        recover_interrupted_run_for_session(session_id)
     all_messages = db.get_messages(session_id)
     messages_total = len(all_messages)
     messages = window_session_messages(all_messages, limit=message_limit, before_message_id=message_before)
@@ -249,7 +253,7 @@ def get_session_response(
     return SessionDetailResponse(
         session=serialize_session(session),
         messages=serialize_messages(messages, changes_by_message=changes_by_message),
-        activeRun=active_run_for_session(session_id) if active_run_for_session else None,
+        activeRun=active_run,
         isolatedWorkspace=isolated_worktree_for_session(db, session_id) if isolated_worktree_for_session else None,
         compressionCount=compression_count(db, session),
         messagesHasMoreBefore=messages_total > 0 and bool(messages) and all_messages[0].get("id") != messages[0].get("id"),

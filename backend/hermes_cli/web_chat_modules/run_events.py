@@ -64,6 +64,14 @@ def system_event_part(event: dict[str, Any], occurred_at: str) -> dict[str, Any]
             "description": event.get("error") if isinstance(event.get("error"), str) else None,
             "occurredAt": occurred_at,
         }
+    if event_type == "run.interrupted":
+        return {
+            "eventType": "run_interrupted",
+            "severity": "warning",
+            "title": "Run interrupted",
+            "description": event.get("message") if isinstance(event.get("message"), str) else None,
+            "occurredAt": occurred_at,
+        }
     if event_type == "agent.status" and event.get("kind") == "warn":
         return {
             "eventType": "agent_warning",

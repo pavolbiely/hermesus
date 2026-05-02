@@ -317,6 +317,7 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
             serialize_session=services.serialize_session,
             serialize_messages=services.serialize_messages,
             active_run_for_session=services.run_manager().active_run_for_session,
+            recover_interrupted_run_for_session=services.run_manager().recover_interrupted_run_for_session,
             isolated_worktree_for_session=services.isolated_worktree_for_session,
         )
 

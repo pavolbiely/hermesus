@@ -749,3 +749,45 @@ def test_run_events_can_be_replayed_from_event_id(client, monkeypatch):
     assert "event: message.delta" in replayed_body
     assert "event: run.completed" in replayed_body
 
+
+
+def test_session_detail_recovers_partial_response_for_orphaned_run(client):
+    from hermes_cli.web_chat_modules.run_event_log import record_run_event
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("session-orphaned-run", source="web-chat")
+    db.append_message("session-orphaned-run", "user", "Implement recovery")
+    run_id = "orphaned-run"
+    base = {"runId": run_id, "sessionId": "session-orphaned-run"}
+    record_run_event(db, {"id": 1, "type": "run.started", **base})
+    record_run_event(db, {"id": 2, "type": "reasoning.delta", "content": "Thinking...", **base})
+    record_run_event(db, {"id": 3, "type": "tool.started", "name": "terminal", "input": "pytest", **base})
+    record_run_event(db, {"id": 4, "type": "message.delta", "content": "Partial ", **base})
+    record_run_event(db, {"id": 5, "type": "message.delta", "content": "answer", **base})
+    record_run_event(db, {
+        "id": 6,
+        "type": "task_plan.updated",
+        "taskPlan": {"items": [{"id": "1", "content": "Verify recovery", "status": "in_progress"}]},
+        **base,
+    })
+
+    response = client.get("/api/web-chat/sessions/session-orphaned-run")
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant", "system"]
+    assistant = messages[1]
+    assert assistant["parts"][0]["type"] == "tool"
+    assert assistant["parts"][0]["name"] == "terminal"
+    assert assistant["parts"][1]["type"] == "task_plan"
+    assert assistant["parts"][1]["taskPlan"]["items"][0]["status"] == "cancelled"
+    assert assistant["parts"][2]["type"] == "reasoning"
+    assert assistant["parts"][2]["text"] == "Thinking..."
+    assert assistant["parts"][3]["text"] == "Partial answer"
+    event = messages[2]["parts"][0]
+    assert event["eventType"] == "run_interrupted"
+    assert "Partial response was restored" in event["description"]
+
+    second = client.get("/api/web-chat/sessions/session-orphaned-run")
+    assert [message["role"] for message in second.json()["messages"]] == ["user", "assistant", "system"]

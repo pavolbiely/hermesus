@@ -60,6 +60,7 @@ export type AgentStatusEvent = {
 export type WebChatSystemEventType =
   | 'run_stopped'
   | 'run_failed'
+  | 'run_interrupted'
   | 'run_steered'
   | 'prompt_expired'
   | 'prompt_cancelled'

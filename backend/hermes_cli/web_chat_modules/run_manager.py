@@ -27,6 +27,7 @@ from .models import (
     WebChatWorkspaceChanges,
 )
 from .run_eta import looks_like_progress_text
+from .run_event_log import recover_interrupted_run_for_session, record_run_event
 from .run_events import MESSAGE_ITEMS_FIELD, client_message_id_from_message, system_event_part, task_plan_from_event
 from .sessions import session_archived, session_provider
 
@@ -247,6 +248,7 @@ class RunManager:
             client_message_id=request.clientMessageId if not request.editedMessageId else None,
             user_message_id=str(user_message_id) if user_message_id else None,
         )
+        record_run_event(db, {"id": 1, "runId": run_id, "sessionId": session_id, "type": "run.started"})
         active.thread = threading.Thread(target=self._run, args=(active,), daemon=True)
         with self._lock:
             self._runs[run_id] = active
@@ -359,6 +361,11 @@ class RunManager:
                 eta=active.latest_eta,
             )
 
+    def recover_interrupted_run_for_session(self, session_id: str) -> None:
+        if self.active_run_for_session(session_id):
+            return
+        recover_interrupted_run_for_session(self._services.db(), session_id)
+
     def _get(self, run_id: str) -> ActiveRun:
         with self._lock:
             active = self._runs.get(run_id)
@@ -399,6 +406,8 @@ class RunManager:
             event_id = active.next_event_id
             active.next_event_id += 1
             emitted_event = {"id": event_id, **emitted_event}
+            if event.get("type") != "run.started":
+                record_run_event(self._services.db(), emitted_event)
             active.events.append(emitted_event)
             active.event_condition.notify_all()
         if task_plan_updated or self._should_refresh_eta(active, event):
@@ -440,6 +449,7 @@ class RunManager:
             event_id = active.next_event_id
             active.next_event_id += 1
             emitted_event = {"id": event_id, **emitted_event}
+            record_run_event(self._services.db(), emitted_event)
             active.events.append(emitted_event)
             active.event_condition.notify_all()
         return True
