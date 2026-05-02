@@ -7,13 +7,22 @@ const workspaces = [
   { id: 'beta', label: 'Beta', path: '/repo/beta', active: false }
 ]
 
-test('explicit no-workspace session clears persisted workspace selection', () => {
+test('session without workspace preserves the current workspace selection', () => {
   assert.equal(resolveSelectedWorkspace({
     workspaces,
     preferredWorkspace: null,
     persistedWorkspace: '/repo/alpha',
     currentWorkspace: '/repo/beta'
-  }), null)
+  }), '/repo/beta')
+})
+
+test('session without workspace restores persisted workspace when current selection is empty', () => {
+  assert.equal(resolveSelectedWorkspace({
+    workspaces,
+    preferredWorkspace: null,
+    persistedWorkspace: '/repo/alpha',
+    currentWorkspace: null
+  }), '/repo/alpha')
 })
 
 test('new chat initialization can still restore persisted workspace', () => {
