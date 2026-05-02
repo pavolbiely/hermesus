@@ -86,9 +86,23 @@ def session_archived(session: dict[str, Any] | None) -> bool:
     return session_model_config(session).get("archived") is True
 
 
+def session_restored_at(session: dict[str, Any] | None) -> float | None:
+    value = session_model_config(session).get("restoredAt")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _latest_activity(session: dict[str, Any]) -> float | None:
+    values = [
+        value
+        for value in (session.get("last_active"), session_restored_at(session), session.get("started_at"))
+        if value is not None
+    ]
+    return max(values) if values else None
+
+
 def serialize_session(session: dict[str, Any]) -> WebChatSession:
     created_at = iso_from_epoch(session.get("started_at"))
-    updated_at = iso_from_epoch(session.get("last_active") or session.get("started_at"))
+    updated_at = iso_from_epoch(_latest_activity(session))
     return WebChatSession(
         id=session["id"],
         title=session.get("title") or session.get("preview") or "New chat",

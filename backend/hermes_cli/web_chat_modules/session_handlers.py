@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import time
+from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -20,7 +22,7 @@ from .models import (
     WebChatMessage,
     WebChatWorkspaceChanges,
 )
-from .sessions import session_archived
+from .sessions import session_archived, session_workspace
 
 
 def list_sessions_response(
@@ -70,9 +72,14 @@ def rename_session_response(
     get_session_or_404: Callable[[SessionDB, str], dict[str, Any]],
     serialize_session: Callable[[dict[str, Any]], WebChatSession],
     serialize_messages: Callable[..., list[WebChatMessage]],
+    validate_workspace: Callable[[str | None], Path | None] | None = None,
 ) -> SessionDetailResponse:
-    get_session_or_404(db, session_id)
-    if payload.title is None and payload.pinned is None and payload.archived is None:
+    session = get_session_or_404(db, session_id)
+    provided_fields = getattr(payload, "model_fields_set", None)
+    if provided_fields is None:
+        provided_fields = getattr(payload, "__fields_set__", set())
+    workspace_provided = "workspace" in provided_fields
+    if payload.title is None and payload.pinned is None and payload.archived is None and not workspace_provided:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No session changes provided")
 
     if payload.title is not None:
@@ -84,8 +91,35 @@ def rename_session_response(
     if payload.pinned is not None:
         _update_session_model_config(db, session_id, {"pinned": True if payload.pinned else None})
 
-    if payload.archived is not None:
-        _update_session_model_config(db, session_id, {"archived": True if payload.archived else None})
+    if payload.archived is not None or workspace_provided:
+        model_config_updates: dict[str, Any] = {}
+        if workspace_provided:
+            if not payload.workspace:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Workspace is required")
+            if not validate_workspace:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Workspace validation is unavailable")
+            workspace = validate_workspace(payload.workspace)
+            model_config_updates["workspace"] = str(workspace) if workspace else None
+
+        if payload.archived is not None:
+            if payload.archived:
+                model_config_updates["archived"] = True
+                model_config_updates["restoredAt"] = None
+            else:
+                if not workspace_provided:
+                    existing_workspace = session_workspace(session)
+                    if existing_workspace and validate_workspace:
+                        try:
+                            validate_workspace(existing_workspace)
+                        except HTTPException as exc:
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail="Workspace no longer exists. Choose another workspace to restore this chat.",
+                            ) from exc
+                model_config_updates["archived"] = None
+                model_config_updates["restoredAt"] = time.time()
+
+        _update_session_model_config(db, session_id, model_config_updates)
 
     session = get_session_or_404(db, session_id)
     return SessionDetailResponse(

@@ -348,21 +348,61 @@ def test_archives_and_restores_session(client):
 
     db = SessionDB()
     db.create_session("session-archive", source="web-chat")
+    db.create_session("newer-session", source="web-chat")
     db.append_message("session-archive", "user", "Archive me")
+    db.append_message("newer-session", "user", "Newer chat")
+
+    def set_timestamps(conn):
+        conn.execute("UPDATE messages SET timestamp = ? WHERE session_id = ?", (100.0, "session-archive"))
+        conn.execute("UPDATE messages SET timestamp = ? WHERE session_id = ?", (200.0, "newer-session"))
+
+    db._execute_write(set_timestamps)
 
     archived = client.patch("/api/web-chat/sessions/session-archive", json={"archived": True})
     default_list = client.get("/api/web-chat/sessions")
     archived_list = client.get("/api/web-chat/sessions?includeArchived=true")
     restored = client.patch("/api/web-chat/sessions/session-archive", json={"archived": False})
+    restored_list = client.get("/api/web-chat/sessions")
 
     assert archived.status_code == 200
     assert archived.json()["session"]["archived"] is True
-    assert [session["id"] for session in default_list.json()["sessions"]] == []
-    assert archived_list.json()["sessions"][0]["id"] == "session-archive"
-    assert archived_list.json()["sessions"][0]["archived"] is True
+    assert [session["id"] for session in default_list.json()["sessions"]] == ["newer-session"]
+    assert archived_list.json()["sessions"][1]["id"] == "session-archive"
+    assert archived_list.json()["sessions"][1]["archived"] is True
     assert restored.status_code == 200
     assert restored.json()["session"]["archived"] is False
+    assert restored_list.json()["sessions"][0]["id"] == "session-archive"
     assert db.get_session("session-archive") is not None
+
+
+def test_restore_session_requires_existing_workspace(client, tmp_path):
+    from hermes_state import SessionDB
+
+    missing_workspace = tmp_path / "missing"
+    target_workspace = tmp_path / "target"
+    target_workspace.mkdir()
+    create_workspace = client.post("/api/web-chat/workspaces", json={"label": "Target", "path": str(target_workspace)})
+    assert create_workspace.status_code == 201
+
+    db = SessionDB()
+    db.create_session(
+        "session-restore-missing-workspace",
+        source="web-chat",
+        model_config={"archived": True, "workspace": str(missing_workspace)},
+    )
+    db.append_message("session-restore-missing-workspace", "user", "Restore me")
+
+    missing = client.patch("/api/web-chat/sessions/session-restore-missing-workspace", json={"archived": False})
+    restored = client.patch(
+        "/api/web-chat/sessions/session-restore-missing-workspace",
+        json={"archived": False, "workspace": str(target_workspace)},
+    )
+
+    assert missing.status_code == 409
+    assert missing.json()["detail"] == "Workspace no longer exists. Choose another workspace to restore this chat."
+    assert restored.status_code == 200
+    assert restored.json()["session"]["archived"] is False
+    assert restored.json()["session"]["workspace"] == str(target_workspace)
 
 
 def test_deletes_session(client):

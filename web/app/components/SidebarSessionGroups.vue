@@ -417,6 +417,7 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
       >
         <span class="flex min-w-0 items-center gap-1.5 truncate" :title="group.path || undefined">
           <UIcon
+            :key="isGroupCollapsed(group) ? 'folder' : 'folder-open'"
             :name="isGroupCollapsed(group) ? 'i-lucide-folder' : 'i-lucide-folder-open'"
             class="size-3.5 shrink-0 text-muted"
           />

@@ -556,9 +556,19 @@ async function setSessionArchived(session: WebChatSession, archived: boolean) {
     await refresh()
     if (archived && isActiveSession(session)) await router.push('/')
   } catch (err) {
+    const message = getHermesErrorMessage(err, archived ? 'Could not archive chat.' : 'Could not restore chat.')
+    if (!archived && message.includes('Choose another workspace')) {
+      await router.push(`/chat/${session.id}`)
+      toast.add({
+        title: 'Choose a workspace to restore this chat',
+        description: 'The original workspace no longer exists.',
+        color: 'warning'
+      })
+      return
+    }
     toast.add({
       title: archived ? 'Failed to archive chat' : 'Failed to restore chat',
-      description: err instanceof Error ? err.message : String(err),
+      description: message,
       color: 'error'
     })
   } finally {

@@ -473,6 +473,7 @@ class RenameSessionRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     pinned: bool | None = None
     archived: bool | None = None
+    workspace: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class EditMessageRequest(BaseModel):

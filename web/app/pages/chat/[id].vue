@@ -102,6 +102,19 @@ const isLoadingSession = computed(() => isSwitchingSession.value || ((sessionSta
 const hasSession = computed(() => Boolean(displayedData.value?.session))
 const currentSessionArchived = computed(() => displayedData.value?.session.archived === true)
 const restoringArchivedSession = ref(false)
+const restoreNeedsWorkspace = ref(false)
+const restoreWorkspace = ref<string>()
+const restoreWorkspaceOptions = computed(() => context.workspaces.value.map(workspace => ({
+  label: workspace.label || workspace.path,
+  value: workspace.path
+})))
+
+watch([currentSessionArchived, () => displayedData.value?.session.workspace, context.workspaces], ([archived, workspace]) => {
+  if (!archived || !workspace || !context.workspaces.value.length) return
+  if (context.workspaces.value.some(item => item.path === workspace)) return
+  restoreNeedsWorkspace.value = true
+  restoreWorkspace.value ||= context.selectedWorkspace.value || restoreWorkspaceOptions.value[0]?.value
+})
 const {
   messages,
   submitStatus,
@@ -679,12 +692,27 @@ async function restoreArchivedSession() {
 
   restoringArchivedSession.value = true
   try {
-    const response = await api.setSessionArchived(session.id, false)
+    if (restoreNeedsWorkspace.value && !restoreWorkspace.value) {
+      toast.add({ color: 'warning', title: 'Choose a workspace to restore this chat.' })
+      return
+    }
+    const response = await api.setSessionArchived(session.id, false, { workspace: restoreWorkspace.value || undefined })
     data.value = response
     sessionCache.set(response)
+    context.selectWorkspace(response.session.workspace)
+    restoreNeedsWorkspace.value = false
+    restoreWorkspace.value = undefined
     await refreshSessions?.()
     toast.add({ title: 'Chat restored' })
   } catch (err) {
+    const message = getHermesErrorMessage(err, 'Failed to restore chat')
+    if (message.includes('Choose another workspace')) {
+      restoreNeedsWorkspace.value = true
+      restoreWorkspace.value ||= context.selectedWorkspace.value || restoreWorkspaceOptions.value[0]?.value
+      await context.loadWorkspaces()
+      toast.add({ color: 'warning', title: 'Choose a workspace to restore this chat.' })
+      return
+    }
     showError(err, 'Failed to restore chat')
   } finally {
     restoringArchivedSession.value = false
@@ -1207,20 +1235,35 @@ onBeforeUnmount(() => {
                 v-if="currentSessionArchived"
                 class="rounded-xl border border-dashed border-default bg-elevated/30 px-4 py-3"
               >
-                <div class="flex items-center justify-between gap-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div class="min-w-0">
                     <p class="text-sm font-medium text-highlighted">This chat is archived</p>
-                    <p class="text-xs text-muted">Restore it before sending new messages.</p>
+                    <p class="text-xs text-muted">
+                      {{ restoreNeedsWorkspace ? 'The original workspace no longer exists. Choose where to restore it.' : 'Restore it before sending new messages.' }}
+                    </p>
                   </div>
-                  <UButton
-                    color="neutral"
-                    variant="soft"
-                    size="sm"
-                    icon="i-lucide-archive-restore"
-                    label="Restore"
-                    :loading="restoringArchivedSession"
-                    @click="restoreArchivedSession"
-                  />
+                  <div class="flex min-w-0 items-center gap-2">
+                    <USelectMenu
+                      v-if="restoreNeedsWorkspace"
+                      v-model="restoreWorkspace"
+                      :items="restoreWorkspaceOptions"
+                      value-key="value"
+                      label-key="label"
+                      placeholder="Choose workspace"
+                      size="sm"
+                      class="min-w-52"
+                      :loading="context.workspacesLoading.value"
+                    />
+                    <UButton
+                      color="neutral"
+                      variant="soft"
+                      size="sm"
+                      icon="i-lucide-archive-restore"
+                      label="Restore"
+                      :loading="restoringArchivedSession"
+                      @click="restoreArchivedSession"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1274,7 +1317,7 @@ onBeforeUnmount(() => {
                   />
                 </template>
               </UChatPrompt>
-              <div class="mt-2 flex items-center gap-3">
+              <div v-if="!currentSessionArchived" class="mt-2 flex items-center gap-3">
                 <ProviderUsageBadge
                   display="text"
                   :usage="providerUsage.usage.value"

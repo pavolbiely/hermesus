@@ -270,6 +270,7 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
             get_session_or_404=services.get_session_or_404,
             serialize_session=services.serialize_session,
             serialize_messages=services.serialize_messages,
+            validate_workspace=services.validate_workspace,
         )
 
     @router.patch("/sessions/{session_id}/messages/{message_id}", response_model=SessionDetailResponse)

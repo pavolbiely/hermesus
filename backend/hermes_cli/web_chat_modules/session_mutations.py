@@ -67,6 +67,7 @@ def duplicate_session(
             model_config = parsed
             model_config.pop("pinned", None)
             model_config.pop("archived", None)
+            model_config.pop("restoredAt", None)
 
     db.create_session(
         new_session_id,
@@ -159,9 +160,13 @@ def list_non_empty_sessions(
 
 
 def _session_last_active_sort_key(session: dict[str, Any]) -> tuple[int, float, float, str]:
+    activity = max(
+        _numeric_timestamp(session.get("last_active")),
+        _numeric_timestamp(_session_model_config(session).get("restoredAt")),
+    )
     return (
         0 if _session_pinned(session) else 1,
-        -_numeric_timestamp(session.get("last_active")),
+        -activity,
         -_numeric_timestamp(session.get("started_at")),
         str(session.get("id") or ""),
     )

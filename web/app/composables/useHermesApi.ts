@@ -38,8 +38,12 @@ function hermesToken() {
   return window.__HERMES_SESSION_TOKEN__ || (typeof runtimeToken === 'string' ? runtimeToken : undefined)
 }
 
-type ListSessionsOptions = {
+export interface ListSessionsOptions {
   includeArchived?: boolean
+}
+
+export interface SetSessionArchivedOptions {
+  workspace?: string
 }
 
 type SessionDetailOptions = {
@@ -151,9 +155,9 @@ export function useHermesApi() {
       method: 'PATCH',
       body: { title }
     }),
-    setSessionArchived: (id: string, archived: boolean) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
+    setSessionArchived: (id: string, archived: boolean, options: SetSessionArchivedOptions = {}) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
       method: 'PATCH',
-      body: { archived }
+      body: { archived, workspace: options.workspace }
     }),
     setSessionPinned: (id: string, pinned: boolean) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
       method: 'PATCH',
