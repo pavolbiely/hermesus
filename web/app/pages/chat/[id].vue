@@ -17,6 +17,7 @@ const OLDER_SESSION_MESSAGE_LIMIT = 80
 const CHAT_PROMPT_MAX_ROWS = 6
 const STREAM_AUTO_SCROLL_PAUSE_DISTANCE = 160
 const STREAM_AUTO_SCROLL_RESUME_DISTANCE = 80
+const STREAM_AUTO_SCROLL_RESUME_EPSILON = 4
 const STREAM_AUTO_SCROLL_FOLLOWING_MS = 220
 
 const { route, sessionId } = useChatRouteState()
@@ -69,6 +70,8 @@ let streamAutoScrollFrame: number | undefined
 let streamAutoScrollFollowingTimer: ReturnType<typeof setTimeout> | undefined
 let streamAutoScrollPaused = false
 let streamAutoScrollFollowing = false
+let streamAutoScrollUserOverride = false
+let streamAutoScrollLastTouchY: number | undefined
 
 type SendMessageOptions = {
   clearInput?: boolean
@@ -704,10 +707,13 @@ function updateStreamAutoScrollPaused() {
   if (!streamAutoScrollRoot) return
 
   const distance = scrollDistanceFromBottom(streamAutoScrollRoot)
-  if (distance <= STREAM_AUTO_SCROLL_RESUME_DISTANCE) {
+  if (distance <= STREAM_AUTO_SCROLL_RESUME_DISTANCE && (!streamAutoScrollUserOverride || distance <= STREAM_AUTO_SCROLL_RESUME_EPSILON)) {
     streamAutoScrollPaused = false
+    streamAutoScrollUserOverride = false
     return
   }
+
+  if (streamAutoScrollUserOverride) return
 
   if (!streamAutoScrollFollowing && distance >= STREAM_AUTO_SCROLL_PAUSE_DISTANCE) {
     streamAutoScrollPaused = true
@@ -730,21 +736,67 @@ function handleStreamAutoScrollUserInput() {
   requestAnimationFrame(updateStreamAutoScrollPaused)
 }
 
+function pauseStreamAutoScrollForUser() {
+  streamAutoScrollPaused = true
+  streamAutoScrollUserOverride = true
+  streamAutoScrollFollowing = false
+  if (streamAutoScrollFollowingTimer) clearTimeout(streamAutoScrollFollowingTimer)
+  if (streamAutoScrollFrame !== undefined) {
+    cancelAnimationFrame(streamAutoScrollFrame)
+    streamAutoScrollFrame = undefined
+  }
+  if (streamAutoScrollRoot) {
+    streamAutoScrollRoot.scrollTo({ top: streamAutoScrollRoot.scrollTop, behavior: 'auto' })
+  }
+}
+
+function handleStreamAutoScrollWheel(event: Event) {
+  const { deltaY } = event as WheelEvent
+  if (deltaY < 0) {
+    pauseStreamAutoScrollForUser()
+    return
+  }
+
+  handleStreamAutoScrollUserInput()
+}
+
+function handleStreamAutoScrollTouchStart(event: Event) {
+  streamAutoScrollLastTouchY = (event as TouchEvent).touches[0]?.clientY
+}
+
+function handleStreamAutoScrollTouchMove(event: Event) {
+  const nextY = (event as TouchEvent).touches[0]?.clientY
+  if (nextY === undefined || streamAutoScrollLastTouchY === undefined) return
+
+  const deltaY = nextY - streamAutoScrollLastTouchY
+  streamAutoScrollLastTouchY = nextY
+  if (deltaY > 0) {
+    pauseStreamAutoScrollForUser()
+    return
+  }
+
+  handleStreamAutoScrollUserInput()
+}
+
 function attachStreamAutoScrollRoot() {
   const nextRoot = nearestScrollableAncestor(chatContainer.value)
   if (nextRoot === streamAutoScrollRoot) return
 
   streamAutoScrollRoot?.removeEventListener('scroll', updateStreamAutoScrollPaused)
-  streamAutoScrollRoot?.removeEventListener('wheel', handleStreamAutoScrollUserInput)
-  streamAutoScrollRoot?.removeEventListener('touchstart', handleStreamAutoScrollUserInput)
+  streamAutoScrollRoot?.removeEventListener('wheel', handleStreamAutoScrollWheel)
+  streamAutoScrollRoot?.removeEventListener('touchstart', handleStreamAutoScrollTouchStart)
+  streamAutoScrollRoot?.removeEventListener('touchmove', handleStreamAutoScrollTouchMove)
   streamAutoScrollRoot = nextRoot
   streamAutoScrollPaused = false
+  streamAutoScrollUserOverride = false
+  streamAutoScrollLastTouchY = undefined
   streamAutoScrollRoot?.addEventListener('scroll', updateStreamAutoScrollPaused, { passive: true })
-  streamAutoScrollRoot?.addEventListener('wheel', handleStreamAutoScrollUserInput, { passive: true })
-  streamAutoScrollRoot?.addEventListener('touchstart', handleStreamAutoScrollUserInput, { passive: true })
+  streamAutoScrollRoot?.addEventListener('wheel', handleStreamAutoScrollWheel, { passive: true })
+  streamAutoScrollRoot?.addEventListener('touchstart', handleStreamAutoScrollTouchStart, { passive: true })
+  streamAutoScrollRoot?.addEventListener('touchmove', handleStreamAutoScrollTouchMove, { passive: true })
 }
 
-function scheduleSmoothStreamAutoScroll() {
+function scheduleStreamAutoScroll() {
   if (!isRunning.value || loadingOlderMessages.value || streamAutoScrollPaused) return
   if (streamAutoScrollFrame !== undefined) return
 
@@ -755,19 +807,16 @@ function scheduleSmoothStreamAutoScroll() {
     if (!root || streamAutoScrollPaused) return
 
     markFollowingStreamAutoScroll()
-    root.scrollTo({
-      top: root.scrollHeight,
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
-    })
+    root.scrollTop = root.scrollHeight
   })
 }
 
-function observeSmoothStreamAutoScroll() {
+function observeStreamAutoScroll() {
   streamAutoScrollObserver?.disconnect()
   if (!chatContainer.value || typeof MutationObserver !== 'function') return
 
   attachStreamAutoScrollRoot()
-  streamAutoScrollObserver = new MutationObserver(scheduleSmoothStreamAutoScroll)
+  streamAutoScrollObserver = new MutationObserver(scheduleStreamAutoScroll)
   streamAutoScrollObserver.observe(chatContainer.value, {
     childList: true,
     characterData: true,
@@ -1135,7 +1184,7 @@ onMounted(() => {
   }
 
   attachReadScrollListener()
-  observeSmoothStreamAutoScroll()
+  observeStreamAutoScroll()
   observeChatFooter()
 
   stopQueuedAutoSend = activeChatRuns.onFinished(async (finishedSessionId) => {
@@ -1153,8 +1202,9 @@ onBeforeUnmount(() => {
   chatFooterResizeObserver?.disconnect()
   streamAutoScrollObserver?.disconnect()
   streamAutoScrollRoot?.removeEventListener('scroll', updateStreamAutoScrollPaused)
-  streamAutoScrollRoot?.removeEventListener('wheel', handleStreamAutoScrollUserInput)
-  streamAutoScrollRoot?.removeEventListener('touchstart', handleStreamAutoScrollUserInput)
+  streamAutoScrollRoot?.removeEventListener('wheel', handleStreamAutoScrollWheel)
+  streamAutoScrollRoot?.removeEventListener('touchstart', handleStreamAutoScrollTouchStart)
+  streamAutoScrollRoot?.removeEventListener('touchmove', handleStreamAutoScrollTouchMove)
   if (streamAutoScrollFrame !== undefined) cancelAnimationFrame(streamAutoScrollFrame)
   if (streamAutoScrollFollowingTimer) clearTimeout(streamAutoScrollFollowingTimer)
   window.removeEventListener('resize', updateAutoScrollOffset)
