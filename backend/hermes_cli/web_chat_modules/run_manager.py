@@ -683,9 +683,11 @@ class RunManager:
     def _run(self, active: ActiveRun) -> None:
         self._emit(active, {"type": "run.started"})
         assistant_message_id: int | None = None
+        visible_session_id = active.context.session_id
         try:
             active.context.request_prompt = lambda prompt, timeout_seconds=600: self._request_prompt(active, prompt, timeout_seconds)
             final_text = self._executor(active.context, lambda event: self._emit(active, event))
+            active.context.session_id = visible_session_id
             if active.latest_eta is None:
                 self._emit_eta_update(active)
             if active.context.stop_requested.is_set():
@@ -717,9 +719,11 @@ class RunManager:
             self._emit(active, {"type": "run.completed"})
             self._finish(active, "completed")
         except Exception as exc:
+            active.context.session_id = visible_session_id
             self._emit(active, {"type": "run.failed", "error": str(exc)})
             self._finish(active, "failed")
         finally:
+            active.context.session_id = visible_session_id
             self._cancel_pending_prompts(active)
             if assistant_message_id is None:
                 self._services.persist_run_workspace_changes(active.context, None)

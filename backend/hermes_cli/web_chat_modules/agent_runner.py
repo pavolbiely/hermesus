@@ -21,7 +21,15 @@ _APPROVAL_BRIDGE_ORIGINAL_GETTER: Callable[[], Any] | None = None
 
 
 class AgentSessionLineageDB:
-    """Let the runtime record compression lineage without duplicating chat messages."""
+    """Expose read-only session state to the runtime while web chat owns persistence.
+
+    Hermes runtime compression can rotate its internal ``agent.session_id`` by
+    ending the current session and creating a child session. That lineage is a
+    CLI storage detail; exposing it in web chat creates duplicate/child chats and
+    can strand queued messages on the old route. Web chat persists the visible
+    user/assistant turn itself, so runtime session mutations are intentionally
+    ignored here.
+    """
 
     def __init__(self, db: Any):
         self._db = db
@@ -30,6 +38,12 @@ class AgentSessionLineageDB:
         return getattr(self._db, name)
 
     def append_message(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def create_session(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def end_session(self, *args: Any, **kwargs: Any) -> None:
         return None
 
 
@@ -342,8 +356,9 @@ def agent_executor(
             conversation_history=conversation_history(context.session_id),
             task_id=context.run_id,
         )
-        if getattr(agent, "session_id", context.session_id) != context.session_id:
-            context.session_id = agent.session_id
+        # Keep the web-chat turn anchored to the visible session. The runtime may
+        # rotate its internal session id during compression, but web chat owns its
+        # user-facing persistence and queue semantics.
         context.usage_metrics = {
             key: value for key, value in {
                 "tokenCount": result.get("total_tokens"),

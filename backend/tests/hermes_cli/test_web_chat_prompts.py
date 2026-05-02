@@ -229,7 +229,7 @@ def test_agent_executor_forwards_runtime_status_events(monkeypatch):
     }]
 
 
-def test_agent_executor_records_compression_lineage_without_message_duplicates(monkeypatch):
+def test_agent_executor_hides_runtime_compression_lineage_from_web_chat(monkeypatch):
     from hermes_cli.web_chat_modules.agent_runner import agent_executor
     from hermes_cli.web_chat_modules.run_manager import RunContext
     from hermes_state import SessionDB
@@ -243,13 +243,12 @@ def test_agent_executor_records_compression_lineage_without_message_duplicates(m
             self.session_db.create_session(self.session_id, source="web-chat", model="test-model")
             self.session_db.append_message(self.session_id, "assistant", "should not persist")
             self.session_db.end_session(self.session_id, "compression")
-            old_session_id = self.session_id
             self.session_id = "session-compressed-tip"
             self.session_db.create_session(
                 self.session_id,
                 source="web-chat",
                 model="test-model",
-                parent_session_id=old_session_id,
+                parent_session_id="session-compression-root",
             )
             return {"final_response": "done", "last_prompt_tokens": 12345}
 
@@ -269,13 +268,11 @@ def test_agent_executor_records_compression_lineage_without_message_duplicates(m
     )
 
     assert agent_executor(context, lambda event: None, conversation_history=lambda _: []) == "done"
-    assert context.session_id == "session-compressed-tip"
+    assert context.session_id == "session-compression-root"
 
     db = SessionDB()
-    root = db.get_session("session-compression-root")
-    tip = db.get_session("session-compressed-tip")
-    assert root["end_reason"] == "compression"
-    assert tip["parent_session_id"] == "session-compression-root"
+    assert db.get_session("session-compression-root") is None
+    assert db.get_session("session-compressed-tip") is None
     assert db.get_messages("session-compression-root") == []
 
 

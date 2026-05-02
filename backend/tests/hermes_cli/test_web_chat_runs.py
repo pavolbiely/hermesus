@@ -69,16 +69,11 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
     assert detail.json()["session"]["workspace"] == str(repo)
 
 
-def test_run_completion_uses_compression_tip_session(client, monkeypatch):
+def test_run_completion_stays_on_visible_session_after_runtime_compression(client, monkeypatch):
     import hermes_cli.web_chat as web_chat
-    from hermes_state import SessionDB
 
     def fake_executor(context, emit):
-        db = SessionDB()
-        db.end_session(context.session_id, "compression")
-        old_session_id = context.session_id
         context.session_id = "compressed-tip"
-        db.create_session("compressed-tip", source="web-chat", model="test-model", parent_session_id=old_session_id)
         context.usage_metrics = {"contextTokens": 1024}
         return "Done after compression"
 
@@ -91,18 +86,18 @@ def test_run_completion_uses_compression_tip_session(client, monkeypatch):
     with client.stream("GET", f"/api/web-chat/runs/{run['runId']}/events") as stream:
         body = stream.read().decode()
 
-    assert '"sessionId":"compressed-tip"' in body
+    assert f'"sessionId":"{run["sessionId"]}"' in body
+    assert '"sessionId":"compressed-tip"' not in body
     assert '"contextTokens":1024' in body
 
     root_detail = client.get(f"/api/web-chat/sessions/{run['sessionId']}")
     tip_detail = client.get("/api/web-chat/sessions/compressed-tip")
     assert root_detail.status_code == 200
-    assert tip_detail.status_code == 200
-    assert root_detail.json()["messages"][-1]["role"] == "user"
-    assert [message["role"] for message in tip_detail.json()["messages"]] == ["user", "assistant"]
-    assert tip_detail.json()["messages"][0]["parts"][0]["text"] == "Trigger compression"
-    assert tip_detail.json()["messages"][1]["contextTokens"] == 1024
-    assert tip_detail.json()["compressionCount"] == 1
+    assert tip_detail.status_code == 404
+    assert [message["role"] for message in root_detail.json()["messages"]] == ["user", "assistant"]
+    assert root_detail.json()["messages"][0]["parts"][0]["text"] == "Trigger compression"
+    assert root_detail.json()["messages"][1]["contextTokens"] == 1024
+    assert root_detail.json()["compressionCount"] == 0
 
 
 def test_run_events_unknown_run_returns_404_before_streaming(client):
