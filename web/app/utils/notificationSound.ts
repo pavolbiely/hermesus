@@ -1,4 +1,4 @@
-export type NotificationSoundVariant = 'default' | 'attention' | 'sent'
+export type NotificationSoundVariant = 'default' | 'attention' | 'sent' | 'read-aloud-next'
 
 type NotificationSoundState = {
   activeVisibleChat: boolean
@@ -59,6 +59,13 @@ function tonesForVariant(variant: NotificationSoundVariant): Tone[] {
     return [
       { offset: 0, frequency: 587, duration: 0.08 },
       { offset: 0.07, frequency: 880, duration: 0.11 }
+    ]
+  }
+
+  if (variant === 'read-aloud-next') {
+    return [
+      { offset: 0, frequency: 660, duration: 0.12 },
+      { offset: 0.09, frequency: 784, duration: 0.14 }
     ]
   }
 
@@ -154,7 +161,7 @@ async function scheduleNotificationSound(variant: NotificationSoundVariant) {
 
   const start = context.currentTime + 0.01
   const tones = tonesForVariant(variant)
-  const volume = variant === 'attention' ? 0.07 : variant === 'sent' ? 0.08 : 0.09
+  const volume = variant === 'attention' ? 0.07 : variant === 'sent' ? 0.08 : variant === 'read-aloud-next' ? 0.055 : 0.09
   const end = Math.max(...tones.map(tone => tone.offset + tone.duration))
   const gain = context.createGain()
 

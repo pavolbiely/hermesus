@@ -18,8 +18,9 @@ test('uses the attention sound outside the active visible chat', () => {
   assert.equal(notificationSoundVariant({ activeVisibleChat: false, latestContentVisible: true }), 'attention')
 })
 
-test('supports a separate outgoing sent sound variant', () => {
+test('supports separate outgoing and read-aloud transition sound variants', () => {
   assert.equal('sent', 'sent')
+  assert.equal('read-aloud-next', 'read-aloud-next')
 })
 
 test('play attempts audio even when it was not explicitly prepared first', async () => {

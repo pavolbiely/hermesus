@@ -1,5 +1,6 @@
 import type { WebChatMessage } from '~/types/web-chat'
 import { messageSpeechText } from '~/utils/chatMessages'
+import { playNotificationSound } from '~/utils/notificationSound'
 import {
   readAloudContentMode,
   readAloudEngine,
@@ -8,11 +9,29 @@ import {
 } from '~/utils/readAloudPreferences'
 
 type ReadAloudStatus = 'idle' | 'generating' | 'speaking'
+type ReadAloudOptions = {
+  queue?: boolean
+}
+type PreparedReadAloud =
+  | { engine: 'web-speech', text: string }
+  | { engine: 'backend-tts', blob: Blob }
+type QueuedReadAloudMessage = {
+  message: WebChatMessage
+  attempt: number
+  prepared: Promise<PreparedReadAloud | null>
+}
+
+const READ_ALOUD_CACHE_LIMIT = 30
 
 let activeUtterance: SpeechSynthesisUtterance | null = null
 let activeAudio: HTMLAudioElement | null = null
 let activeAudioUrl: string | null = null
+let activeCompletion: (() => void) | null = null
 let readAttempt = 0
+let readQueue: QueuedReadAloudMessage[] = []
+let queueProcessing = false
+const summaryCache = new Map<string, Promise<string>>()
+const speechBlobCache = new Map<string, Promise<Blob>>()
 
 function browserSpeechSynthesis() {
   return import.meta.client ? window.speechSynthesis : null
@@ -72,6 +91,49 @@ function selectSpeechVoice(synthesis: SpeechSynthesis, lang: string) {
     ?? null
 }
 
+function rememberCachedValue<TKey, TValue>(cache: Map<TKey, Promise<TValue>>, key: TKey, value: Promise<TValue>) {
+  if (cache.has(key)) cache.delete(key)
+  cache.set(key, value)
+  while (cache.size > READ_ALOUD_CACHE_LIMIT) {
+    const oldestKey = cache.keys().next().value
+    if (oldestKey === undefined) break
+    cache.delete(oldestKey)
+  }
+}
+
+function cachedReadAloudSummary(text: string, generate: () => Promise<string>) {
+  const cached = summaryCache.get(text)
+  if (cached) {
+    rememberCachedValue(summaryCache, text, cached)
+    return cached
+  }
+
+  const summary = generate()
+    .then(cleanSpeechText)
+    .catch((error: unknown) => {
+      summaryCache.delete(text)
+      throw error
+    })
+  rememberCachedValue(summaryCache, text, summary)
+  return summary
+}
+
+function cachedSpeechBlob(text: string, speed: number, synthesize: () => Promise<Blob>) {
+  const key = `${speed}:${text}`
+  const cached = speechBlobCache.get(key)
+  if (cached) {
+    rememberCachedValue(speechBlobCache, key, cached)
+    return cached
+  }
+
+  const blob = synthesize().catch((error: unknown) => {
+    speechBlobCache.delete(key)
+    throw error
+  })
+  rememberCachedValue(speechBlobCache, key, blob)
+  return blob
+}
+
 export function useMessageReadAloud() {
   const api = useHermesApi()
   const toast = useToast()
@@ -83,6 +145,12 @@ export function useMessageReadAloud() {
   })
   const isSupported = computed(() => Boolean(browserSpeechSynthesis() && typeof SpeechSynthesisUtterance !== 'undefined'))
 
+  function finishActiveSpeech() {
+    const completion = activeCompletion
+    activeCompletion = null
+    completion?.()
+  }
+
   function clearActiveAudio() {
     activeAudio?.pause()
     activeAudio = null
@@ -92,10 +160,12 @@ export function useMessageReadAloud() {
 
   function stop() {
     readAttempt += 1
+    readQueue = []
     const synthesis = browserSpeechSynthesis()
     if (synthesis) synthesis.cancel()
     activeUtterance = null
     clearActiveAudio()
+    finishActiveSpeech()
     speakingMessageId.value = null
     generatingMessageId.value = null
   }
@@ -106,9 +176,12 @@ export function useMessageReadAloud() {
 
     generatingMessageId.value = message.id
     try {
-      const summary = await api.generateReadAloudSummary({ text })
+      const summary = await cachedReadAloudSummary(text, async () => {
+        const response = await api.generateReadAloudSummary({ text })
+        return response.text
+      })
       if (readAttempt !== attempt) return ''
-      return cleanSpeechText(summary.text)
+      return summary
     } catch {
       if (readAttempt === attempt) {
         toast.add({ color: 'error', title: 'Could not generate readable read-aloud summary.' })
@@ -119,98 +192,165 @@ export function useMessageReadAloud() {
     }
   }
 
-  function readWithWebSpeech(message: WebChatMessage, text: string) {
-    const synthesis = browserSpeechSynthesis()
-    if (!synthesis || typeof SpeechSynthesisUtterance === 'undefined') {
-      toast.add({ color: 'error', title: 'Read aloud is not supported in this browser.' })
-      return
-    }
-
-    const attempt = readAttempt
-    const utterance = new SpeechSynthesisUtterance(text)
-    const speechLanguage = detectSpeechLanguage(text)
-    const voice = selectSpeechVoice(synthesis, speechLanguage)
-
-    utterance.lang = voice?.lang ?? speechLanguage
-    utterance.rate = readAloudSpeed()
-    if (voice) utterance.voice = voice
-
-    activeUtterance = utterance
-    speakingMessageId.value = message.id
-
-    utterance.onend = () => {
-      if (activeUtterance !== utterance || readAttempt !== attempt) return
-      activeUtterance = null
-      speakingMessageId.value = null
-    }
-
-    utterance.onerror = (event) => {
-      if (activeUtterance !== utterance || readAttempt !== attempt) return
-      activeUtterance = null
-      speakingMessageId.value = null
-      if (event.error !== 'canceled' && event.error !== 'interrupted') {
-        toast.add({ color: 'error', title: 'Could not read message aloud.' })
+  function readWithWebSpeech(message: WebChatMessage, text: string, attempt: number) {
+    return new Promise<void>((resolve) => {
+      const synthesis = browserSpeechSynthesis()
+      if (!synthesis || typeof SpeechSynthesisUtterance === 'undefined') {
+        toast.add({ color: 'error', title: 'Read aloud is not supported in this browser.' })
+        resolve()
+        return
       }
-    }
 
-    synthesis.speak(utterance)
+      const utterance = new SpeechSynthesisUtterance(text)
+      const speechLanguage = detectSpeechLanguage(text)
+      const voice = selectSpeechVoice(synthesis, speechLanguage)
+
+      utterance.lang = voice?.lang ?? speechLanguage
+      utterance.rate = readAloudSpeed()
+      if (voice) utterance.voice = voice
+
+      activeUtterance = utterance
+      activeCompletion = resolve
+      speakingMessageId.value = message.id
+
+      utterance.onend = () => {
+        if (activeUtterance !== utterance || readAttempt !== attempt) return
+        activeUtterance = null
+        speakingMessageId.value = null
+        finishActiveSpeech()
+      }
+
+      utterance.onerror = (event) => {
+        if (activeUtterance !== utterance || readAttempt !== attempt) return
+        activeUtterance = null
+        speakingMessageId.value = null
+        if (event.error !== 'canceled' && event.error !== 'interrupted') {
+          toast.add({ color: 'error', title: 'Could not read message aloud.' })
+        }
+        finishActiveSpeech()
+      }
+
+      synthesis.speak(utterance)
+    })
   }
 
-  async function readWithBackendTts(message: WebChatMessage, text: string) {
-    const attempt = readAttempt
+  async function synthesizeSpeechBlob(message: WebChatMessage, text: string, attempt: number) {
     generatingMessageId.value = message.id
 
     try {
-      const blob = await api.synthesizeSpeech({ text, speed: readAloudSpeed() })
-      if (readAttempt !== attempt) return
+      const speed = readAloudSpeed()
+      const blob = await cachedSpeechBlob(text, speed, () => api.synthesizeSpeech({ text, speed }))
+      if (readAttempt !== attempt) return null
+      return blob
+    } catch {
+      if (readAttempt === attempt) {
+        toast.add({ color: 'error', title: 'Could not generate speech audio.' })
+      }
+      return null
+    } finally {
+      if (readAttempt === attempt) generatingMessageId.value = null
+    }
+  }
 
-      const audioUrl = URL.createObjectURL(blob)
-      const audio = new Audio(audioUrl)
-      activeAudio = audio
-      activeAudioUrl = audioUrl
-      generatingMessageId.value = null
-      speakingMessageId.value = message.id
+  async function playBackendTts(message: WebChatMessage, blob: Blob, attempt: number) {
+    const audioUrl = URL.createObjectURL(blob)
+    const audio = new Audio(audioUrl)
+    activeAudio = audio
+    activeAudioUrl = audioUrl
+    speakingMessageId.value = message.id
+
+    await new Promise<void>((resolve) => {
+      activeCompletion = resolve
 
       audio.onended = () => {
         if (activeAudio !== audio || readAttempt !== attempt) return
         clearActiveAudio()
         speakingMessageId.value = null
+        finishActiveSpeech()
       }
       audio.onerror = () => {
         if (activeAudio !== audio || readAttempt !== attempt) return
         clearActiveAudio()
         speakingMessageId.value = null
         toast.add({ color: 'error', title: 'Could not play generated speech audio.' })
+        finishActiveSpeech()
       }
 
-      await audio.play()
-    } catch {
-      if (readAttempt !== attempt) return
-      toast.add({ color: 'error', title: 'Could not generate speech audio.' })
-      generatingMessageId.value = null
-      speakingMessageId.value = null
-      clearActiveAudio()
-    }
+      void audio.play().catch(() => {
+        if (readAttempt !== attempt) return
+        clearActiveAudio()
+        speakingMessageId.value = null
+        toast.add({ color: 'error', title: 'Could not play generated speech audio.' })
+        finishActiveSpeech()
+      })
+    })
   }
 
-  async function read(message: WebChatMessage) {
-    if (speakingMessageId.value === message.id || generatingMessageId.value === message.id) {
-      stop()
-      return
-    }
-
-    stop()
-    const attempt = readAttempt
+  async function prepareReadAloud(message: WebChatMessage, attempt: number): Promise<PreparedReadAloud | null> {
     const text = await resolveReadAloudText(message, attempt)
-    if (!text || readAttempt !== attempt) return
+    if (!text || readAttempt !== attempt) return null
 
     const engine = readAloudEngine()
     if (engine === 'backend-tts') {
-      await readWithBackendTts(message, text)
+      const blob = await synthesizeSpeechBlob(message, text, attempt)
+      return blob ? { engine, blob } : null
+    }
+
+    return { engine, text }
+  }
+
+  async function playPreparedReadAloud(message: WebChatMessage, prepared: PreparedReadAloud, attempt: number) {
+    if (prepared.engine === 'backend-tts') {
+      await playBackendTts(message, prepared.blob, attempt)
       return
     }
 
-    readWithWebSpeech(message, text)
+    await readWithWebSpeech(message, prepared.text, attempt)
+  }
+
+  async function readImmediately(message: WebChatMessage, attempt: number) {
+    const prepared = await prepareReadAloud(message, attempt)
+    if (!prepared || readAttempt !== attempt) return
+    await playPreparedReadAloud(message, prepared, attempt)
+  }
+
+  async function processQueue() {
+    if (queueProcessing) return
+    queueProcessing = true
+
+    try {
+      let playedCount = 0
+      while (readQueue.length) {
+        const item = readQueue.shift()
+        if (!item || readAttempt !== item.attempt) continue
+        const prepared = await item.prepared
+        if (!prepared || readAttempt !== item.attempt) continue
+        if (playedCount > 0) void playNotificationSound('read-aloud-next')
+        playedCount += 1
+        await playPreparedReadAloud(item.message, prepared, item.attempt)
+      }
+    } finally {
+      queueProcessing = false
+    }
+  }
+
+  async function read(message: WebChatMessage, options: ReadAloudOptions = {}) {
+    const activeMessageId = speakingMessageId.value || generatingMessageId.value
+    if (activeMessageId === message.id) {
+      if (!options.queue) stop()
+      return
+    }
+
+    if (readQueue.some(item => item.message.id === message.id)) return
+
+    if (!options.queue) stop()
+    const attempt = readAttempt
+    readQueue.push({
+      message,
+      attempt,
+      prepared: prepareReadAloud(message, attempt)
+    })
+    await processQueue()
   }
 
   return {

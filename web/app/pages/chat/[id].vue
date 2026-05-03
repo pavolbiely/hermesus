@@ -33,7 +33,7 @@ const activeChatRuns = useActiveChatRuns()
 const notificationOpenedSessionId = useState<string | null>('chat-notification-opened-session-id', () => null)
 const context = useChatComposerContext()
 const toast = useToast()
-const { read: readMessageAloud } = useMessageReadAloud()
+const { read: readMessageAloud, stop: stopReadAloud } = useMessageReadAloud()
 const generatingCommitMessage = ref(false)
 const generatedCommitMessage = ref('')
 const commitMessageModalOpen = ref(false)
@@ -152,7 +152,7 @@ const {
   toast,
   activeChatRuns,
   onAssistantCompleted(message) {
-    if (readAloudAutoReadResponsesEnabled()) void readMessageAloud(message)
+    if (readAloudAutoReadResponsesEnabled()) void readMessageAloud(message, { queue: true })
   }
 })
 const error = computed(() => streamError.value)
@@ -302,7 +302,8 @@ watch(
   { immediate: true }
 )
 
-watch(sessionId, () => {
+watch(sessionId, (newSessionId, previousSessionId) => {
+  if (previousSessionId && newSessionId !== previousSessionId) stopReadAloud()
   initialScrollSettledSessionId.value = null
 })
 
@@ -1220,6 +1221,7 @@ onBeforeUnmount(() => {
   readScrollRoot?.removeEventListener('scroll', scheduleReadVisibilityCheck)
   readScrollRoot = null
   if (readScrollAnimationFrame !== undefined) cancelAnimationFrame(readScrollAnimationFrame)
+  stopReadAloud()
   stopQueuedAutoSend?.()
   cleanupRunMessages()
 })
