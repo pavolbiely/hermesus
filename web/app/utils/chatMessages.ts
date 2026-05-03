@@ -118,6 +118,14 @@ export function messageText(message: WebChatMessage) {
   return message.parts.map(partText).filter(Boolean).join('\n\n')
 }
 
+export function messageSpeechText(message: WebChatMessage) {
+  return message.parts
+    .filter(part => part.type === 'text')
+    .map(partText)
+    .filter(Boolean)
+    .join('\n\n')
+}
+
 function finitePositive(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }

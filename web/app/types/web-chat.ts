@@ -205,6 +205,20 @@ export type WebChatProviderUsageResponse = {
   capturedAt?: string | null
 }
 
+export type SynthesizeSpeechRequest = {
+  text: string
+  voice?: string | null
+  speed?: number | null
+}
+
+export type ReadAloudSummaryRequest = {
+  text: string
+}
+
+export type ReadAloudSummaryResponse = {
+  text: string
+}
+
 export type WebChatUpdateStatusResponse = {
   updateAvailable: boolean
   runtimeOutOfSync: boolean

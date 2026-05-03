@@ -204,6 +204,20 @@ class WebChatProviderUsageResponse(BaseModel):
     capturedAt: str | None = None
 
 
+class SynthesizeSpeechRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=65536)
+    voice: str | None = Field(default=None, max_length=512)
+    speed: float | None = Field(default=None, ge=0.5, le=2.0)
+
+
+class ReadAloudSummaryRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=65536)
+
+
+class ReadAloudSummaryResponse(BaseModel):
+    text: str
+
+
 class WebChatUpdateStatusResponse(BaseModel):
     updateAvailable: bool
     runtimeOutOfSync: bool

@@ -11,6 +11,7 @@ import { markLocalMessageFailed, markLocalMessageSending, removeLocalMessage } f
 import { isElementVisibleInRoot, nearestScrollableAncestor, scrollElementTreeToBottomAfterRender } from '~/utils/chatInitialScroll'
 import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
 import { latestContextUsageTokens } from '~/utils/contextUsage'
+import { readAloudAutoReadResponsesEnabled } from '~/utils/readAloudPreferences'
 
 const INITIAL_SESSION_MESSAGE_LIMIT = 60
 const OLDER_SESSION_MESSAGE_LIMIT = 80
@@ -32,6 +33,7 @@ const activeChatRuns = useActiveChatRuns()
 const notificationOpenedSessionId = useState<string | null>('chat-notification-opened-session-id', () => null)
 const context = useChatComposerContext()
 const toast = useToast()
+const { read: readMessageAloud } = useMessageReadAloud()
 const generatingCommitMessage = ref(false)
 const generatedCommitMessage = ref('')
 const commitMessageModalOpen = ref(false)
@@ -148,7 +150,10 @@ const {
   refreshSessions,
   refreshSessionOnFinish: false,
   toast,
-  activeChatRuns
+  activeChatRuns,
+  onAssistantCompleted(message) {
+    if (readAloudAutoReadResponsesEnabled()) void readMessageAloud(message)
+  }
 })
 const error = computed(() => streamError.value)
 const {

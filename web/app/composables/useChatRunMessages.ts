@@ -34,6 +34,7 @@ type UseChatRunMessagesOptions = {
   refreshSessionOnFinish?: boolean
   toast: ReturnType<typeof useToast>
   activeChatRuns: ReturnType<typeof useActiveChatRuns>
+  onAssistantCompleted?: (message: WebChatMessage) => void
 }
 
 export function useChatRunMessages(options: UseChatRunMessagesOptions) {
@@ -162,7 +163,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
   }
 
   function replaceAssistantMessage(payload: { content?: string, changes?: WebChatWorkspaceChanges | null } & RunMetrics) {
-    if (!payload.content && !payload.changes?.files?.length) return
+    if (!payload.content && !payload.changes?.files?.length) return null
 
     setActivity('Finalizing…', 'working')
     hasAssistantResponseStarted.value = true
@@ -191,6 +192,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       }
     }
     appendCompletedChanges(payload.changes)
+    return assistant
   }
 
   function completeProcessPart(part: WebChatPart, completedAt = new Date().toISOString()) {
@@ -402,8 +404,9 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
       },
       onCompleted: (payload) => {
         if (targetSessionId !== options.sessionId.value) return
-        replaceAssistantMessage(payload)
+        const assistant = replaceAssistantMessage(payload)
         finishTaskPlans('completed')
+        if (assistant) options.onAssistantCompleted?.(assistant)
       },
       onToolStarted: (payload) => {
         if (targetSessionId === options.sessionId.value) appendToolStarted(payload)

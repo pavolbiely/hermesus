@@ -40,6 +40,114 @@ def test_lists_sessions_for_chat_sidebar(client):
     assert_iso_timestamp(data["sessions"][0]["updatedAt"])
 
 
+def test_synthesizes_speech_with_request_voice_override(client, tmp_path, monkeypatch):
+    import tools.tts_tool as tts_tool
+
+    audio_path = tmp_path / "speech.mp3"
+    audio_path.write_bytes(b"fake mp3")
+    seen_configs = []
+
+    def load_config():
+        return {"provider": "openai", "openai": {"voice": "alloy"}}
+
+    def text_to_speech_tool(*, text):
+        seen_configs.append(tts_tool._load_tts_config())
+        assert text == "Hello"
+        return json.dumps({"success": True, "file_path": str(audio_path)})
+
+    monkeypatch.setattr(tts_tool, "_load_tts_config", load_config)
+    monkeypatch.setattr(tts_tool, "text_to_speech_tool", text_to_speech_tool)
+
+    response = client.post("/api/web-chat/tts", json={"text": "Hello", "voice": "nova", "speed": 1.25})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("audio/mpeg")
+    assert response.content == b"fake mp3"
+    assert seen_configs == [{"provider": "openai", "speed": 1.25, "openai": {"voice": "nova"}}]
+    assert tts_tool._load_tts_config() == {"provider": "openai", "openai": {"voice": "alloy"}}
+
+
+def test_synthesizes_edge_speech_with_detected_language_voice(client, tmp_path, monkeypatch):
+    import tools.tts_tool as tts_tool
+
+    audio_path = tmp_path / "speech.mp3"
+    audio_path.write_bytes(b"fake mp3")
+    seen_configs = []
+
+    def load_config():
+        return {"provider": "openai", "openai": {"voice": "alloy"}}
+
+    def text_to_speech_tool(*, text):
+        seen_configs.append(tts_tool._load_tts_config())
+        assert text == "This response should be read in English."
+        return json.dumps({"success": True, "file_path": str(audio_path)})
+
+    monkeypatch.setattr(tts_tool, "_load_tts_config", load_config)
+    monkeypatch.setattr(tts_tool, "text_to_speech_tool", text_to_speech_tool)
+
+    response = client.post("/api/web-chat/tts", json={"text": "This response should be read in English.", "speed": 1.5})
+
+    assert response.status_code == 200
+    assert response.content == b"fake mp3"
+    assert seen_configs == [{
+        "provider": "edge",
+        "openai": {"voice": "alloy"},
+        "edge": {"voice": "en-US-BrianNeural", "speed": 1.5},
+    }]
+    assert tts_tool._load_tts_config() == {"provider": "openai", "openai": {"voice": "alloy"}}
+
+
+def test_synthesizes_edge_speech_with_slovak_language_voice(client, tmp_path, monkeypatch):
+    import tools.tts_tool as tts_tool
+
+    audio_path = tmp_path / "speech.mp3"
+    audio_path.write_bytes(b"fake mp3")
+    seen_configs = []
+
+    def load_config():
+        return {"provider": "edge", "edge": {"voice": "en-US-AriaNeural"}}
+
+    def text_to_speech_tool(*, text):
+        seen_configs.append(tts_tool._load_tts_config())
+        assert text == "Toto je slovenská odpoveď."
+        return json.dumps({"success": True, "file_path": str(audio_path)})
+
+    monkeypatch.setattr(tts_tool, "_load_tts_config", load_config)
+    monkeypatch.setattr(tts_tool, "text_to_speech_tool", text_to_speech_tool)
+
+    response = client.post("/api/web-chat/tts", json={"text": "Toto je slovenská odpoveď."})
+
+    assert response.status_code == 200
+    assert response.content == b"fake mp3"
+    assert seen_configs == [{"provider": "edge", "edge": {"voice": "sk-SK-LukasNeural"}}]
+    assert tts_tool._load_tts_config() == {"provider": "edge", "edge": {"voice": "en-US-AriaNeural"}}
+
+
+def test_generates_read_aloud_summary_with_hidden_agent(client, monkeypatch):
+    from hermes_cli import web_chat
+
+    calls = []
+
+    def hidden_agent(prompt, *, conversation_history, **kwargs):
+        calls.append({"prompt": prompt, "conversation_history": conversation_history, "kwargs": kwargs})
+        return "Ľudsky prerozprávané: upravil som nastavenia čítania a overil som kontroly."
+
+    monkeypatch.setattr(web_chat, "_hidden_session_summary_agent", hidden_agent)
+
+    response = client.post("/api/web-chat/read-aloud-summary", json={
+        "text": "Updated `web/app/components/SettingsModal.vue`.\n```css\n.foo-bar-baz { color: red; }\n```\npnpm typecheck passed."
+    })
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "text": "Ľudsky prerozprávané: upravil som nastavenia čítania a overil som kontroly."
+    }
+    assert calls[0]["conversation_history"] == []
+    assert "natural, human-friendly spoken read-aloud version" in calls[0]["prompt"]
+    assert "Do not read raw code" in calls[0]["prompt"]
+    assert "SettingsModal.vue" in calls[0]["prompt"]
+
+
 def test_session_preview_reports_missing_summary(client):
     from hermes_state import SessionDB
 

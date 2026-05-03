@@ -1012,6 +1012,7 @@ register_web_chat_routes(
         workspace_changes=_workspace_changes,
         git_status=_git_status,
         generate_commit_message=_generate_commit_message,
+        hidden_agent_response=lambda *args, **kwargs: _hidden_session_summary_agent(*args, **kwargs),
         title_from_message=_title_from_message,
         get_session_or_404=_get_session_or_404,
         edit_user_message=_edit_user_message,

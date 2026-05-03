@@ -9,6 +9,9 @@ import type {
   CommitMessageSuggestion,
   ReorderWorkspacesRequest,
   SaveWorkspaceRequest,
+  SynthesizeSpeechRequest,
+  ReadAloudSummaryRequest,
+  ReadAloudSummaryResponse,
   SessionDetailResponse,
   SessionListResponse,
   StartRunResponse,
@@ -76,8 +79,8 @@ export function useHermesApi() {
     })
   }
 
-  async function fetchBlob(path: string) {
-    const response = await fetch(path, { headers: authHeaders() })
+  async function fetchBlob(path: string, options: RequestInit = {}) {
+    const response = await fetch(path, { ...options, headers: authHeaders(options.headers) })
     if (!response.ok) {
       const message = response.status === 404 ? 'Attachment file not found' : `Request failed with ${response.status}`
       throw new Error(message)
@@ -98,6 +101,15 @@ export function useHermesApi() {
     getAppUpdateStatus: () => request<WebChatAppUpdateStatusResponse>('/api/web-chat/app-update'),
     updateApp: () => request<WebChatAppUpdateStatusResponse>('/api/web-chat/app-update', { method: 'POST' }),
     getCommands: () => request<WebChatCommandsResponse>('/api/web-chat/commands'),
+    synthesizeSpeech: (payload: SynthesizeSpeechRequest) => fetchBlob('/api/web-chat/tts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      headers: { 'Content-Type': 'application/json' }
+    }),
+    generateReadAloudSummary: (payload: ReadAloudSummaryRequest) => request<ReadAloudSummaryResponse>('/api/web-chat/read-aloud-summary', {
+      method: 'POST',
+      body: payload
+    }),
     executeCommand: (payload: ExecuteCommandRequest) => request<ExecuteCommandResponse>('/api/web-chat/commands/execute', {
       method: 'POST',
       body: payload

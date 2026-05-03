@@ -11,6 +11,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from hermes_state import SessionDB
 
 from . import file_previews, session_handlers
+from .read_aloud_summaries import generate_read_aloud_summary
+from .tts import synthesize_speech_response
 from .models import (
     CreateSessionRequest,
     DeleteSessionResponse,
@@ -23,6 +25,8 @@ from .models import (
     GenerateCommitMessageRequest,
     GitStatusResponse,
     CommitMessageSuggestion,
+    ReadAloudSummaryRequest,
+    ReadAloudSummaryResponse,
     RenameSessionRequest,
     ReorderWorkspacesRequest,
     RespondRunPromptRequest,
@@ -33,6 +37,7 @@ from .models import (
     StartRunRequest,
     StartRunResponse,
     SteerRunRequest,
+    SynthesizeSpeechRequest,
     SteerRunResponse,
     StopRunResponse,
     SwitchProfileRequest,
@@ -90,6 +95,7 @@ class WebChatRouteServices:
     workspace_changes: Callable[[str | None], WebChatWorkspaceChanges]
     git_status: Callable[[str | None], GitStatusResponse]
     generate_commit_message: Callable[[GenerateCommitMessageRequest], CommitMessageSuggestion]
+    hidden_agent_response: Callable[..., str]
     title_from_message: Callable[[str], str]
     get_session_or_404: Callable[[SessionDB, str], dict[str, Any]]
     edit_user_message: Callable[[SessionDB, str, str, str], None]
@@ -164,6 +170,16 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
     @router.post("/app-update", response_model=WebChatAppUpdateStatusResponse)
     def update_app() -> WebChatAppUpdateStatusResponse:
         return services.perform_app_update()
+
+    @router.post("/tts")
+    def synthesize_speech(payload: SynthesizeSpeechRequest) -> FileResponse:
+        return synthesize_speech_response(payload.text, voice=payload.voice, speed=payload.speed)
+
+    @router.post("/read-aloud-summary", response_model=ReadAloudSummaryResponse)
+    def summarize_read_aloud(payload: ReadAloudSummaryRequest) -> ReadAloudSummaryResponse:
+        return ReadAloudSummaryResponse(
+            text=generate_read_aloud_summary(payload.text, hidden_agent=services.hidden_agent_response)
+        )
 
     @router.get("/profiles", response_model=WebChatProfilesResponse)
     def get_profiles() -> WebChatProfilesResponse:
