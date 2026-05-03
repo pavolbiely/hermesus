@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import types
 
 from web_chat_test_helpers import assert_iso_timestamp
@@ -86,21 +87,73 @@ def test_transcribes_speech_input_with_elevenlabs_request_api_key(client, monkey
     monkeypatch.setattr(tts_tool, "_import_elevenlabs", lambda: FakeElevenLabs)
     monkeypatch.setattr(tts_tool, "_load_tts_config", lambda: {"elevenlabs": {}})
 
+    payload = {"provider": "elevenlabs", "apiKey": "test-elevenlabs-api-key"}
     response = client.post(
         "/api/web-chat/speech-input/transcribe",
-        data={"provider": "elevenlabs", "apiKey": "dummy-api-key"},
+        data=payload,
         files={"file": ("voice-input.webm", b"fake webm", "audio/webm")},
     )
 
     assert response.status_code == 200
     assert response.json() == {"text": "hello from voice", "provider": "elevenlabs"}
     assert calls == [
-        {"api_key": "dummy-api-key"},
+        {"api_key": payload["apiKey"]},
         {
             "file": ("voice-input.webm", b"fake webm", "audio/webm"),
             "model_id": "scribe_v2",
         },
     ]
+
+
+def test_transcribes_speech_input_with_openai_request_api_key(client, monkeypatch):
+    calls = []
+
+    class FakeTranscriptions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return types.SimpleNamespace(text="hello from openai voice")
+
+    class FakeAudio:
+        def __init__(self):
+            self.transcriptions = FakeTranscriptions()
+
+    class FakeOpenAI:
+        def __init__(self, *, api_key):
+            calls.append({"api_key": api_key})
+            self.audio = FakeAudio()
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=FakeOpenAI))
+
+    payload = {"provider": "openai", "apiKey": "test-openai-api-key"}
+    response = client.post(
+        "/api/web-chat/speech-input/transcribe",
+        data=payload,
+        files={"file": ("voice-input.webm", b"fake webm", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "hello from openai voice", "provider": "openai"}
+    assert calls[0] == {"api_key": payload["apiKey"]}
+    assert calls[1]["model"] == "gpt-4o-transcribe"
+    assert calls[1]["file"].name == "voice-input.webm"
+    assert calls[1]["file"].read() == b"fake webm"
+
+
+def test_transcribes_speech_input_with_openai_requires_api_key(client, monkeypatch):
+    import tools.tts_tool as tts_tool
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(tts_tool, "get_env_value", lambda name: None)
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=object))
+
+    response = client.post(
+        "/api/web-chat/speech-input/transcribe",
+        data={"provider": "openai"},
+        files={"file": ("voice-input.webm", b"fake webm", "audio/webm")},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "OpenAI API key is required for OpenAI speech input."}
 
 
 def test_synthesized_speech_uses_server_cache(client, tmp_path, monkeypatch):
@@ -207,7 +260,7 @@ def test_streams_elevenlabs_speech_with_request_api_key_and_reuses_cache(client,
     monkeypatch.setattr(tts_tool, "_load_tts_config", lambda: {"elevenlabs": {"voice_id": "configured", "model_id": "eleven_flash_v2_5"}})
     monkeypatch.setattr(tts_tool, "_import_elevenlabs", lambda: FakeElevenLabs)
 
-    payload = {"text": "Stream with ElevenLabs.", "provider": "elevenlabs", "apiKey": "secret", "voice": "voice-1", "speed": 1.25}
+    payload = {"text": "Stream with ElevenLabs.", "provider": "elevenlabs", "apiKey": "***", "voice": "voice-1", "speed": 1.25}
     first = client.post("/api/web-chat/tts/stream", json=payload)
     second = client.post("/api/web-chat/tts/stream", json=payload)
 
@@ -280,7 +333,7 @@ def test_synthesizes_edge_speech_with_slovak_language_voice(client, tmp_path, mo
 
     assert response.status_code == 200
     assert response.content == b"fake mp3"
-    assert seen_configs == [{"provider": "edge", "edge": {"voice": "sk-SK-LukasNeural"}}]
+    assert seen_configs == [{"provider": "edge", "edge": {"voice": "***"}}]
     assert tts_tool._load_tts_config() == {"provider": "edge", "edge": {"voice": "en-US-AriaNeural"}}
 
 

@@ -22,6 +22,8 @@ import {
   setReadAloudSpeed,
   setReadAloudWebSpeechVoiceURI,
   setVoiceInputProvider,
+  setVoiceInputOpenAIApiKey,
+  voiceInputOpenAIApiKey,
   voiceInputProvider
 } from '~/utils/readAloudPreferences'
 
@@ -49,6 +51,8 @@ const autoReadResponses = ref(false)
 const voiceInput = ref<VoiceInputProvider>('browser')
 const elevenLabsApiKey = ref('')
 const elevenLabsApiKeyVisible = ref(false)
+const openAIApiKey = ref('')
+const openAIApiKeyVisible = ref(false)
 const webSpeechVoiceURI = ref<string | null>(null)
 const browserVoices = ref<SpeechSynthesisVoice[]>([])
 
@@ -93,6 +97,11 @@ const voiceInputItems = [
     label: 'ElevenLabs speech input',
     value: 'elevenlabs',
     description: 'Records a short clip and asks ElevenLabs to transcribe it through Hermes. Requires an ElevenLabs API key.'
+  },
+  {
+    label: 'OpenAI gpt-4o-transcribe',
+    value: 'openai',
+    description: 'Records a short clip and asks OpenAI gpt-4o-transcribe to transcribe it through Hermes. Requires an OpenAI API key.'
   }
 ] satisfies Array<{ label: string, value: VoiceInputProvider, description: string }>
 
@@ -156,6 +165,8 @@ function refreshState() {
   webSpeechVoiceURI.value = readAloudWebSpeechVoiceURI()
   elevenLabsApiKey.value = readAloudElevenLabsApiKey() ?? ''
   elevenLabsApiKeyVisible.value = false
+  openAIApiKey.value = voiceInputOpenAIApiKey() ?? ''
+  openAIApiKeyVisible.value = false
   refreshBrowserVoices()
 }
 
@@ -195,8 +206,17 @@ function updateElevenLabsApiKey(value: string) {
   setReadAloudElevenLabsApiKey(value)
 }
 
+function updateOpenAIApiKey(value: string) {
+  openAIApiKey.value = value
+  setVoiceInputOpenAIApiKey(value)
+}
+
 function toggleElevenLabsApiKeyVisible() {
   elevenLabsApiKeyVisible.value = !elevenLabsApiKeyVisible.value
+}
+
+function toggleOpenAIApiKeyVisible() {
+  openAIApiKeyVisible.value = !openAIApiKeyVisible.value
 }
 
 function waitForPermissionDecision() {
@@ -440,6 +460,40 @@ onBeforeUnmount(() => {
               variant="subtle"
               title="ElevenLabs transcription"
               description="Hermes records a short browser audio clip, sends it to ElevenLabs speech-to-text, and inserts the transcript into the composer. Browser voice input remains the local default fallback."
+            />
+          </div>
+
+          <div v-else-if="voiceInput === 'openai'" class="space-y-3">
+            <UFormField
+              name="openAIInputApiKey"
+              label="OpenAI API key"
+              description="Stored in this browser and sent only with OpenAI speech-input requests. Leave empty to use OPENAI_API_KEY from the Hermes runtime."
+            >
+              <UInput
+                :model-value="openAIApiKey"
+                :type="openAIApiKeyVisible ? 'text' : 'password'"
+                placeholder="sk-..."
+                autocomplete="off"
+                class="w-full"
+                @update:model-value="updateOpenAIApiKey"
+              >
+                <template #trailing>
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    size="xs"
+                    :icon="openAIApiKeyVisible ? 'i-lucide-eye-off' : 'i-lucide-eye'"
+                    :aria-label="openAIApiKeyVisible ? 'Hide OpenAI API key' : 'Show OpenAI API key'"
+                    @click="toggleOpenAIApiKeyVisible"
+                  />
+                </template>
+              </UInput>
+            </UFormField>
+            <UAlert
+              color="neutral"
+              variant="subtle"
+              title="OpenAI transcription"
+              description="Hermes records a short browser audio clip, sends it to OpenAI gpt-4o-transcribe, and inserts the transcript into the composer. Language auto-detection remains enabled by default."
             />
           </div>
         </section>

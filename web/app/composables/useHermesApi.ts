@@ -139,7 +139,7 @@ export function useHermesApi() {
       method: 'POST',
       body: payload
     }),
-    transcribeSpeechInput: (audio: Blob, options: { provider: 'elevenlabs', apiKey?: string | null, language?: string | null }) => {
+    transcribeSpeechInput: (audio: Blob, options: { provider: 'elevenlabs' | 'openai', apiKey?: string | null, language?: string | null }) => {
       const form = new FormData()
       const extension = audio.type.includes('mp4') ? 'm4a' : audio.type.includes('ogg') ? 'ogg' : 'webm'
       form.set('file', audio, `voice-input.${extension}`)

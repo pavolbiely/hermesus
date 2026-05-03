@@ -1,12 +1,13 @@
 export type ReadAloudContentMode = 'full' | 'summary'
 export type ReadAloudEngine = 'web-speech' | 'edge-tts' | 'elevenlabs'
-export type VoiceInputProvider = 'browser' | 'elevenlabs'
+export type VoiceInputProvider = 'browser' | 'elevenlabs' | 'openai'
 
 const legacyBackendEngine = 'backend-tts'
 const autoReadPreferenceKey = 'hermes.readAloud.autoReadResponses'
 const contentModePreferenceKey = 'hermes.readAloud.contentMode'
 const enginePreferenceKey = 'hermes.readAloud.engine'
 const elevenLabsApiKeyPreferenceKey = 'hermes.readAloud.elevenLabsApiKey'
+const openAIApiKeyPreferenceKey = 'hermes.voiceInput.openAIApiKey'
 const voiceInputProviderPreferenceKey = 'hermes.voiceInput.provider'
 const speedPreferenceKey = 'hermes.readAloud.speed'
 const webSpeechVoicePreferenceKey = 'hermes.readAloud.webSpeechVoiceURI'
@@ -30,7 +31,7 @@ function isReadAloudEngine(value: string | null): value is ReadAloudEngine {
 }
 
 function isVoiceInputProvider(value: string | null): value is VoiceInputProvider {
-  return value === 'browser' || value === 'elevenlabs'
+  return value === 'browser' || value === 'elevenlabs' || value === 'openai'
 }
 
 function storedPreference(key: string) {
@@ -82,6 +83,14 @@ export function readAloudElevenLabsApiKey() {
 
 export function setReadAloudElevenLabsApiKey(apiKey: string | null) {
   setStoredPreference(elevenLabsApiKeyPreferenceKey, apiKey)
+}
+
+export function voiceInputOpenAIApiKey() {
+  return storedPreference(openAIApiKeyPreferenceKey)
+}
+
+export function setVoiceInputOpenAIApiKey(apiKey: string | null) {
+  setStoredPreference(openAIApiKeyPreferenceKey, apiKey)
 }
 
 export function voiceInputProvider(): VoiceInputProvider {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { WebChatAttachment, WebChatCommand, WebChatModelCapability, WebChatWorkspace } from '~/types/web-chat'
-import { readAloudElevenLabsApiKey, voiceInputProvider } from '~/utils/readAloudPreferences'
+import { readAloudElevenLabsApiKey, voiceInputOpenAIApiKey, voiceInputProvider } from '~/utils/readAloudPreferences'
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance
 type SpeechRecognitionResultLike = { isFinal: boolean, 0: { transcript: string } }
@@ -208,18 +208,43 @@ async function toggleVoice() {
     return
   }
 
-  if (voiceInputProvider() === 'elevenlabs') {
-    await startElevenLabsVoiceInput()
+  const provider = voiceInputProvider()
+  if (provider === 'elevenlabs' || provider === 'openai') {
+    await startRemoteVoiceInput(provider)
     return
   }
 
   startBrowserVoiceInput()
 }
 
-async function startElevenLabsVoiceInput() {
+function voiceInputApiKey(provider: 'elevenlabs' | 'openai') {
+  return provider === 'elevenlabs' ? readAloudElevenLabsApiKey() : voiceInputOpenAIApiKey()
+}
+
+function voiceInputProviderLabel(provider: 'elevenlabs' | 'openai') {
+  return provider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI'
+}
+
+function voiceInputErrorMessage(error: unknown, providerLabel: string) {
+  const fallback = `Could not transcribe voice input with ${providerLabel}.`
+  if (!error || typeof error !== 'object') return fallback
+  const data = 'data' in error ? (error as { data?: unknown }).data : null
+  if (data && typeof data === 'object' && 'detail' in data) {
+    const detail = (data as { detail?: unknown }).detail
+    if (typeof detail === 'string' && detail.trim()) return detail.trim()
+  }
+  if ('message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message.trim()) return message.trim()
+  }
+  return fallback
+}
+
+async function startRemoteVoiceInput(provider: 'elevenlabs' | 'openai') {
+  const providerLabel = voiceInputProviderLabel(provider)
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
     voiceStatus.value = 'error'
-    emit('voiceError', 'ElevenLabs voice input needs browser microphone recording support.')
+    emit('voiceError', `${providerLabel} voice input needs browser microphone recording support.`)
     return
   }
 
@@ -252,16 +277,16 @@ async function startElevenLabsVoiceInput() {
       try {
         const audio = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
         const result = await api.transcribeSpeechInput(audio, {
-          provider: 'elevenlabs',
-          apiKey: readAloudElevenLabsApiKey()
+          provider,
+          apiKey: voiceInputApiKey(provider)
         })
         const text = result.text.trim()
         if (text) emit('voiceText', text)
-        else emit('voiceError', 'ElevenLabs returned an empty transcript.')
+        else emit('voiceError', `${providerLabel} returned an empty transcript.`)
         voiceStatus.value = 'idle'
-      } catch {
+      } catch (error) {
         voiceStatus.value = 'error'
-        emit('voiceError', 'Could not transcribe voice input with ElevenLabs.')
+        emit('voiceError', voiceInputErrorMessage(error, providerLabel))
       }
     }
     voiceStatus.value = 'listening'
