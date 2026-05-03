@@ -79,12 +79,17 @@ export function useHermesApi() {
     })
   }
 
-  async function fetchBlob(path: string, options: RequestInit = {}) {
+  async function fetchBlobResponse(path: string, options: RequestInit = {}) {
     const response = await fetch(path, { ...options, headers: authHeaders(options.headers) })
     if (!response.ok) {
       const message = response.status === 404 ? 'Attachment file not found' : `Request failed with ${response.status}`
       throw new Error(message)
     }
+    return response
+  }
+
+  async function fetchBlob(path: string, options: RequestInit = {}) {
+    const response = await fetchBlobResponse(path, options)
     return await response.blob()
   }
 
@@ -106,6 +111,29 @@ export function useHermesApi() {
       body: JSON.stringify(payload),
       headers: { 'Content-Type': 'application/json' }
     }),
+    synthesizeSpeechWithMetadata: async (payload: SynthesizeSpeechRequest) => {
+      const response = await fetchBlobResponse('/api/web-chat/tts', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' }
+      })
+      return {
+        blob: await response.blob(),
+        cacheStatus: response.headers.get('X-Hermes-TTS-Cache')
+      }
+    },
+    streamSpeech: async (payload: SynthesizeSpeechRequest, signal?: AbortSignal) => {
+      const response = await fetch('/api/web-chat/tts/stream', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        signal
+      })
+      if (!response.ok || !response.body) {
+        throw new Error(`Request failed with ${response.status}`)
+      }
+      return response
+    },
     generateReadAloudSummary: (payload: ReadAloudSummaryRequest) => request<ReadAloudSummaryResponse>('/api/web-chat/read-aloud-summary', {
       method: 'POST',
       body: payload

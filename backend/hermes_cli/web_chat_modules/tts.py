@@ -7,11 +7,12 @@ import json
 import re
 import shutil
 import threading
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 _MEDIA_TYPES = {
     ".mp3": "audio/mpeg",
@@ -70,7 +71,7 @@ def synthesize_speech_response(text: str, voice: str | None = None, speed: float
     with key_lock:
         cached_path = _cached_tts_file(cache_key)
         if cached_path:
-            return _audio_file_response(cached_path)
+            return _audio_file_response(cached_path, cache_status="hit")
 
         if normalized_voice:
             result = _synthesize_with_voice_override(tts_tool, text, normalized_voice, speed)
@@ -90,15 +91,76 @@ def synthesize_speech_response(text: str, voice: str | None = None, speed: float
             )
 
         cached_path = _store_tts_cache_file(cache_key, file_path)
-        return _audio_file_response(cached_path)
+        return _audio_file_response(cached_path, cache_status="miss")
 
 
-def _audio_file_response(file_path: Path) -> FileResponse:
+def stream_speech_response(text: str, speed: float | None = None) -> FileResponse | StreamingResponse:
+    """Stream Edge TTS audio directly while filling the server-side cache."""
+    try:
+        import edge_tts
+        import tools.tts_tool as tts_tool
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Edge TTS streaming is not available in this runtime.",
+        ) from exc
+
+    cache_key = _tts_cache_key(tts_tool, text=text, voice=None, speed=speed)
+    cached_path = _cached_tts_file(cache_key)
+    if cached_path:
+        return _audio_file_response(cached_path, cache_status="hit")
+
+    voice = _EDGE_VOICE_BY_LANGUAGE.get(_detect_language_code(text)) or _EDGE_VOICE_BY_LANGUAGE["en"]
+    return StreamingResponse(
+        _stream_edge_tts_to_cache(edge_tts, text=text, voice=voice, speed=speed, cache_key=cache_key),
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Hermes-TTS-Cache": "miss"},
+    )
+
+
+async def _stream_edge_tts_to_cache(
+    edge_tts: Any,
+    *,
+    text: str,
+    voice: str,
+    speed: float | None,
+    cache_key: str,
+) -> AsyncIterator[bytes]:
+    cache_dir = _tts_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{cache_key}.mp3"
+    temp_path = cache_dir / f"{cache_key}.{threading.get_ident()}.tmp"
+    completed = False
+
+    try:
+        communicate = edge_tts.Communicate(text, voice=voice, rate=_edge_rate(speed))
+        with temp_path.open("wb") as output:
+            async for chunk in communicate.stream():
+                if chunk.get("type") != "audio":
+                    continue
+                data = chunk.get("data")
+                if not data:
+                    continue
+                output.write(data)
+                yield data
+        completed = True
+    finally:
+        if completed and temp_path.exists():
+            temp_path.replace(cache_path)
+            cache_path.touch(exist_ok=True)
+            _prune_tts_cache(cache_dir)
+        elif temp_path.exists():
+            temp_path.unlink()
+
+
+def _audio_file_response(file_path: Path, *, cache_status: str | None = None) -> FileResponse:
+    headers = {"X-Hermes-TTS-Cache": cache_status} if cache_status else None
     return FileResponse(
         file_path,
         media_type=_MEDIA_TYPES.get(file_path.suffix.lower(), "application/octet-stream"),
         filename=file_path.name,
         content_disposition_type="inline",
+        headers=headers,
     )
 
 
@@ -147,7 +209,7 @@ def _tts_cache_dir() -> Path:
 def _cached_tts_file(cache_key: str) -> Path | None:
     cache_dir = _tts_cache_dir()
     for path in cache_dir.glob(f"{cache_key}.*"):
-        if path.is_file():
+        if path.is_file() and path.suffix != ".tmp":
             path.touch(exist_ok=True)
             return path
     return None
@@ -267,6 +329,13 @@ def _detect_language_code(text: str) -> str:
         if re.search(pattern, sample, re.IGNORECASE):
             return language
     return "en"
+
+
+def _edge_rate(speed: float | None) -> str:
+    if speed is None or speed == 1:
+        return "+0%"
+    percentage = round((speed - 1) * 100)
+    return f"{percentage:+d}%"
 
 
 def _parse_tool_result(raw: str) -> dict[str, Any]:

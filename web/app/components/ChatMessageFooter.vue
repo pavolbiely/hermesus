@@ -29,16 +29,36 @@ const richTooltipUi = {
   content: 'h-auto max-w-none items-stretch rounded-md bg-elevated px-3 py-2 text-default shadow-lg ring ring-default'
 }
 
-const { generatingMessageId, speakingMessageId, read: readAloud, stop: stopReadAloud } = useMessageReadAloud()
+const { generatingMessageId, playbackCacheStatuses, playbackSources, speakingMessageId, read: readAloud, stop: stopReadAloud } = useMessageReadAloud()
 
 const tokenCount = computed(() => props.message.role === 'assistant' ? formatMessageTokenCount(props.message) : '')
 const generationDuration = computed(() => props.message.role === 'assistant' ? formatMessageGenerationDuration(props.message) : '')
 const isReadingAloud = computed(() => speakingMessageId.value === props.message.id)
 const isGeneratingAloud = computed(() => generatingMessageId.value === props.message.id)
 const isReadAloudActive = computed(() => isReadingAloud.value || isGeneratingAloud.value)
-const readAloudTooltip = computed(() => {
-  if (isGeneratingAloud.value) return 'Generating speech audio'
-  return isReadingAloud.value ? 'Stop reading aloud' : 'Read aloud'
+const readAloudPlaybackSource = computed(() => playbackSources.value[props.message.id] ?? null)
+const readAloudCacheStatus = computed(() => playbackCacheStatuses.value[props.message.id] ?? null)
+const readAloudStatusText = computed(() => {
+  if (isGeneratingAloud.value) {
+    if (readAloudPlaybackSource.value === 'readable-summary') return 'Preparing readable summary'
+    if (readAloudPlaybackSource.value === 'edge-tts-fallback-generating') return 'Generating Edge TTS fallback audio'
+    return 'Generating speech audio'
+  }
+
+  if (isReadingAloud.value) {
+    if (readAloudPlaybackSource.value === 'web-speech') return 'Reading via Browser Web Speech API'
+    if (readAloudPlaybackSource.value === 'edge-tts-stream') return 'Reading via Edge TTS stream'
+    if (readAloudPlaybackSource.value === 'edge-tts-fallback-blob') return 'Reading via Edge TTS fallback audio'
+    return 'Reading aloud'
+  }
+
+  return ''
+})
+const readAloudStatusDetail = computed(() => {
+  if (!readAloudStatusText.value) return ''
+  if (!readAloudCacheStatus.value) return readAloudStatusText.value
+  const cacheLabel = readAloudCacheStatus.value === 'cached' ? 'cached' : 'not cached'
+  return `${readAloudStatusText.value} (${cacheLabel})`
 })
 const readAloudAriaLabel = computed(() => {
   if (isGeneratingAloud.value) return 'Stop generating speech audio'
@@ -122,26 +142,6 @@ onBeforeUnmount(() => {
       {{ formatMessageTimestamp(message.createdAt) }}
     </span>
     <UTooltip
-      v-if="message.role === 'assistant'"
-      :text="readAloudTooltip"
-      :content="tooltipContent"
-      @update:open="setTooltipOpen('read-aloud', $event)"
-    >
-      <button
-        type="button"
-        class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50"
-        :class="isReadingAloud || isGeneratingAloud ? 'text-primary hover:text-primary' : ''"
-        :aria-label="readAloudAriaLabel"
-        @click="readAloud(message)"
-      >
-        <UIcon
-          :name="isReadingAloud ? 'i-lucide-square' : (isGeneratingAloud ? 'i-lucide-loader-circle' : 'i-lucide-volume-2')"
-          class="size-3"
-          :class="isGeneratingAloud ? 'animate-spin' : ''"
-        />
-      </button>
-    </UTooltip>
-    <UTooltip
       v-if="message.role === 'user'"
       text="Edit prompt"
       :content="tooltipContent"
@@ -187,5 +187,26 @@ onBeforeUnmount(() => {
         <UIcon :name="copiedMessageId === message.id ? 'i-lucide-check' : 'i-lucide-copy'" class="size-3" />
       </button>
     </UTooltip>
+    <button
+      v-if="message.role === 'assistant'"
+      type="button"
+      class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50"
+      :class="isReadingAloud || isGeneratingAloud ? 'text-primary hover:text-primary' : ''"
+      :aria-label="readAloudAriaLabel"
+      @click="readAloud(message)"
+    >
+      <UIcon
+        :name="isReadingAloud ? 'i-lucide-square' : (isGeneratingAloud ? 'i-lucide-loader-circle' : 'i-lucide-volume-2')"
+        class="size-3"
+        :class="isGeneratingAloud ? 'animate-spin' : ''"
+      />
+    </button>
+    <span v-if="message.role === 'assistant' && readAloudStatusDetail" aria-hidden="true">·</span>
+    <em
+      v-if="message.role === 'assistant' && readAloudStatusDetail"
+      class="cursor-default whitespace-nowrap text-muted"
+    >
+      {{ readAloudStatusDetail }}
+    </em>
   </div>
 </template>

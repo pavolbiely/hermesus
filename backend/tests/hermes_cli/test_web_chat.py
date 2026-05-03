@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import types
 
 from web_chat_test_helpers import assert_iso_timestamp
 
@@ -122,6 +123,34 @@ def test_synthesized_speech_cache_varies_by_speed(client, tmp_path, monkeypatch)
     assert normal.content == b"fake mp3 0"
     assert faster.content == b"fake mp3 1"
     assert calls == ["Same text, different speed.", "Same text, different speed."]
+
+
+def test_streams_edge_speech_and_reuses_server_cache(client, monkeypatch):
+    import tools.tts_tool as tts_tool
+
+    calls = []
+
+    class FakeCommunicate:
+        def __init__(self, text, *, voice, rate):
+            calls.append({"text": text, "voice": voice, "rate": rate})
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"streamed "}
+            yield {"type": "WordBoundary"}
+            yield {"type": "audio", "data": b"mp3"}
+
+    monkeypatch.setattr(tts_tool, "_load_tts_config", lambda: {"provider": "edge"})
+    monkeypatch.setitem(__import__("sys").modules, "edge_tts", types.SimpleNamespace(Communicate=FakeCommunicate))
+
+    first = client.post("/api/web-chat/tts/stream", json={"text": "Stream this response.", "speed": 1.25})
+    second = client.post("/api/web-chat/tts/stream", json={"text": "Stream this response.", "speed": 1.25})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.headers["content-type"].startswith("audio/mpeg")
+    assert first.content == b"streamed mp3"
+    assert second.content == b"streamed mp3"
+    assert calls == [{"text": "Stream this response.", "voice": "en-US-BrianNeural", "rate": "+25%"}]
 
 
 def test_synthesizes_edge_speech_with_detected_language_voice(client, tmp_path, monkeypatch):

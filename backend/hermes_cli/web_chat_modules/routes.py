@@ -12,7 +12,7 @@ from hermes_state import SessionDB
 
 from . import file_previews, session_handlers
 from .read_aloud_summaries import generate_read_aloud_summary
-from .tts import synthesize_speech_response
+from .tts import stream_speech_response, synthesize_speech_response
 from .models import (
     CreateSessionRequest,
     DeleteSessionResponse,
@@ -174,6 +174,10 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
     @router.post("/tts")
     def synthesize_speech(payload: SynthesizeSpeechRequest) -> FileResponse:
         return synthesize_speech_response(payload.text, voice=payload.voice, speed=payload.speed)
+
+    @router.post("/tts/stream", response_model=None)
+    def stream_speech(payload: SynthesizeSpeechRequest) -> FileResponse | StreamingResponse:
+        return stream_speech_response(payload.text, speed=payload.speed)
 
     @router.post("/read-aloud-summary", response_model=ReadAloudSummaryResponse)
     def summarize_read_aloud(payload: ReadAloudSummaryRequest) -> ReadAloudSummaryResponse:

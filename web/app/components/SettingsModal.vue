@@ -54,7 +54,7 @@ const speechEngineItems = [
   {
     label: 'Edge TTS via Hermes',
     value: 'backend-tts',
-    description: 'Generates audio through Hermes using Edge TTS with automatic language voice selection.'
+    description: 'Streams audio through the Hermes web backend using Edge TTS directly with automatic language voice selection.'
   }
 ] satisfies Array<{ label: string, value: ReadAloudEngine, description: string }>
 
