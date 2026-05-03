@@ -67,6 +67,63 @@ def test_synthesizes_speech_with_request_voice_override(client, tmp_path, monkey
     assert tts_tool._load_tts_config() == {"provider": "openai", "openai": {"voice": "alloy"}}
 
 
+def test_synthesized_speech_uses_server_cache(client, tmp_path, monkeypatch):
+    import tools.tts_tool as tts_tool
+
+    audio_path = tmp_path / "speech.mp3"
+    audio_path.write_bytes(b"cached mp3")
+    calls = 0
+
+    def load_config():
+        return {"provider": "edge", "edge": {"voice": "en-US-AriaNeural"}}
+
+    def text_to_speech_tool(*, text):
+        nonlocal calls
+        calls += 1
+        assert text == "Cache this response."
+        return json.dumps({"success": True, "file_path": str(audio_path)})
+
+    monkeypatch.setattr(tts_tool, "_load_tts_config", load_config)
+    monkeypatch.setattr(tts_tool, "text_to_speech_tool", text_to_speech_tool)
+
+    first = client.post("/api/web-chat/tts", json={"text": "Cache this response.", "speed": 1.25})
+    audio_path.write_bytes(b"changed source should not be read")
+    second = client.post("/api/web-chat/tts", json={"text": "Cache this response.", "speed": 1.25})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.content == b"cached mp3"
+    assert second.content == b"cached mp3"
+    assert calls == 1
+
+
+def test_synthesized_speech_cache_varies_by_speed(client, tmp_path, monkeypatch):
+    import tools.tts_tool as tts_tool
+
+    calls = []
+
+    def load_config():
+        return {"provider": "edge", "edge": {"voice": "en-US-AriaNeural"}}
+
+    def text_to_speech_tool(*, text):
+        audio_path = tmp_path / f"speech-{len(calls)}.mp3"
+        audio_path.write_bytes(f"fake mp3 {len(calls)}".encode())
+        calls.append(text)
+        return json.dumps({"success": True, "file_path": str(audio_path)})
+
+    monkeypatch.setattr(tts_tool, "_load_tts_config", load_config)
+    monkeypatch.setattr(tts_tool, "text_to_speech_tool", text_to_speech_tool)
+
+    normal = client.post("/api/web-chat/tts", json={"text": "Same text, different speed.", "speed": 1})
+    faster = client.post("/api/web-chat/tts", json={"text": "Same text, different speed.", "speed": 1.5})
+
+    assert normal.status_code == 200
+    assert faster.status_code == 200
+    assert normal.content == b"fake mp3 0"
+    assert faster.content == b"fake mp3 1"
+    assert calls == ["Same text, different speed.", "Same text, different speed."]
+
+
 def test_synthesizes_edge_speech_with_detected_language_voice(client, tmp_path, monkeypatch):
     import tools.tts_tool as tts_tool
 

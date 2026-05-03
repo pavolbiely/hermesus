@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,10 @@ _MEDIA_TYPES = {
 }
 
 _TTS_CONFIG_OVERRIDE_LOCK = threading.Lock()
+_TTS_CACHE_LOCK = threading.Lock()
+_TTS_CACHE_KEY_LOCKS: dict[str, threading.Lock] = {}
+_TTS_CACHE_SCHEMA_VERSION = 1
+_TTS_CACHE_MAX_FILES = 200
 _VOICE_ID_PROVIDERS = {"elevenlabs", "minimax", "mistral", "xai"}
 _VOICE_NAME_PROVIDERS = {"edge", "openai", "gemini", "kittentts", "piper"}
 _EDGE_VOICE_BY_LANGUAGE = {
@@ -58,29 +64,118 @@ def synthesize_speech_response(text: str, voice: str | None = None, speed: float
         ) from exc
 
     normalized_voice = voice.strip() if voice else None
-    if normalized_voice:
-        result = _synthesize_with_voice_override(tts_tool, text, normalized_voice, speed)
-    else:
-        result = _synthesize_with_edge_language_voice(tts_tool, text, speed)
-    if not result.get("success"):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(result.get("error") or "TTS generation failed."),
-        )
+    cache_key = _tts_cache_key(tts_tool, text=text, voice=normalized_voice, speed=speed)
+    key_lock = _tts_cache_key_lock(cache_key)
 
-    file_path = Path(str(result.get("file_path") or "")).expanduser()
-    if not file_path.is_file():
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="TTS generation did not produce an audio file.",
-        )
+    with key_lock:
+        cached_path = _cached_tts_file(cache_key)
+        if cached_path:
+            return _audio_file_response(cached_path)
 
+        if normalized_voice:
+            result = _synthesize_with_voice_override(tts_tool, text, normalized_voice, speed)
+        else:
+            result = _synthesize_with_edge_language_voice(tts_tool, text, speed)
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(result.get("error") or "TTS generation failed."),
+            )
+
+        file_path = Path(str(result.get("file_path") or "")).expanduser()
+        if not file_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="TTS generation did not produce an audio file.",
+            )
+
+        cached_path = _store_tts_cache_file(cache_key, file_path)
+        return _audio_file_response(cached_path)
+
+
+def _audio_file_response(file_path: Path) -> FileResponse:
     return FileResponse(
         file_path,
         media_type=_MEDIA_TYPES.get(file_path.suffix.lower(), "application/octet-stream"),
         filename=file_path.name,
         content_disposition_type="inline",
     )
+
+
+def _tts_cache_key(tts_tool: Any, *, text: str, voice: str | None, speed: float | None) -> str:
+    base_config = _load_tts_config(tts_tool)
+    effective_config = (
+        _tts_config_with_voice_override(tts_tool, base_config, voice, speed)
+        if voice
+        else _tts_config_with_edge_language_voice(base_config, text, speed)
+    )
+    payload = {
+        "version": _TTS_CACHE_SCHEMA_VERSION,
+        "text": text,
+        "speed": speed,
+        "voice": voice,
+        "effective_config": effective_config,
+    }
+    serialized = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _load_tts_config(tts_tool: Any) -> dict[str, Any]:
+    config = tts_tool._load_tts_config()
+    return dict(config) if isinstance(config, dict) else {}
+
+
+def _tts_cache_key_lock(cache_key: str) -> threading.Lock:
+    with _TTS_CACHE_LOCK:
+        lock = _TTS_CACHE_KEY_LOCKS.get(cache_key)
+        if lock is None:
+            lock = threading.Lock()
+            _TTS_CACHE_KEY_LOCKS[cache_key] = lock
+        return lock
+
+
+def _tts_cache_dir() -> Path:
+    try:
+        from hermes_constants import get_hermes_home
+
+        root = get_hermes_home()
+    except Exception:
+        root = Path.home() / ".hermes"
+    return root / "web-chat" / "tts-cache"
+
+
+def _cached_tts_file(cache_key: str) -> Path | None:
+    cache_dir = _tts_cache_dir()
+    for path in cache_dir.glob(f"{cache_key}.*"):
+        if path.is_file():
+            path.touch(exist_ok=True)
+            return path
+    return None
+
+
+def _store_tts_cache_file(cache_key: str, source_path: Path) -> Path:
+    suffix = source_path.suffix.lower() or ".mp3"
+    cache_dir = _tts_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{cache_key}{suffix}"
+    if not cache_path.exists():
+        shutil.copyfile(source_path, cache_path)
+    cache_path.touch(exist_ok=True)
+    _prune_tts_cache(cache_dir)
+    return cache_path
+
+
+def _prune_tts_cache(cache_dir: Path) -> None:
+    files = sorted(
+        (path for path in cache_dir.iterdir() if path.is_file()),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for path in files[_TTS_CACHE_MAX_FILES:]:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _synthesize_with_voice_override(tts_tool: Any, text: str, voice: str, speed: float | None) -> dict[str, Any]:
