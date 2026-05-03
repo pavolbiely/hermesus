@@ -595,7 +595,7 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
                 class="size-3.5 text-muted"
               />
             </span>
-            <span class="min-w-0 flex-1 truncate" title="">
+            <span class="pointer-events-none min-w-0 flex-1 truncate" title="">
               {{ sessionTitle(session) }}
             </span>
 
