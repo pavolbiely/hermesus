@@ -50,6 +50,10 @@ const props = defineProps<{
 }>()
 
 const shouldPausePreviewEnhancement = computed(() => props.isRunning && props.isActiveRunMessage && props.message.role === 'assistant')
+const { generatingMessageId, speakingMessageId } = useMessageReadAloud()
+const isMessageReadAloudActive = computed(() => props.message.role === 'assistant' && (
+  speakingMessageId.value === props.message.id || generatingMessageId.value === props.message.id
+))
 const previewEnhancementSource = computed(() => [
   props.message.id,
   props.workspace,
@@ -67,7 +71,8 @@ function isPrimaryContentPart(part: WebChatPart) {
 }
 
 const showMessageFooter = computed(() => {
-  if (props.isActiveRunMessage || props.message.role === 'system') return false
+  if (props.message.role === 'system') return false
+  if (props.isActiveRunMessage && !isMessageReadAloudActive.value) return false
   if (props.message.role === 'assistant') return props.message.parts.some(isPrimaryContentPart)
   return true
 })

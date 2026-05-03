@@ -35,6 +35,7 @@ const tokenCount = computed(() => props.message.role === 'assistant' ? formatMes
 const generationDuration = computed(() => props.message.role === 'assistant' ? formatMessageGenerationDuration(props.message) : '')
 const isReadingAloud = computed(() => speakingMessageId.value === props.message.id)
 const isGeneratingAloud = computed(() => generatingMessageId.value === props.message.id)
+const isReadAloudActive = computed(() => isReadingAloud.value || isGeneratingAloud.value)
 const readAloudTooltip = computed(() => {
   if (isGeneratingAloud.value) return 'Generating speech audio'
   return isReadingAloud.value ? 'Stop reading aloud' : 'Read aloud'
@@ -60,8 +61,8 @@ onBeforeUnmount(() => {
 <template>
   <div
     :class="[
-      'pointer-events-none absolute -bottom-6 flex w-max max-w-none flex-nowrap items-center gap-1 whitespace-nowrap text-xs leading-4 text-muted opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100',
-      openTooltipKey ? 'pointer-events-auto opacity-100' : '',
+      'pointer-events-none absolute -bottom-6 flex w-max max-w-none flex-nowrap items-center gap-2 whitespace-nowrap text-xs leading-4 text-muted opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100',
+      openTooltipKey || isReadAloudActive ? 'pointer-events-auto opacity-100' : '',
       message.role === 'user' ? 'right-0 justify-end' : 'left-0 justify-start'
     ]"
   >
