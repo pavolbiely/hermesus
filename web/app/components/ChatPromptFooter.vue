@@ -253,8 +253,7 @@ async function startElevenLabsVoiceInput() {
         const audio = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
         const result = await api.transcribeSpeechInput(audio, {
           provider: 'elevenlabs',
-          apiKey: readAloudElevenLabsApiKey(),
-          language: navigator.language || null
+          apiKey: readAloudElevenLabsApiKey()
         })
         const text = result.text.trim()
         if (text) emit('voiceText', text)

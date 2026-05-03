@@ -88,7 +88,7 @@ def test_transcribes_speech_input_with_elevenlabs_request_api_key(client, monkey
 
     response = client.post(
         "/api/web-chat/speech-input/transcribe",
-        data={"provider": "elevenlabs", "apiKey": "dummy-api-key", "language": "sk-SK"},
+        data={"provider": "elevenlabs", "apiKey": "dummy-api-key"},
         files={"file": ("voice-input.webm", b"fake webm", "audio/webm")},
     )
 
@@ -99,7 +99,6 @@ def test_transcribes_speech_input_with_elevenlabs_request_api_key(client, monkey
         {
             "file": ("voice-input.webm", b"fake webm", "audio/webm"),
             "model_id": "scribe_v1",
-            "language_code": "sk",
         },
     ]
 
