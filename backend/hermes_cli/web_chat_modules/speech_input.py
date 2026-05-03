@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
 
-_DEFAULT_ELEVENLABS_STT_MODEL_ID = "scribe_v1"
+_DEFAULT_ELEVENLABS_STT_MODEL_ID = "scribe_v2"
 
 
 async def transcribe_speech_input_response(

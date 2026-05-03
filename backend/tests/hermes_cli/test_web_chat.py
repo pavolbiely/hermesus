@@ -84,7 +84,7 @@ def test_transcribes_speech_input_with_elevenlabs_request_api_key(client, monkey
             self.speech_to_text = FakeSpeechToText()
 
     monkeypatch.setattr(tts_tool, "_import_elevenlabs", lambda: FakeElevenLabs)
-    monkeypatch.setattr(tts_tool, "_load_tts_config", lambda: {"elevenlabs": {"stt_model_id": "scribe_v1"}})
+    monkeypatch.setattr(tts_tool, "_load_tts_config", lambda: {"elevenlabs": {}})
 
     response = client.post(
         "/api/web-chat/speech-input/transcribe",
@@ -98,7 +98,7 @@ def test_transcribes_speech_input_with_elevenlabs_request_api_key(client, monkey
         {"api_key": "dummy-api-key"},
         {
             "file": ("voice-input.webm", b"fake webm", "audio/webm"),
-            "model_id": "scribe_v1",
+            "model_id": "scribe_v2",
         },
     ]
 
