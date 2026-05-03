@@ -209,6 +209,8 @@ export type SynthesizeSpeechRequest = {
   text: string
   voice?: string | null
   speed?: number | null
+  provider?: 'edge' | 'elevenlabs' | string | null
+  apiKey?: string | null
 }
 
 export type ReadAloudSummaryRequest = {

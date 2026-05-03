@@ -11,11 +11,13 @@ import {
 import {
   readAloudAutoReadResponsesEnabled,
   readAloudContentMode,
+  readAloudElevenLabsApiKey,
   readAloudEngine,
   readAloudSpeed,
   readAloudWebSpeechVoiceURI,
   setReadAloudAutoReadResponsesEnabled,
   setReadAloudContentMode,
+  setReadAloudElevenLabsApiKey,
   setReadAloudEngine,
   setReadAloudSpeed,
   setReadAloudWebSpeechVoiceURI
@@ -42,6 +44,8 @@ const speechEngine = ref<ReadAloudEngine>('web-speech')
 const speechContentMode = ref<ReadAloudContentMode>('full')
 const speechSpeed = ref(1)
 const autoReadResponses = ref(false)
+const elevenLabsApiKey = ref('')
+const elevenLabsApiKeyVisible = ref(false)
 const webSpeechVoiceURI = ref<string | null>(null)
 const browserVoices = ref<SpeechSynthesisVoice[]>([])
 
@@ -53,8 +57,13 @@ const speechEngineItems = [
   },
   {
     label: 'Edge TTS via Hermes',
-    value: 'backend-tts',
+    value: 'edge-tts',
     description: 'Streams audio through the Hermes web backend using Edge TTS directly with automatic language voice selection.'
+  },
+  {
+    label: 'ElevenLabs via Hermes',
+    value: 'elevenlabs',
+    description: 'Streams high-quality ElevenLabs audio through the Hermes web backend. Requires an ElevenLabs API key.'
   }
 ] satisfies Array<{ label: string, value: ReadAloudEngine, description: string }>
 
@@ -128,6 +137,8 @@ function refreshState() {
   speechSpeed.value = readAloudSpeed()
   autoReadResponses.value = readAloudAutoReadResponsesEnabled()
   webSpeechVoiceURI.value = readAloudWebSpeechVoiceURI()
+  elevenLabsApiKey.value = readAloudElevenLabsApiKey() ?? ''
+  elevenLabsApiKeyVisible.value = false
   refreshBrowserVoices()
 }
 
@@ -155,6 +166,15 @@ function updateWebSpeechVoice(value: string) {
   const voiceURI = value === '__auto__' ? null : value
   webSpeechVoiceURI.value = voiceURI
   setReadAloudWebSpeechVoiceURI(voiceURI)
+}
+
+function updateElevenLabsApiKey(value: string) {
+  elevenLabsApiKey.value = value
+  setReadAloudElevenLabsApiKey(value)
+}
+
+function toggleElevenLabsApiKeyVisible() {
+  elevenLabsApiKeyVisible.value = !elevenLabsApiKeyVisible.value
 }
 
 function waitForPermissionDecision() {
@@ -269,7 +289,7 @@ onBeforeUnmount(() => {
           <UFormField
             name="readAloudSpeed"
             label="Reading speed"
-            description="Applies to both Web Speech API and Edge TTS read-aloud."
+            description="Applies to Web Speech, Edge TTS, and ElevenLabs where supported. ElevenLabs currently clamps provider speed to 0.7×–1.2×."
           >
             <USelect
               :model-value="speechSpeed"
@@ -296,7 +316,7 @@ onBeforeUnmount(() => {
           </UFormField>
 
           <UFormField
-            v-else
+            v-else-if="speechEngine === 'edge-tts'"
             name="edgeTts"
             label="Edge TTS"
             description="Uses Hermes backend TTS with automatic language detection. This is independent from the selected chat model."
@@ -308,6 +328,40 @@ onBeforeUnmount(() => {
               description="Hermes generates the audio with Edge TTS and chooses a matching voice per message language, for example Slovak, English, Czech, German, French, Spanish, Italian, Polish, Portuguese, or Ukrainian."
             />
           </UFormField>
+
+          <div v-else class="space-y-3">
+            <UFormField
+              name="elevenLabsApiKey"
+              label="ElevenLabs API key"
+              description="Stored in this browser and sent only with ElevenLabs TTS requests. Leave empty to use ELEVENLABS_API_KEY from the Hermes runtime."
+            >
+              <UInput
+                :model-value="elevenLabsApiKey"
+                :type="elevenLabsApiKeyVisible ? 'text' : 'password'"
+                placeholder="sk_..."
+                autocomplete="off"
+                class="w-full"
+                @update:model-value="updateElevenLabsApiKey"
+              >
+                <template #trailing>
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    size="xs"
+                    :icon="elevenLabsApiKeyVisible ? 'i-lucide-eye-off' : 'i-lucide-eye'"
+                    :aria-label="elevenLabsApiKeyVisible ? 'Hide ElevenLabs API key' : 'Show ElevenLabs API key'"
+                    @click="toggleElevenLabsApiKeyVisible"
+                  />
+                </template>
+              </UInput>
+            </UFormField>
+            <UAlert
+              color="neutral"
+              variant="subtle"
+              title="ElevenLabs streaming"
+              description="Hermes streams ElevenLabs MP3 audio through the same read-aloud pipeline and falls back to generated audio if streaming playback is not available."
+            />
+          </div>
         </section>
 
         <USeparator />

@@ -3,6 +3,7 @@ import { messageSpeechText } from '~/utils/chatMessages'
 import { playNotificationSound } from '~/utils/notificationSound'
 import {
   readAloudContentMode,
+  readAloudElevenLabsApiKey,
   readAloudEngine,
   readAloudSpeed,
   readAloudWebSpeechVoiceURI
@@ -12,9 +13,9 @@ type ReadAloudStatus = 'idle' | 'generating' | 'speaking'
 type ReadAloudPlaybackSource =
   | 'readable-summary'
   | 'web-speech'
-  | 'edge-tts-stream'
-  | 'edge-tts-fallback-generating'
-  | 'edge-tts-fallback-blob'
+  | 'tts-stream'
+  | 'tts-fallback-generating'
+  | 'tts-fallback-blob'
 type ReadAloudCacheStatus = 'cached' | 'generated'
 type CachedSpeechBlob = {
   blob: Blob
@@ -26,7 +27,7 @@ type ReadAloudOptions = {
 }
 type PreparedReadAloud =
   | { engine: 'web-speech', text: string }
-  | { engine: 'backend-tts', text: string, speed: number }
+  | { engine: 'tts', text: string, speed: number, provider: 'edge' | 'elevenlabs', apiKey?: string | null }
 type QueuedReadAloudMessage = {
   message: WebChatMessage
   attempt: number
@@ -135,8 +136,18 @@ function readResponseCacheStatus(value: string | null): ReadAloudCacheStatus {
   return value === 'hit' ? 'cached' : 'generated'
 }
 
-function cachedSpeechBlob(text: string, speed: number, synthesize: () => Promise<CachedSpeechBlob>) {
-  const key = `${speed}:${text}`
+function localSecretFingerprint(value: string | null | undefined) {
+  if (!value) return null
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash.toString(16)
+}
+
+function cachedSpeechBlob(text: string, speed: number, provider: 'edge' | 'elevenlabs', apiKey: string | null | undefined, synthesize: () => Promise<CachedSpeechBlob>) {
+  const key = JSON.stringify({ provider, speed, apiKey: localSecretFingerprint(apiKey), text })
   const cached = speechBlobCache.get(key)
   if (cached) {
     const markedCached = cached.then(result => ({ ...result, cacheStatus: 'cached' as const }))
@@ -293,14 +304,13 @@ export function useMessageReadAloud() {
     })
   }
 
-  async function synthesizeSpeechBlob(message: WebChatMessage, text: string, attempt: number) {
+  async function synthesizeSpeechBlob(message: WebChatMessage, text: string, speed: number, provider: 'edge' | 'elevenlabs', apiKey: string | null | undefined, attempt: number) {
     generatingMessageId.value = message.id
-    setPlaybackSource(message.id, 'edge-tts-fallback-generating')
+    setPlaybackSource(message.id, 'tts-fallback-generating')
 
     try {
-      const speed = readAloudSpeed()
-      const result = await cachedSpeechBlob(text, speed, async () => {
-        const response = await api.synthesizeSpeechWithMetadata({ text, speed })
+      const result = await cachedSpeechBlob(text, speed, provider, apiKey, async () => {
+        const response = await api.synthesizeSpeechWithMetadata({ text, speed, provider, apiKey })
         return {
           blob: response.blob,
           cacheStatus: readResponseCacheStatus(response.cacheStatus)
@@ -328,7 +338,7 @@ export function useMessageReadAloud() {
     activeAudio = audio
     activeAudioUrl = audioUrl
     speakingMessageId.value = message.id
-    setPlaybackSource(message.id, 'edge-tts-fallback-blob')
+    setPlaybackSource(message.id, 'tts-fallback-blob')
 
     await new Promise<void>((resolve) => {
       activeCompletion = resolve
@@ -373,12 +383,14 @@ export function useMessageReadAloud() {
   async function pipeSpeechStreamToMediaSource(
     text: string,
     speed: number,
+    provider: 'edge' | 'elevenlabs',
+    apiKey: string | null | undefined,
     mediaSource: MediaSource,
     signal: AbortSignal,
     onCacheStatus: (cacheStatus: ReadAloudCacheStatus) => void
   ) {
     const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg')
-    const response = await api.streamSpeech({ text, speed }, signal)
+    const response = await api.streamSpeech({ text, speed, provider, apiKey }, signal)
     onCacheStatus(readResponseCacheStatus(response.headers.get('X-Hermes-TTS-Cache')))
     const reader = response.body?.getReader()
     if (!reader) throw new Error('Speech stream returned no body.')
@@ -392,7 +404,7 @@ export function useMessageReadAloud() {
     if (mediaSource.readyState === 'open' && !sourceBuffer.updating) mediaSource.endOfStream()
   }
 
-  async function playBackendTtsStream(message: WebChatMessage, text: string, speed: number, attempt: number) {
+  async function playBackendTtsStream(message: WebChatMessage, text: string, speed: number, provider: 'edge' | 'elevenlabs', apiKey: string | null | undefined, attempt: number) {
     if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported('audio/mpeg')) {
       throw new Error('Streaming audio playback is not supported in this browser.')
     }
@@ -405,7 +417,7 @@ export function useMessageReadAloud() {
     activeAudio = audio
     activeAudioUrl = audioUrl
     speakingMessageId.value = message.id
-    setPlaybackSource(message.id, 'edge-tts-stream')
+    setPlaybackSource(message.id, 'tts-stream')
 
     await new Promise<void>((resolve, reject) => {
       activeCompletion = resolve
@@ -429,6 +441,8 @@ export function useMessageReadAloud() {
         pipeSpeechStreamToMediaSource(
           text,
           speed,
+          provider,
+          apiKey,
           mediaSource,
           controller.signal,
           cacheStatus => setPlaybackCacheStatus(message.id, cacheStatus)
@@ -442,9 +456,9 @@ export function useMessageReadAloud() {
     })
   }
 
-  async function playBackendTts(message: WebChatMessage, text: string, speed: number, attempt: number) {
+  async function playBackendTts(message: WebChatMessage, text: string, speed: number, provider: 'edge' | 'elevenlabs', apiKey: string | null | undefined, attempt: number) {
     try {
-      await playBackendTtsStream(message, text, speed, attempt)
+      await playBackendTtsStream(message, text, speed, provider, apiKey, attempt)
       return
     } catch {
       if (readAttempt !== attempt) return
@@ -453,7 +467,7 @@ export function useMessageReadAloud() {
       clearPlaybackSource(message.id)
     }
 
-    const blob = await synthesizeSpeechBlob(message, text, attempt)
+    const blob = await synthesizeSpeechBlob(message, text, speed, provider, apiKey, attempt)
     if (!blob || readAttempt !== attempt) return
     await playBackendTtsBlob(message, blob, attempt)
   }
@@ -463,16 +477,22 @@ export function useMessageReadAloud() {
     if (!text || readAttempt !== attempt) return null
 
     const engine = readAloudEngine()
-    if (engine === 'backend-tts') {
-      return { engine, text, speed: readAloudSpeed() }
+    if (engine === 'edge-tts' || engine === 'elevenlabs') {
+      return {
+        engine: 'tts',
+        text,
+        speed: readAloudSpeed(),
+        provider: engine === 'elevenlabs' ? 'elevenlabs' : 'edge',
+        apiKey: engine === 'elevenlabs' ? readAloudElevenLabsApiKey() : null
+      }
     }
 
     return { engine, text }
   }
 
   async function playPreparedReadAloud(message: WebChatMessage, prepared: PreparedReadAloud, attempt: number) {
-    if (prepared.engine === 'backend-tts') {
-      await playBackendTts(message, prepared.text, prepared.speed, attempt)
+    if (prepared.engine === 'tts') {
+      await playBackendTts(message, prepared.text, prepared.speed, prepared.provider, prepared.apiKey, attempt)
       return
     }
 

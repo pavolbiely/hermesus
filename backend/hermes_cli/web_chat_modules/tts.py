@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import threading
@@ -54,8 +55,47 @@ _LANGUAGE_PATTERNS = (
 )
 
 
-def synthesize_speech_response(text: str, voice: str | None = None, speed: float | None = None) -> FileResponse:
-    """Generate TTS audio with Hermes' configured provider and return it inline."""
+class TtsProviderAdapter:
+    """Small provider adapter descriptor for web-chat TTS routing."""
+
+    def __init__(self, name: str, *, supports_streaming: bool) -> None:
+        self.name = name
+        self.supports_streaming = supports_streaming
+
+    def cache_key(
+        self,
+        tts_tool: Any,
+        *,
+        text: str,
+        voice: str | None,
+        speed: float | None,
+        api_key: str | None,
+    ) -> str:
+        return _tts_cache_key(
+            tts_tool,
+            text=text,
+            voice=voice,
+            speed=speed,
+            provider=self.name,
+            api_key=api_key,
+        )
+
+
+_TTS_ADAPTERS = {
+    "configured": TtsProviderAdapter("configured", supports_streaming=False),
+    "edge": TtsProviderAdapter("edge", supports_streaming=True),
+    "elevenlabs": TtsProviderAdapter("elevenlabs", supports_streaming=True),
+}
+
+
+def synthesize_speech_response(
+    text: str,
+    voice: str | None = None,
+    speed: float | None = None,
+    provider: str | None = None,
+    api_key: str | None = None,
+) -> FileResponse:
+    """Generate TTS audio with the selected adapter and return it inline."""
     try:
         import tools.tts_tool as tts_tool
     except ImportError as exc:
@@ -65,7 +105,15 @@ def synthesize_speech_response(text: str, voice: str | None = None, speed: float
         ) from exc
 
     normalized_voice = voice.strip() if voice else None
-    cache_key = _tts_cache_key(tts_tool, text=text, voice=normalized_voice, speed=speed)
+    adapter = _tts_adapter(provider if provider or not normalized_voice else "configured")
+    normalized_api_key = api_key.strip() if api_key else None
+    cache_key = adapter.cache_key(
+        tts_tool,
+        text=text,
+        voice=normalized_voice,
+        speed=speed,
+        api_key=normalized_api_key,
+    )
     key_lock = _tts_cache_key_lock(cache_key)
 
     with key_lock:
@@ -73,10 +121,21 @@ def synthesize_speech_response(text: str, voice: str | None = None, speed: float
         if cached_path:
             return _audio_file_response(cached_path, cache_status="hit")
 
-        if normalized_voice:
+        if adapter.name == "elevenlabs":
+            cached_path = _synthesize_elevenlabs_to_cache(
+                tts_tool,
+                text=text,
+                voice=normalized_voice,
+                speed=speed,
+                api_key=normalized_api_key,
+                cache_key=cache_key,
+            )
+            return _audio_file_response(cached_path, cache_status="miss")
+
+        if normalized_voice and adapter.name != "edge":
             result = _synthesize_with_voice_override(tts_tool, text, normalized_voice, speed)
         else:
-            result = _synthesize_with_edge_language_voice(tts_tool, text, speed)
+            result = _synthesize_with_edge_language_voice(tts_tool, text, speed, voice=normalized_voice)
         if not result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -94,29 +153,199 @@ def synthesize_speech_response(text: str, voice: str | None = None, speed: float
         return _audio_file_response(cached_path, cache_status="miss")
 
 
-def stream_speech_response(text: str, speed: float | None = None) -> FileResponse | StreamingResponse:
-    """Stream Edge TTS audio directly while filling the server-side cache."""
+def stream_speech_response(
+    text: str,
+    speed: float | None = None,
+    provider: str | None = None,
+    voice: str | None = None,
+    api_key: str | None = None,
+) -> FileResponse | StreamingResponse:
+    """Stream selected TTS audio directly while filling the server-side cache."""
+    try:
+        import tools.tts_tool as tts_tool
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Hermes TTS provider is not available in this runtime.",
+        ) from exc
+
+    adapter = _tts_adapter(provider)
+    normalized_voice = voice.strip() if voice else None
+    normalized_api_key = api_key.strip() if api_key else None
+    cache_key = adapter.cache_key(
+        tts_tool,
+        text=text,
+        voice=normalized_voice,
+        speed=speed,
+        api_key=normalized_api_key,
+    )
+    cached_path = _cached_tts_file(cache_key)
+    if cached_path:
+        return _audio_file_response(cached_path, cache_status="hit")
+
+    if adapter.name == "elevenlabs":
+        return StreamingResponse(
+            _stream_elevenlabs_to_cache(
+                tts_tool,
+                text=text,
+                voice=normalized_voice,
+                speed=speed,
+                api_key=normalized_api_key,
+                cache_key=cache_key,
+            ),
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Hermes-TTS-Cache": "miss"},
+        )
+
     try:
         import edge_tts
-        import tools.tts_tool as tts_tool
     except ImportError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Edge TTS streaming is not available in this runtime.",
         ) from exc
 
-    cache_key = _tts_cache_key(tts_tool, text=text, voice=None, speed=speed)
-    cached_path = _cached_tts_file(cache_key)
-    if cached_path:
-        return _audio_file_response(cached_path, cache_status="hit")
-
-    voice = _EDGE_VOICE_BY_LANGUAGE.get(_detect_language_code(text)) or _EDGE_VOICE_BY_LANGUAGE["en"]
+    edge_voice = normalized_voice or _EDGE_VOICE_BY_LANGUAGE.get(_detect_language_code(text)) or _EDGE_VOICE_BY_LANGUAGE["en"]
     return StreamingResponse(
-        _stream_edge_tts_to_cache(edge_tts, text=text, voice=voice, speed=speed, cache_key=cache_key),
+        _stream_edge_tts_to_cache(edge_tts, text=text, voice=edge_voice, speed=speed, cache_key=cache_key),
         media_type="audio/mpeg",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Hermes-TTS-Cache": "miss"},
     )
 
+
+def _normalize_tts_provider(provider: str | None) -> str | None:
+    value = provider.strip().lower() if provider else ""
+    if not value or value in {"backend", "backend-tts", "hermes"}:
+        return None
+    if value in {"edge", "edge-tts"}:
+        return "edge"
+    if value in {"elevenlabs", "eleven-labs"}:
+        return "elevenlabs"
+    if value in {"configured", "config", "default"}:
+        return "configured"
+    return value
+
+
+def _tts_adapter(provider: str | None) -> TtsProviderAdapter:
+    normalized_provider = _normalize_tts_provider(provider) or "edge"
+    adapter = _TTS_ADAPTERS.get(normalized_provider)
+    if adapter is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported TTS provider: {normalized_provider}.",
+        )
+    return adapter
+
+
+def _elevenlabs_config(tts_tool: Any, voice: str | None, speed: float | None, api_key: str | None) -> dict[str, Any]:
+    config = _load_tts_config(tts_tool)
+    provider_config = config.get("elevenlabs") if isinstance(config.get("elevenlabs"), dict) else {}
+    get_env_value = getattr(tts_tool, "get_env_value", None)
+    env_api_key = get_env_value("ELEVENLABS_API_KEY") if callable(get_env_value) else os.environ.get("ELEVENLABS_API_KEY")
+    resolved_api_key = api_key or env_api_key
+    if not resolved_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ElevenLabs API key is required for ElevenLabs TTS.",
+        )
+
+    return {
+        "api_key": str(resolved_api_key),
+        "voice_id": str(voice or provider_config.get("voice_id") or getattr(tts_tool, "DEFAULT_ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")),
+        "model_id": str(provider_config.get("model_id") or getattr(tts_tool, "DEFAULT_ELEVENLABS_STREAMING_MODEL_ID", "eleven_flash_v2_5")),
+        "speed": _elevenlabs_speed(speed),
+    }
+
+
+def _elevenlabs_audio_chunks(tts_tool: Any, *, text: str, voice: str | None, speed: float | None, api_key: str | None) -> Any:
+    options = _elevenlabs_config(tts_tool, voice, speed, api_key)
+    try:
+        ElevenLabs = getattr(tts_tool, "_import_elevenlabs")()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ElevenLabs TTS is not available in this runtime.",
+        ) from exc
+
+    client = ElevenLabs(api_key=options["api_key"])
+    convert_kwargs: dict[str, Any] = {
+        "text": text,
+        "voice_id": options["voice_id"],
+        "model_id": options["model_id"],
+        "output_format": "mp3_44100_128",
+    }
+    if options["speed"] is not None:
+        try:
+            from elevenlabs import VoiceSettings
+
+            convert_kwargs["voice_settings"] = VoiceSettings(speed=options["speed"])
+        except Exception:
+            convert_kwargs["voice_settings"] = {"speed": options["speed"]}
+    return client.text_to_speech.convert(**convert_kwargs)
+
+
+def _synthesize_elevenlabs_to_cache(
+    tts_tool: Any,
+    *,
+    text: str,
+    voice: str | None,
+    speed: float | None,
+    api_key: str | None,
+    cache_key: str,
+) -> Path:
+    cache_dir = _tts_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{cache_key}.mp3"
+    temp_path = cache_dir / f"{cache_key}.{threading.get_ident()}.tmp"
+    completed = False
+
+    try:
+        with temp_path.open("wb") as output:
+            for chunk in _elevenlabs_audio_chunks(tts_tool, text=text, voice=voice, speed=speed, api_key=api_key):
+                if chunk:
+                    output.write(chunk)
+        completed = True
+    finally:
+        if completed and temp_path.exists():
+            temp_path.replace(cache_path)
+            cache_path.touch(exist_ok=True)
+            _prune_tts_cache(cache_dir)
+        elif temp_path.exists():
+            temp_path.unlink()
+
+    return cache_path
+
+
+async def _stream_elevenlabs_to_cache(
+    tts_tool: Any,
+    *,
+    text: str,
+    voice: str | None,
+    speed: float | None,
+    api_key: str | None,
+    cache_key: str,
+) -> AsyncIterator[bytes]:
+    cache_dir = _tts_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{cache_key}.mp3"
+    temp_path = cache_dir / f"{cache_key}.{threading.get_ident()}.tmp"
+    completed = False
+
+    try:
+        with temp_path.open("wb") as output:
+            for chunk in _elevenlabs_audio_chunks(tts_tool, text=text, voice=voice, speed=speed, api_key=api_key):
+                if not chunk:
+                    continue
+                output.write(chunk)
+                yield chunk
+        completed = True
+    finally:
+        if completed and temp_path.exists():
+            temp_path.replace(cache_path)
+            cache_path.touch(exist_ok=True)
+            _prune_tts_cache(cache_dir)
+        elif temp_path.exists():
+            temp_path.unlink()
 
 async def _stream_edge_tts_to_cache(
     edge_tts: Any,
@@ -164,18 +393,30 @@ def _audio_file_response(file_path: Path, *, cache_status: str | None = None) ->
     )
 
 
-def _tts_cache_key(tts_tool: Any, *, text: str, voice: str | None, speed: float | None) -> str:
+def _tts_cache_key(
+    tts_tool: Any,
+    *,
+    text: str,
+    voice: str | None,
+    speed: float | None,
+    provider: str | None = None,
+    api_key: str | None = None,
+) -> str:
     base_config = _load_tts_config(tts_tool)
-    effective_config = (
-        _tts_config_with_voice_override(tts_tool, base_config, voice, speed)
-        if voice
-        else _tts_config_with_edge_language_voice(base_config, text, speed)
-    )
+    normalized_provider = _normalize_tts_provider(provider)
+    if normalized_provider == "elevenlabs":
+        effective_config = _tts_config_with_elevenlabs_options(tts_tool, base_config, voice, speed)
+    elif normalized_provider == "edge" or not voice:
+        effective_config = _tts_config_with_edge_language_voice(base_config, text, speed, voice=voice)
+    else:
+        effective_config = _tts_config_with_voice_override(tts_tool, base_config, voice, speed)
     payload = {
         "version": _TTS_CACHE_SCHEMA_VERSION,
         "text": text,
         "speed": speed,
         "voice": voice,
+        "provider": normalized_provider,
+        "api_key_digest": hashlib.sha256(api_key.encode("utf-8")).hexdigest() if api_key else None,
         "effective_config": effective_config,
     }
     serialized = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
@@ -297,11 +538,11 @@ def _set_provider_option(config: dict[str, Any], provider: str, key: str, value:
     config[provider] = {**provider_config, key: value}
 
 
-def _synthesize_with_edge_language_voice(tts_tool: Any, text: str, speed: float | None) -> dict[str, Any]:
+def _synthesize_with_edge_language_voice(tts_tool: Any, text: str, speed: float | None, voice: str | None = None) -> dict[str, Any]:
     original_loader = tts_tool._load_tts_config
 
     def load_config_with_detected_voice() -> dict[str, Any]:
-        return _tts_config_with_edge_language_voice(original_loader(), text, speed)
+        return _tts_config_with_edge_language_voice(original_loader(), text, speed, voice=voice)
 
     with _TTS_CONFIG_OVERRIDE_LOCK:
         tts_tool._load_tts_config = load_config_with_detected_voice
@@ -311,15 +552,37 @@ def _synthesize_with_edge_language_voice(tts_tool: Any, text: str, speed: float 
             tts_tool._load_tts_config = original_loader
 
 
-def _tts_config_with_edge_language_voice(config: Any, text: str, speed: float | None) -> dict[str, Any]:
+def _tts_config_with_edge_language_voice(config: Any, text: str, speed: float | None, voice: str | None = None) -> dict[str, Any]:
     next_config = dict(config) if isinstance(config, dict) else {}
     next_config["provider"] = "edge"
 
-    voice = _EDGE_VOICE_BY_LANGUAGE.get(_detect_language_code(text))
-    if voice:
-        _set_provider_option(next_config, "edge", "voice", voice)
+    edge_voice = voice or _EDGE_VOICE_BY_LANGUAGE.get(_detect_language_code(text))
+    if edge_voice:
+        _set_provider_option(next_config, "edge", "voice", edge_voice)
     if speed is not None:
         _set_provider_option(next_config, "edge", "speed", speed)
+    return next_config
+
+
+def _tts_config_with_elevenlabs_options(tts_tool: Any, config: Any, voice: str | None, speed: float | None) -> dict[str, Any]:
+    next_config = dict(config) if isinstance(config, dict) else {}
+    provider_config = next_config.get("elevenlabs") if isinstance(next_config.get("elevenlabs"), dict) else {}
+    next_config["provider"] = "elevenlabs"
+    _set_provider_option(
+        next_config,
+        "elevenlabs",
+        "voice_id",
+        voice or provider_config.get("voice_id") or getattr(tts_tool, "DEFAULT_ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB"),
+    )
+    _set_provider_option(
+        next_config,
+        "elevenlabs",
+        "model_id",
+        provider_config.get("model_id") or getattr(tts_tool, "DEFAULT_ELEVENLABS_STREAMING_MODEL_ID", "eleven_flash_v2_5"),
+    )
+    elevenlabs_speed = _elevenlabs_speed(speed)
+    if elevenlabs_speed is not None:
+        _set_provider_option(next_config, "elevenlabs", "speed", elevenlabs_speed)
     return next_config
 
 
@@ -336,6 +599,12 @@ def _edge_rate(speed: float | None) -> str:
         return "+0%"
     percentage = round((speed - 1) * 100)
     return f"{percentage:+d}%"
+
+
+def _elevenlabs_speed(speed: float | None) -> float | None:
+    if speed is None or speed == 1:
+        return None
+    return max(0.7, min(1.2, float(speed)))
 
 
 def _parse_tool_result(raw: str) -> dict[str, Any]:

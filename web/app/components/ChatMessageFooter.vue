@@ -41,14 +41,14 @@ const readAloudCacheStatus = computed(() => playbackCacheStatuses.value[props.me
 const readAloudStatusText = computed(() => {
   if (isGeneratingAloud.value) {
     if (readAloudPlaybackSource.value === 'readable-summary') return 'Preparing readable summary'
-    if (readAloudPlaybackSource.value === 'edge-tts-fallback-generating') return 'Generating Edge TTS fallback audio'
+    if (readAloudPlaybackSource.value === 'tts-fallback-generating') return 'Generating TTS fallback audio'
     return 'Generating speech audio'
   }
 
   if (isReadingAloud.value) {
     if (readAloudPlaybackSource.value === 'web-speech') return 'Reading via Browser Web Speech API'
-    if (readAloudPlaybackSource.value === 'edge-tts-stream') return 'Reading via Edge TTS stream'
-    if (readAloudPlaybackSource.value === 'edge-tts-fallback-blob') return 'Reading via Edge TTS fallback audio'
+    if (readAloudPlaybackSource.value === 'tts-stream') return 'Reading via TTS stream'
+    if (readAloudPlaybackSource.value === 'tts-fallback-blob') return 'Reading via TTS fallback audio'
     return 'Reading aloud'
   }
 

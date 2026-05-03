@@ -153,6 +153,46 @@ def test_streams_edge_speech_and_reuses_server_cache(client, monkeypatch):
     assert calls == [{"text": "Stream this response.", "voice": "en-US-BrianNeural", "rate": "+25%"}]
 
 
+def test_streams_elevenlabs_speech_with_request_api_key_and_reuses_cache(client, monkeypatch):
+    import tools.tts_tool as tts_tool
+
+    calls = []
+
+    class FakeTextToSpeech:
+        def convert(self, **kwargs):
+            calls.append(kwargs)
+            yield b"eleven "
+            yield b"mp3"
+
+    class FakeElevenLabs:
+        def __init__(self, *, api_key):
+            calls.append({"api_key": api_key})
+            self.text_to_speech = FakeTextToSpeech()
+
+    monkeypatch.setattr(tts_tool, "_load_tts_config", lambda: {"elevenlabs": {"voice_id": "configured", "model_id": "eleven_flash_v2_5"}})
+    monkeypatch.setattr(tts_tool, "_import_elevenlabs", lambda: FakeElevenLabs)
+
+    payload = {"text": "Stream with ElevenLabs.", "provider": "elevenlabs", "apiKey": "secret", "voice": "voice-1", "speed": 1.25}
+    first = client.post("/api/web-chat/tts/stream", json=payload)
+    second = client.post("/api/web-chat/tts/stream", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.headers["content-type"].startswith("audio/mpeg")
+    assert first.content == b"eleven mp3"
+    assert second.content == b"eleven mp3"
+    assert calls == [
+        {"api_key": "secret"},
+        {
+            "text": "Stream with ElevenLabs.",
+            "voice_id": "voice-1",
+            "model_id": "eleven_flash_v2_5",
+            "output_format": "mp3_44100_128",
+            "voice_settings": {"speed": 1.2},
+        },
+    ]
+
+
 def test_synthesizes_edge_speech_with_detected_language_voice(client, tmp_path, monkeypatch):
     import tools.tts_tool as tts_tool
 

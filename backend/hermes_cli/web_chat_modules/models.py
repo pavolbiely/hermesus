@@ -208,6 +208,8 @@ class SynthesizeSpeechRequest(BaseModel):
     text: str = Field(min_length=1, max_length=65536)
     voice: str | None = Field(default=None, max_length=512)
     speed: float | None = Field(default=None, ge=0.5, le=2.0)
+    provider: str | None = Field(default=None, max_length=64)
+    apiKey: str | None = Field(default=None, max_length=4096)
 
 
 class ReadAloudSummaryRequest(BaseModel):
