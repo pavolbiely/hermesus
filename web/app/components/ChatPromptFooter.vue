@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { WebChatAttachment, WebChatCommand, WebChatModelCapability, WebChatWorkspace } from '~/types/web-chat'
+import { readAloudElevenLabsApiKey, voiceInputProvider } from '~/utils/readAloudPreferences'
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance
 type SpeechRecognitionResultLike = { isFinal: boolean, 0: { transcript: string } }
@@ -90,8 +91,12 @@ const emit = defineEmits<{
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const workspaceInvalid = ref(false)
-const voiceStatus = ref<'idle' | 'listening' | 'error'>('idle')
+const voiceStatus = ref<'idle' | 'listening' | 'transcribing' | 'error'>('idle')
 const recognition = ref<SpeechRecognitionInstance | null>(null)
+const voiceRecorder = ref<MediaRecorder | null>(null)
+const voiceStream = ref<MediaStream | null>(null)
+const voiceChunks = ref<Blob[]>([])
+const api = useHermesApi()
 const controlsDisabled = computed(() => props.submitStatus === 'submitted' || props.submitStatus === 'streaming')
 const contextUsagePercent = computed(() => {
   const usage = props.contextUsage
@@ -133,8 +138,12 @@ const {
   reasoningItems
 } = useChatPromptSelectorState(props, emit)
 const voiceIsListening = computed(() => voiceStatus.value === 'listening')
-const voiceTooltip = computed(() => voiceIsListening.value ? 'Stop voice input' : 'Dictate by voice')
-const voiceAriaLabel = computed(() => voiceIsListening.value ? 'Stop voice input' : 'Dictate by voice')
+const voiceIsBusy = computed(() => voiceStatus.value === 'listening' || voiceStatus.value === 'transcribing')
+const voiceTooltip = computed(() => {
+  if (voiceStatus.value === 'transcribing') return 'Transcribing voice input'
+  return voiceIsListening.value ? 'Stop voice input' : 'Dictate by voice'
+})
+const voiceAriaLabel = computed(() => voiceTooltip.value)
 
 function formatContextTokens(value: number) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
@@ -164,10 +173,23 @@ function onFileChange(event: Event) {
   if (files.length) emit('attachFiles', files)
 }
 
+function stopVoiceStream() {
+  voiceStream.value?.getTracks().forEach((track) => track.stop())
+  voiceStream.value = null
+}
+
 function stopVoice() {
+  const recorder = voiceRecorder.value
+  if (recorder) {
+    if (recorder.state !== 'inactive') recorder.stop()
+    voiceRecorder.value = null
+    return
+  }
+
   const instance = recognition.value
   if (!instance) {
     voiceStatus.value = 'idle'
+    stopVoiceStream()
     return
   }
 
@@ -179,12 +201,81 @@ function stopVoice() {
   voiceStatus.value = 'idle'
 }
 
-function toggleVoice() {
+async function toggleVoice() {
+  if (voiceStatus.value === 'transcribing') return
   if (voiceStatus.value === 'listening') {
     stopVoice()
     return
   }
 
+  if (voiceInputProvider() === 'elevenlabs') {
+    await startElevenLabsVoiceInput()
+    return
+  }
+
+  startBrowserVoiceInput()
+}
+
+async function startElevenLabsVoiceInput() {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    voiceStatus.value = 'error'
+    emit('voiceError', 'ElevenLabs voice input needs browser microphone recording support.')
+    return
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const recorder = new MediaRecorder(stream)
+    voiceStream.value = stream
+    voiceRecorder.value = recorder
+    voiceChunks.value = []
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) voiceChunks.value.push(event.data)
+    }
+    recorder.onerror = () => {
+      voiceRecorder.value = null
+      stopVoiceStream()
+      voiceStatus.value = 'error'
+      emit('voiceError', 'Could not capture voice input.')
+    }
+    recorder.onstop = async () => {
+      const chunks = voiceChunks.value
+      voiceRecorder.value = null
+      voiceChunks.value = []
+      stopVoiceStream()
+      if (!chunks.length) {
+        voiceStatus.value = 'idle'
+        return
+      }
+
+      voiceStatus.value = 'transcribing'
+      try {
+        const audio = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
+        const result = await api.transcribeSpeechInput(audio, {
+          provider: 'elevenlabs',
+          apiKey: readAloudElevenLabsApiKey(),
+          language: navigator.language || null
+        })
+        const text = result.text.trim()
+        if (text) emit('voiceText', text)
+        else emit('voiceError', 'ElevenLabs returned an empty transcript.')
+        voiceStatus.value = 'idle'
+      } catch {
+        voiceStatus.value = 'error'
+        emit('voiceError', 'Could not transcribe voice input with ElevenLabs.')
+      }
+    }
+    voiceStatus.value = 'listening'
+    recorder.start()
+  } catch {
+    voiceRecorder.value = null
+    stopVoiceStream()
+    voiceStatus.value = 'error'
+    emit('voiceError', 'Could not access the microphone.')
+  }
+}
+
+function startBrowserVoiceInput() {
   const SpeechRecognition = (window as SpeechWindow).SpeechRecognition || (window as SpeechWindow).webkitSpeechRecognition
   if (!SpeechRecognition) {
     voiceStatus.value = 'error'
@@ -220,6 +311,12 @@ function toggleVoice() {
 }
 
 onBeforeUnmount(() => {
+  const recorder = voiceRecorder.value
+  if (recorder && recorder.state !== 'inactive') recorder.stop()
+  voiceRecorder.value = null
+  voiceChunks.value = []
+  stopVoiceStream()
+
   const instance = recognition.value
   if (!instance) return
 
@@ -267,10 +364,11 @@ onBeforeUnmount(() => {
         <UButton
           :aria-label="voiceAriaLabel"
           icon="i-lucide-mic"
-          :color="voiceIsListening ? 'error' : 'neutral'"
-          :variant="voiceIsListening ? 'soft' : 'ghost'"
+          :color="voiceIsBusy ? 'error' : 'neutral'"
+          :variant="voiceIsBusy ? 'soft' : 'ghost'"
           size="sm"
-          :disabled="controlsDisabled"
+          :disabled="controlsDisabled || voiceStatus === 'transcribing'"
+          :loading="voiceStatus === 'transcribing'"
           :class="voiceIsListening ? 'animate-pulse' : undefined"
           @click="toggleVoice"
         />

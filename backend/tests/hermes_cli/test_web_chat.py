@@ -68,6 +68,42 @@ def test_synthesizes_speech_with_request_voice_override(client, tmp_path, monkey
     assert tts_tool._load_tts_config() == {"provider": "openai", "openai": {"voice": "alloy"}}
 
 
+def test_transcribes_speech_input_with_elevenlabs_request_api_key(client, monkeypatch):
+    import tools.tts_tool as tts_tool
+
+    calls = []
+
+    class FakeSpeechToText:
+        def convert(self, **kwargs):
+            calls.append(kwargs)
+            return types.SimpleNamespace(text="hello from voice")
+
+    class FakeElevenLabs:
+        def __init__(self, *, api_key):
+            calls.append({"api_key": api_key})
+            self.speech_to_text = FakeSpeechToText()
+
+    monkeypatch.setattr(tts_tool, "_import_elevenlabs", lambda: FakeElevenLabs)
+    monkeypatch.setattr(tts_tool, "_load_tts_config", lambda: {"elevenlabs": {"stt_model_id": "scribe_v1"}})
+
+    response = client.post(
+        "/api/web-chat/speech-input/transcribe",
+        data={"provider": "elevenlabs", "apiKey": "dummy-api-key", "language": "sk-SK"},
+        files={"file": ("voice-input.webm", b"fake webm", "audio/webm")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "hello from voice", "provider": "elevenlabs"}
+    assert calls == [
+        {"api_key": "dummy-api-key"},
+        {
+            "file": ("voice-input.webm", b"fake webm", "audio/webm"),
+            "model_id": "scribe_v1",
+            "language_code": "sk",
+        },
+    ]
+
+
 def test_synthesized_speech_uses_server_cache(client, tmp_path, monkeypatch):
     import tools.tts_tool as tts_tool
 
@@ -181,16 +217,16 @@ def test_streams_elevenlabs_speech_with_request_api_key_and_reuses_cache(client,
     assert first.headers["content-type"].startswith("audio/mpeg")
     assert first.content == b"eleven mp3"
     assert second.content == b"eleven mp3"
-    assert calls == [
-        {"api_key": "secret"},
-        {
-            "text": "Stream with ElevenLabs.",
-            "voice_id": "voice-1",
-            "model_id": "eleven_flash_v2_5",
-            "output_format": "mp3_44100_128",
-            "voice_settings": {"speed": 1.2},
-        },
-    ]
+    assert calls[0] == {"api_key": payload["apiKey"]}
+    convert_call = calls[1]
+    voice_settings = convert_call.pop("voice_settings")
+    assert convert_call == {
+        "text": "Stream with ElevenLabs.",
+        "voice_id": "voice-1",
+        "model_id": "eleven_flash_v2_5",
+        "output_format": "mp3_44100_128",
+    }
+    assert getattr(voice_settings, "speed", None) == 1.2
 
 
 def test_synthesizes_edge_speech_with_detected_language_voice(client, tmp_path, monkeypatch):

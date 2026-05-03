@@ -12,6 +12,7 @@ from hermes_state import SessionDB
 
 from . import file_previews, session_handlers
 from .read_aloud_summaries import generate_read_aloud_summary
+from .speech_input import transcribe_speech_input_response
 from .tts import stream_speech_response, synthesize_speech_response
 from .models import (
     CreateSessionRequest,
@@ -38,6 +39,7 @@ from .models import (
     StartRunResponse,
     SteerRunRequest,
     SynthesizeSpeechRequest,
+    SpeechInputTranscriptionResponse,
     SteerRunResponse,
     StopRunResponse,
     SwitchProfileRequest,
@@ -201,6 +203,18 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
                 provider=payload.provider,
                 reasoning_effort=payload.reasoningEffort,
             )
+        )
+
+    @router.post("/speech-input/transcribe", response_model=SpeechInputTranscriptionResponse)
+    async def transcribe_speech_input(
+        file: UploadFile = File(...),
+        provider: str = Form(...),
+        apiKey: str | None = Form(default=None),
+        language: str | None = Form(default=None),
+    ) -> SpeechInputTranscriptionResponse:
+        return SpeechInputTranscriptionResponse(
+            text=await transcribe_speech_input_response(file, provider=provider, api_key=apiKey, language=language),
+            provider=provider,
         )
 
     @router.get("/profiles", response_model=WebChatProfilesResponse)

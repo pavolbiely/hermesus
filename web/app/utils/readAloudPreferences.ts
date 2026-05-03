@@ -1,15 +1,18 @@
 export type ReadAloudContentMode = 'full' | 'summary'
 export type ReadAloudEngine = 'web-speech' | 'edge-tts' | 'elevenlabs'
+export type VoiceInputProvider = 'browser' | 'elevenlabs'
 
 const legacyBackendEngine = 'backend-tts'
 const autoReadPreferenceKey = 'hermes.readAloud.autoReadResponses'
 const contentModePreferenceKey = 'hermes.readAloud.contentMode'
 const enginePreferenceKey = 'hermes.readAloud.engine'
 const elevenLabsApiKeyPreferenceKey = 'hermes.readAloud.elevenLabsApiKey'
+const voiceInputProviderPreferenceKey = 'hermes.voiceInput.provider'
 const speedPreferenceKey = 'hermes.readAloud.speed'
 const webSpeechVoicePreferenceKey = 'hermes.readAloud.webSpeechVoiceURI'
 const defaultContentMode: ReadAloudContentMode = 'full'
 const defaultEngine: ReadAloudEngine = 'web-speech'
+const defaultVoiceInputProvider: VoiceInputProvider = 'browser'
 const defaultSpeed = 1
 const minSpeed = 0.5
 const maxSpeed = 2
@@ -24,6 +27,10 @@ function isReadAloudContentMode(value: string | null): value is ReadAloudContent
 
 function isReadAloudEngine(value: string | null): value is ReadAloudEngine {
   return value === 'web-speech' || value === 'edge-tts' || value === 'elevenlabs'
+}
+
+function isVoiceInputProvider(value: string | null): value is VoiceInputProvider {
+  return value === 'browser' || value === 'elevenlabs'
 }
 
 function storedPreference(key: string) {
@@ -75,6 +82,15 @@ export function readAloudElevenLabsApiKey() {
 
 export function setReadAloudElevenLabsApiKey(apiKey: string | null) {
   setStoredPreference(elevenLabsApiKeyPreferenceKey, apiKey)
+}
+
+export function voiceInputProvider(): VoiceInputProvider {
+  const stored = storedPreference(voiceInputProviderPreferenceKey)
+  return isVoiceInputProvider(stored) ? stored : defaultVoiceInputProvider
+}
+
+export function setVoiceInputProvider(provider: VoiceInputProvider) {
+  setStoredPreference(voiceInputProviderPreferenceKey, provider === defaultVoiceInputProvider ? null : provider)
 }
 
 export function readAloudSpeed() {

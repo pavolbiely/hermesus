@@ -10,6 +10,7 @@ import type {
   ReorderWorkspacesRequest,
   SaveWorkspaceRequest,
   SynthesizeSpeechRequest,
+  SpeechInputTranscriptionResponse,
   ReadAloudSummaryRequest,
   ReadAloudSummaryResponse,
   SessionDetailResponse,
@@ -138,6 +139,18 @@ export function useHermesApi() {
       method: 'POST',
       body: payload
     }),
+    transcribeSpeechInput: (audio: Blob, options: { provider: 'elevenlabs', apiKey?: string | null, language?: string | null }) => {
+      const form = new FormData()
+      const extension = audio.type.includes('mp4') ? 'm4a' : audio.type.includes('ogg') ? 'ogg' : 'webm'
+      form.set('file', audio, `voice-input.${extension}`)
+      form.set('provider', options.provider)
+      if (options.apiKey) form.set('apiKey', options.apiKey)
+      if (options.language) form.set('language', options.language)
+      return request<SpeechInputTranscriptionResponse>('/api/web-chat/speech-input/transcribe', {
+        method: 'POST',
+        body: form
+      })
+    },
     executeCommand: (payload: ExecuteCommandRequest) => request<ExecuteCommandResponse>('/api/web-chat/commands/execute', {
       method: 'POST',
       body: payload

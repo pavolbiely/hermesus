@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { DesktopNotificationPermission } from '~/utils/desktopNotifications'
-import type { ReadAloudContentMode, ReadAloudEngine } from '~/utils/readAloudPreferences'
+import type { ReadAloudContentMode, ReadAloudEngine, VoiceInputProvider } from '~/utils/readAloudPreferences'
 import {
   desktopNotificationPermission,
   desktopNotificationsEnabled,
@@ -20,7 +20,9 @@ import {
   setReadAloudElevenLabsApiKey,
   setReadAloudEngine,
   setReadAloudSpeed,
-  setReadAloudWebSpeechVoiceURI
+  setReadAloudWebSpeechVoiceURI,
+  setVoiceInputProvider,
+  voiceInputProvider
 } from '~/utils/readAloudPreferences'
 
 const props = defineProps<{
@@ -44,6 +46,7 @@ const speechEngine = ref<ReadAloudEngine>('web-speech')
 const speechContentMode = ref<ReadAloudContentMode>('full')
 const speechSpeed = ref(1)
 const autoReadResponses = ref(false)
+const voiceInput = ref<VoiceInputProvider>('browser')
 const elevenLabsApiKey = ref('')
 const elevenLabsApiKeyVisible = ref(false)
 const webSpeechVoiceURI = ref<string | null>(null)
@@ -79,6 +82,19 @@ const speechContentModeItems = [
     description: 'Ask Hermes to rewrite the response into natural spoken prose and avoid noisy code, file paths, CSS classes, and raw technical output.'
   }
 ] satisfies Array<{ label: string, value: ReadAloudContentMode, description: string }>
+
+const voiceInputItems = [
+  {
+    label: 'Browser voice input',
+    value: 'browser',
+    description: 'Uses the browser Speech Recognition API. Fast, local to the browser integration, and no backend upload.'
+  },
+  {
+    label: 'ElevenLabs speech input',
+    value: 'elevenlabs',
+    description: 'Records a short clip and asks ElevenLabs to transcribe it through Hermes. Requires an ElevenLabs API key.'
+  }
+] satisfies Array<{ label: string, value: VoiceInputProvider, description: string }>
 
 const speechSpeedItems = [
   { label: '0.5× — very slow', value: 0.5 },
@@ -136,6 +152,7 @@ function refreshState() {
   speechContentMode.value = readAloudContentMode()
   speechSpeed.value = readAloudSpeed()
   autoReadResponses.value = readAloudAutoReadResponsesEnabled()
+  voiceInput.value = voiceInputProvider()
   webSpeechVoiceURI.value = readAloudWebSpeechVoiceURI()
   elevenLabsApiKey.value = readAloudElevenLabsApiKey() ?? ''
   elevenLabsApiKeyVisible.value = false
@@ -160,6 +177,11 @@ function updateSpeechSpeed(value: number) {
 function updateAutoReadResponses(value: boolean) {
   autoReadResponses.value = value
   setReadAloudAutoReadResponsesEnabled(value)
+}
+
+function updateVoiceInputProvider(value: VoiceInputProvider) {
+  voiceInput.value = value
+  setVoiceInputProvider(value)
 }
 
 function updateWebSpeechVoice(value: string) {
@@ -333,7 +355,7 @@ onBeforeUnmount(() => {
             <UFormField
               name="elevenLabsApiKey"
               label="ElevenLabs API key"
-              description="Stored in this browser and sent only with ElevenLabs TTS requests. Leave empty to use ELEVENLABS_API_KEY from the Hermes runtime."
+              description="Stored in this browser and sent only with ElevenLabs TTS or speech-input requests. Leave empty to use ELEVENLABS_API_KEY from the Hermes runtime."
             >
               <UInput
                 :model-value="elevenLabsApiKey"
@@ -360,6 +382,64 @@ onBeforeUnmount(() => {
               variant="subtle"
               title="ElevenLabs streaming"
               description="Hermes streams ElevenLabs MP3 audio through the same read-aloud pipeline and falls back to generated audio if streaming playback is not available."
+            />
+          </div>
+        </section>
+
+        <USeparator />
+
+        <section class="space-y-3">
+          <div class="space-y-1">
+            <h3 class="text-sm font-medium text-highlighted">
+              Voice input
+            </h3>
+            <p class="text-sm text-muted">
+              Choose how the microphone button turns speech into text in the composer.
+            </p>
+          </div>
+
+          <UFormField name="voiceInputProvider" label="Voice input provider">
+            <USelect
+              :model-value="voiceInput"
+              :items="voiceInputItems"
+              value-key="value"
+              class="w-full"
+              @update:model-value="updateVoiceInputProvider"
+            />
+          </UFormField>
+
+          <div v-if="voiceInput === 'elevenlabs'" class="space-y-3">
+            <UFormField
+              v-if="speechEngine !== 'elevenlabs'"
+              name="elevenLabsInputApiKey"
+              label="ElevenLabs API key"
+              description="Stored in this browser and sent only with ElevenLabs TTS or speech-input requests. Leave empty to use ELEVENLABS_API_KEY from the Hermes runtime."
+            >
+              <UInput
+                :model-value="elevenLabsApiKey"
+                :type="elevenLabsApiKeyVisible ? 'text' : 'password'"
+                placeholder="sk_..."
+                autocomplete="off"
+                class="w-full"
+                @update:model-value="updateElevenLabsApiKey"
+              >
+                <template #trailing>
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    size="xs"
+                    :icon="elevenLabsApiKeyVisible ? 'i-lucide-eye-off' : 'i-lucide-eye'"
+                    :aria-label="elevenLabsApiKeyVisible ? 'Hide ElevenLabs API key' : 'Show ElevenLabs API key'"
+                    @click="toggleElevenLabsApiKeyVisible"
+                  />
+                </template>
+              </UInput>
+            </UFormField>
+            <UAlert
+              color="neutral"
+              variant="subtle"
+              title="ElevenLabs transcription"
+              description="Hermes records a short browser audio clip, sends it to ElevenLabs speech-to-text, and inserts the transcript into the composer. Browser voice input remains the local default fallback."
             />
           </div>
         </section>

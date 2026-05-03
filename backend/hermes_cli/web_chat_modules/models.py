@@ -223,6 +223,11 @@ class ReadAloudSummaryResponse(BaseModel):
     text: str
 
 
+class SpeechInputTranscriptionResponse(BaseModel):
+    text: str
+    provider: str
+
+
 class WebChatUpdateStatusResponse(BaseModel):
     updateAvailable: bool
     runtimeOutOfSync: bool

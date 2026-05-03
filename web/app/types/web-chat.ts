@@ -213,6 +213,11 @@ export type SynthesizeSpeechRequest = {
   apiKey?: string | null
 }
 
+export type SpeechInputTranscriptionResponse = {
+  text: string
+  provider: string
+}
+
 export type ReadAloudSummaryRequest = {
   text: string
   model?: string | null
