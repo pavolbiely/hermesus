@@ -32,6 +32,8 @@ const OTHER_CHATS_GROUP_ID = '__other__'
 const COLLAPSED_GROUPS_STORAGE_KEY = 'hermes-chat-collapsed-session-groups'
 
 const openMenuSessionId = ref<string | null>(null)
+const openPreviewSessionId = ref<string | null>(null)
+const suppressPreviewOpenUntil = ref(0)
 const api = useHermesApi()
 type PreviewState = {
   data?: WebChatSessionPreviewResponse
@@ -88,11 +90,32 @@ function suppressNativeTitleTooltip(event: Event) {
   }
 }
 
-function loadSessionPreviewOnOpen(session: WebChatSession, open: boolean) {
-  if (!open) return
+function handleSessionPreviewOpen(session: WebChatSession, open: boolean) {
+  if (!open) {
+    if (openPreviewSessionId.value === session.id) {
+      openPreviewSessionId.value = null
+    }
+    return
+  }
+
+  if (Date.now() < suppressPreviewOpenUntil.value) {
+    openPreviewSessionId.value = null
+    return
+  }
+
+  openPreviewSessionId.value = session.id
   emit('prefetchSession', session)
   if (!previewState(session).data && !previewState(session).loading) {
     void loadSessionPreview(session.id)
+  }
+}
+
+function openSessionFromPointer(session: WebChatSession, event: MouseEvent) {
+  suppressPreviewOpenUntil.value = Date.now() + 1500
+  openPreviewSessionId.value = null
+  emit('openSession', session)
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.blur()
   }
 }
 
@@ -564,7 +587,8 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
           :open-delay="1000"
           :close-delay="100"
           :content="{ side: 'right', align: 'start', sideOffset: 8 }"
-          @update:open="loadSessionPreviewOnOpen(session, $event)"
+          :open="openPreviewSessionId === session.id"
+          @update:open="handleSessionPreviewOpen(session, $event)"
         >
           <div
             role="button"
@@ -578,7 +602,7 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
             @pointerenter.capture="suppressNativeTitleTooltip"
             @mouseenter.capture="suppressNativeTitleTooltip"
             @focus.capture="suppressNativeTitleTooltip"
-            @click="emit('openSession', session)"
+            @click="openSessionFromPointer(session, $event)"
             @keydown.enter.prevent="emit('openSession', session)"
             @keydown.space.prevent="emit('openSession', session)"
             @dblclick.stop.prevent="isActiveSession(session) && renameSession(session)"
