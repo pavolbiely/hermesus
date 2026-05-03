@@ -9,7 +9,7 @@ from uuid import uuid4
 from hermes_state import SessionDB
 
 from .models import SessionDetailResponse, WebChatSession, WebChatWorkspaceChanges, WebChatMessage
-from .sessions import MESSAGE_ITEMS_FIELD
+from .sessions import MESSAGE_ITEMS_FIELD, session_with_visible_root_title
 
 
 def title_from_message(message: str) -> str:
@@ -125,7 +125,13 @@ def session_with_tip_config(db: SessionDB, session: dict[str, Any]) -> dict[str,
     if not tip_session:
         return session
 
-    return {**session, "model_config": tip_session.get("model_config")}
+    root_session_id = session.get("_lineage_root_id")
+    root_session = db._get_session_rich_row(str(root_session_id)) if root_session_id else None
+    visible_session = session_with_visible_root_title(db, session)
+    if root_session and root_session.get("title"):
+        visible_session = {**visible_session, "title": root_session.get("title")}
+
+    return {**visible_session, "model_config": tip_session.get("model_config")}
 
 
 def list_non_empty_sessions(

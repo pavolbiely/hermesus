@@ -86,6 +86,42 @@ def session_archived(session: dict[str, Any] | None) -> bool:
     return session_model_config(session).get("archived") is True
 
 
+def is_compression_continuation(parent: dict[str, Any], child: dict[str, Any]) -> bool:
+    parent_ended_at = parent.get("ended_at")
+    child_started_at = child.get("started_at")
+    return (
+        parent.get("end_reason") == "compression"
+        and isinstance(parent_ended_at, (int, float))
+        and isinstance(child_started_at, (int, float))
+        and child_started_at >= parent_ended_at
+    )
+
+
+def compression_root_session(db: SessionDB, session: dict[str, Any]) -> dict[str, Any]:
+    current = session
+    seen = {str(session.get("id"))}
+    for _ in range(100):
+        parent_id = current.get("parent_session_id")
+        if not parent_id or str(parent_id) in seen:
+            return current
+
+        parent = db._get_session_rich_row(str(parent_id))
+        if not parent or not is_compression_continuation(parent, current):
+            return current
+
+        seen.add(str(parent_id))
+        current = parent
+
+    return current
+
+
+def session_with_visible_root_title(db: SessionDB, session: dict[str, Any]) -> dict[str, Any]:
+    root = compression_root_session(db, session)
+    if root.get("id") == session.get("id"):
+        return session
+    return {**session, "title": root.get("title") or session.get("title")}
+
+
 def session_restored_at(session: dict[str, Any] | None) -> float | None:
     value = session_model_config(session).get("restoredAt")
     return float(value) if isinstance(value, (int, float)) else None

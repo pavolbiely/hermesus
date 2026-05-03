@@ -22,7 +22,13 @@ from .models import (
     WebChatMessage,
     WebChatWorkspaceChanges,
 )
-from .sessions import session_archived, session_workspace
+from .sessions import (
+    compression_root_session,
+    is_compression_continuation,
+    session_archived,
+    session_with_visible_root_title,
+    session_workspace,
+)
 
 
 def list_sessions_response(
@@ -58,7 +64,7 @@ def create_session_response(
     session = get_session_or_404(db, session_id)
     messages = db.get_messages(session_id)
     return SessionDetailResponse(
-        session=serialize_session(session),
+        session=serialize_session(session_with_visible_root_title(db, session)),
         messages=serialize_messages(messages),
         compressionCount=compression_count(db, session),
     )
@@ -83,8 +89,9 @@ def rename_session_response(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No session changes provided")
 
     if payload.title is not None:
+        title_session = compression_root_session(db, session)
         try:
-            db.set_session_title(session_id, payload.title)
+            db.set_session_title(str(title_session.get("id") or session_id), payload.title)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -123,7 +130,7 @@ def rename_session_response(
 
     session = get_session_or_404(db, session_id)
     return SessionDetailResponse(
-        session=serialize_session(session),
+        session=serialize_session(session_with_visible_root_title(db, session)),
         messages=serialize_messages(db.get_messages(session_id)),
         compressionCount=compression_count(db, session),
     )
@@ -133,14 +140,7 @@ def compression_count(db: SessionDB, session: dict[str, Any]) -> int:
     """Count compression continuations from the logical conversation root to this session."""
     count = 0
     for parent, child in compression_lineage_pairs(db, session):
-        parent_ended_at = parent.get("ended_at")
-        child_started_at = child.get("started_at")
-        if (
-            parent.get("end_reason") == "compression"
-            and isinstance(parent_ended_at, (int, float))
-            and isinstance(child_started_at, (int, float))
-            and child_started_at >= parent_ended_at
-        ):
+        if is_compression_continuation(parent, child):
             count += 1
 
     return count
@@ -232,7 +232,7 @@ def edit_message_response(
     edit_user_message(db, session_id, message_id, payload.content)
     session = get_session_or_404(db, session_id)
     return SessionDetailResponse(
-        session=serialize_session(session),
+        session=serialize_session(session_with_visible_root_title(db, session)),
         messages=serialize_messages(db.get_messages(session_id)),
         compressionCount=compression_count(db, session),
     )
@@ -282,7 +282,7 @@ def get_session_response(
             if lineage_session_id:
                 changes_by_message.update(session_git_changes_by_message(db, str(lineage_session_id)))
     return SessionDetailResponse(
-        session=serialize_session(session),
+        session=serialize_session(session_with_visible_root_title(db, session)),
         messages=serialize_messages(messages, changes_by_message=changes_by_message),
         activeRun=active_run,
         isolatedWorkspace=isolated_worktree_for_session(db, session_id) if isolated_worktree_for_session else None,

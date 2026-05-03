@@ -78,6 +78,16 @@ function sessionPreviewSummary(session: WebChatSession) {
   return state.data?.summary?.trim() || ''
 }
 
+function suppressNativeTitleTooltip(event: Event) {
+  const element = event.currentTarget
+  if (!(element instanceof HTMLElement)) return
+
+  element.setAttribute('title', '')
+  for (const titledElement of element.querySelectorAll<HTMLElement>('[title]')) {
+    titledElement.setAttribute('title', '')
+  }
+}
+
 function loadSessionPreviewOnOpen(session: WebChatSession, open: boolean) {
   if (!open) return
   emit('prefetchSession', session)
@@ -559,11 +569,15 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
           <div
             role="button"
             tabindex="0"
+            title=""
             class="group relative flex h-8 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-left text-sm outline-none hover:bg-elevated focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 focus-within:bg-elevated"
             :class="[
               isActiveSession(session) ? 'bg-elevated text-highlighted' : 'text-default',
               isUnreadSession(session) ? 'font-bold text-black dark:text-white' : 'font-normal'
             ]"
+            @pointerenter.capture="suppressNativeTitleTooltip"
+            @mouseenter.capture="suppressNativeTitleTooltip"
+            @focus.capture="suppressNativeTitleTooltip"
             @click="emit('openSession', session)"
             @keydown.enter.prevent="emit('openSession', session)"
             @keydown.space.prevent="emit('openSession', session)"
@@ -581,7 +595,7 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
                 class="size-3.5 text-muted"
               />
             </span>
-            <span class="min-w-0 flex-1 truncate">
+            <span class="min-w-0 flex-1 truncate" title="">
               {{ sessionTitle(session) }}
             </span>
 

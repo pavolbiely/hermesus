@@ -14,6 +14,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const activeChatRuns = useActiveChatRuns()
+const sessionTitleOverrides = useSessionTitleOverrides()
 const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
 
@@ -476,7 +477,9 @@ async function saveRename() {
 
   pendingSessionId.value = session.id
   try {
-    await api.renameSession(session.id, title)
+    const response = await api.renameSession(session.id, title)
+    sessionTitleOverrides.set(response.session.id, response.session.title || title)
+    activeChatRuns.setSessionTitle(response.session.id, response.session.title || title)
     await refresh()
     cancelRename()
   } catch (err) {

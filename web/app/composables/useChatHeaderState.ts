@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import type { SessionDetailResponse } from '~/types/web-chat'
+import { resolveChatHeaderTitle } from '~/utils/chatHeaderTitle'
 
 function pathBaseName(path?: string | null) {
   if (!path) return null
@@ -21,11 +22,17 @@ export function useChatHeaderState({
   hasSession,
   activeChatRuns
 }: ChatHeaderStateOptions) {
+  const titleOverrides = useSessionTitleOverrides()
+
   const title = computed(() => {
-    if (isLoadingSession.value) return 'Loading chat…'
-    if (sessionError.value || !hasSession.value) return 'Chat unavailable'
     const session = displayedData.value?.session
-    return session?.title || session?.preview || 'Chat'
+    return resolveChatHeaderTitle({
+      isLoadingSession: isLoadingSession.value,
+      sessionError: sessionError.value,
+      hasSession: hasSession.value,
+      session,
+      titleOverride: titleOverrides.get(session?.id)
+    })
   })
 
   const workspaceStatus = computed(() => {

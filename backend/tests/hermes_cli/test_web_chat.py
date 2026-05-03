@@ -410,6 +410,49 @@ def test_renames_session_title(client):
     assert db.get_session("session-rename")["title"] == "New title"
 
 
+def test_compressed_chat_keeps_root_title_visible(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("root-session", source="web-chat")
+    db.set_session_title("root-session", "Loyalty program: konfigurátor")
+    db.append_message("root-session", "user", "Start loyalty config")
+    db.end_session("root-session", "compression")
+    db.create_session("tip-session", source="web-chat", parent_session_id="root-session")
+    db.set_session_title("tip-session", "Loyalty program: konfigurátor #2")
+    db.append_message("tip-session", "assistant", "Continuing after compression")
+
+    listed = client.get("/api/web-chat/sessions")
+    detail = client.get("/api/web-chat/sessions/tip-session")
+
+    assert listed.status_code == 200
+    assert listed.json()["sessions"][0]["id"] == "tip-session"
+    assert listed.json()["sessions"][0]["title"] == "Loyalty program: konfigurátor"
+    assert detail.status_code == 200
+    assert detail.json()["session"]["title"] == "Loyalty program: konfigurátor"
+
+
+def test_renames_compressed_chat_root_title_from_tip_session(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("root-session", source="web-chat")
+    db.set_session_title("root-session", "Loyalty program: konfigurátor")
+    db.append_message("root-session", "user", "Start loyalty config")
+    db.end_session("root-session", "compression")
+    db.create_session("tip-session", source="web-chat", parent_session_id="root-session")
+    db.set_session_title("tip-session", "Loyalty program: konfigurátor #2")
+    db.append_message("tip-session", "assistant", "Continuing after compression")
+
+    response = client.patch("/api/web-chat/sessions/tip-session", json={"title": "Loyalty configurator"})
+
+    assert response.status_code == 200
+    assert response.json()["session"]["id"] == "tip-session"
+    assert response.json()["session"]["title"] == "Loyalty configurator"
+    assert db.get_session("root-session")["title"] == "Loyalty configurator"
+    assert db.get_session("tip-session")["title"] == "Loyalty program: konfigurátor #2"
+
+
 def test_pins_and_unpins_session(client):
     from hermes_state import SessionDB
 
