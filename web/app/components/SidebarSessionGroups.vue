@@ -32,6 +32,7 @@ const OTHER_CHATS_GROUP_ID = '__other__'
 const COLLAPSED_GROUPS_STORAGE_KEY = 'hermes-chat-collapsed-session-groups'
 
 const openMenuSessionId = ref<string | null>(null)
+const hoveredPreviewSessionId = ref<string | null>(null)
 const openPreviewSessionId = ref<string | null>(null)
 const suppressPreviewOpenUntil = ref(0)
 const api = useHermesApi()
@@ -90,15 +91,22 @@ function suppressNativeTitleTooltip(event: Event) {
   }
 }
 
+function closeSessionPreview(sessionId?: string) {
+  if (!sessionId || hoveredPreviewSessionId.value === sessionId) {
+    hoveredPreviewSessionId.value = null
+  }
+  if (!sessionId || openPreviewSessionId.value === sessionId) {
+    openPreviewSessionId.value = null
+  }
+}
+
 function handleSessionPreviewOpen(session: WebChatSession, open: boolean) {
   if (!open) {
-    if (openPreviewSessionId.value === session.id) {
-      openPreviewSessionId.value = null
-    }
+    closeSessionPreview(session.id)
     return
   }
 
-  if (Date.now() < suppressPreviewOpenUntil.value) {
+  if (openMenuSessionId.value || hoveredPreviewSessionId.value !== session.id || Date.now() < suppressPreviewOpenUntil.value) {
     openPreviewSessionId.value = null
     return
   }
@@ -110,9 +118,18 @@ function handleSessionPreviewOpen(session: WebChatSession, open: boolean) {
   }
 }
 
+function enterSessionPreviewTrigger(session: WebChatSession, event: Event) {
+  hoveredPreviewSessionId.value = session.id
+  suppressNativeTitleTooltip(event)
+}
+
+function leaveSessionPreviewTrigger(session: WebChatSession) {
+  closeSessionPreview(session.id)
+}
+
 function openSessionFromPointer(session: WebChatSession, event: MouseEvent) {
   suppressPreviewOpenUntil.value = Date.now() + 1500
-  openPreviewSessionId.value = null
+  closeSessionPreview()
   emit('openSession', session)
   if (event.currentTarget instanceof HTMLElement) {
     event.currentTarget.blur()
@@ -408,11 +425,13 @@ onUnmounted(() => {
 })
 
 function openSessionMenu(session: WebChatSession) {
+  closeSessionPreview()
   contextMenuReference.value = null
   openMenuSessionId.value = session.id
 }
 
 function openSessionContextMenu(session: WebChatSession, event: MouseEvent) {
+  closeSessionPreview()
   const { clientX, clientY } = event
   contextMenuReference.value = {
     getBoundingClientRect: () => new DOMRect(clientX, clientY, 0, 0)
@@ -421,8 +440,14 @@ function openSessionContextMenu(session: WebChatSession, event: MouseEvent) {
 }
 
 function closeSessionMenu(open: boolean, session: WebChatSession) {
-  openMenuSessionId.value = open ? session.id : null
-  if (!open) contextMenuReference.value = null
+  if (open) {
+    closeSessionPreview()
+    openMenuSessionId.value = session.id
+    return
+  }
+
+  openMenuSessionId.value = null
+  contextMenuReference.value = null
 }
 
 function sessionMenuContent(session: WebChatSession) {
@@ -599,7 +624,8 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
               isActiveSession(session) ? 'bg-elevated text-highlighted' : 'text-default',
               isUnreadSession(session) ? 'font-bold text-black dark:text-white' : 'font-normal'
             ]"
-            @pointerenter.capture="suppressNativeTitleTooltip"
+            @pointerenter.capture="enterSessionPreviewTrigger(session, $event)"
+            @pointerleave="leaveSessionPreviewTrigger(session)"
             @mouseenter.capture="suppressNativeTitleTooltip"
             @focus.capture="suppressNativeTitleTooltip"
             @click="openSessionFromPointer(session, $event)"
