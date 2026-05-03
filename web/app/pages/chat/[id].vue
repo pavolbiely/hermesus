@@ -60,6 +60,7 @@ const refreshSessions = inject<() => Promise<void> | void>('refreshSessions')
 const markSessionRead = inject<(sessionId: string, messageCount: number) => void>('markSessionRead')
 const requestedSessionId = inject<Readonly<Ref<string | null>>>('requestedSessionId')
 let optimisticUserMessageIds = new Set<string>()
+let finalizedAssistantMessageIds = new Set<string>()
 let bottomReadObserver: IntersectionObserver | undefined
 let olderMessagesObserver: IntersectionObserver | undefined
 let olderMessagesScrollRoot: Element | null = null
@@ -158,6 +159,7 @@ const {
   toast,
   activeChatRuns,
   onAssistantCompleted(message) {
+    finalizedAssistantMessageIds.add(message.id)
     if (readAloudAutoReadResponsesEnabled()) void readMessageAloud(message, { queue: true })
   }
 })
@@ -286,22 +288,32 @@ watch(
 )
 
 watch(
-  [sessionId, () => displayedData.value?.session.id, () => displayedData.value?.messages],
+  [sessionId, () => displayedData.value?.session.id, () => displayedData.value?.messages, () => displayedData.value?.activeRun],
   ([currentSessionId, loadedSessionId, persistedMessages]) => {
     if (loadedSessionId !== currentSessionId) {
       messages.value = []
       optimisticUserMessageIds = new Set()
+      finalizedAssistantMessageIds = new Set()
       return
     }
 
+    const activeRun = displayedData.value?.activeRun
+    const preserveStreamingAssistant = Boolean(
+      activeRun?.sessionId === currentSessionId
+      || activeChatRuns.isRunning(currentSessionId)
+    )
     const merged = mergeOptimisticUserMessages(
       persistedMessages ? [...persistedMessages] : [],
       messages.value,
       optimisticUserMessageIds,
-      { preserveStreamingAssistant: activeChatRuns.isRunning(currentSessionId) }
+      {
+        preserveStreamingAssistant,
+        preserveAssistantMessageIds: finalizedAssistantMessageIds
+      }
     )
     messages.value = merged.messages
     optimisticUserMessageIds = merged.optimisticMessageIds
+    finalizedAssistantMessageIds = merged.preservedAssistantMessageIds
     lastRenderedMessageCount.value = messages.value.length
   },
   { immediate: true }

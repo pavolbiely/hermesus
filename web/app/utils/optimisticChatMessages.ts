@@ -33,11 +33,27 @@ function hasEquivalentPersistedMessage(messages: WebChatMessage[], optimistic: W
   ))
 }
 
-type MergeOptimisticUserMessagesOptions = {
-  preserveStreamingAssistant?: boolean
+function hasNewerPersistedAssistant(messages: WebChatMessage[], assistant: WebChatMessage) {
+  const assistantTime = messageTime(assistant)
+  return messages.some(message => (
+    message.role === 'assistant'
+    && message.parts.length > 0
+    && messageTime(message) >= assistantTime
+  ))
 }
 
-function isStreamingAssistantMessage(message: WebChatMessage) {
+type MergeOptimisticUserMessagesOptions = {
+  preserveStreamingAssistant?: boolean
+  preserveAssistantMessageIds?: Set<string>
+}
+
+type MergeOptimisticUserMessagesResult = {
+  messages: WebChatMessage[]
+  optimisticMessageIds: Set<string>
+  preservedAssistantMessageIds: Set<string>
+}
+
+function isPreservableAssistantMessage(message: WebChatMessage) {
   return message.role === 'assistant' && message.parts.length > 0
 }
 
@@ -61,9 +77,10 @@ export function mergeOptimisticUserMessages(
   currentMessages: WebChatMessage[],
   optimisticMessageIds: Set<string>,
   options: MergeOptimisticUserMessagesOptions = {}
-) {
+): MergeOptimisticUserMessagesResult {
   const nextMessages = [...persistedMessages]
   const nextOptimisticIds = new Set(optimisticMessageIds)
+  const nextPreservedAssistantIds = new Set(options.preserveAssistantMessageIds || [])
   const persistedIds = new Set(persistedMessages.map(message => message.id))
 
   for (const message of currentMessages) {
@@ -81,12 +98,31 @@ export function mergeOptimisticUserMessages(
       continue
     }
 
-    if (options.preserveStreamingAssistant && !persistedIds.has(message.id) && isStreamingAssistantMessage(message)) {
+    const preserveAssistant = isPreservableAssistantMessage(message)
+      && !persistedIds.has(message.id)
+      && (options.preserveStreamingAssistant || nextPreservedAssistantIds.has(message.id))
+
+    if (preserveAssistant) {
+      if (
+        nextPreservedAssistantIds.has(message.id)
+        && (hasEquivalentPersistedMessage(persistedMessages, message) || hasNewerPersistedAssistant(persistedMessages, message))
+      ) {
+        nextPreservedAssistantIds.delete(message.id)
+        continue
+      }
       nextMessages.push(message)
     } else if (!persistedIds.has(message.id) && isLocalSystemEventMessage(message) && !hasEquivalentSystemEvent(nextMessages, message)) {
       nextMessages.push(message)
     }
   }
 
-  return { messages: nextMessages, optimisticMessageIds: nextOptimisticIds }
+  for (const messageId of Array.from(nextPreservedAssistantIds)) {
+    if (!nextMessages.some(message => message.id === messageId)) nextPreservedAssistantIds.delete(messageId)
+  }
+
+  return {
+    messages: nextMessages,
+    optimisticMessageIds: nextOptimisticIds,
+    preservedAssistantMessageIds: nextPreservedAssistantIds
+  }
 }

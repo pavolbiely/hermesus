@@ -155,3 +155,56 @@ test('preserves streaming assistant tool history while a run is active', () => {
   assert.deepEqual(result.messages.map(item => item.id), ['server-1', 'local-assistant'])
   assert.deepEqual(result.messages[1].parts, localAssistant.parts)
 })
+
+test('preserves a just-completed assistant message when the terminal session snapshot is stale', () => {
+  const persisted = [message('server-1', 'user', 'please fix it')]
+  const completedAssistant = message('local-assistant', 'assistant', 'fixed')
+
+  const result = mergeOptimisticUserMessages(
+    persisted,
+    [...persisted, completedAssistant],
+    new Set(),
+    { preserveAssistantMessageIds: new Set(['local-assistant']) }
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), ['server-1', 'local-assistant'])
+  assert.deepEqual([...result.preservedAssistantMessageIds], ['local-assistant'])
+})
+
+test('drops a preserved completed assistant once an equivalent persisted message appears', () => {
+  const persisted = [
+    message('server-1', 'user', 'please fix it'),
+    message('server-assistant', 'assistant', 'fixed')
+  ]
+  const completedAssistant = message('local-assistant', 'assistant', 'fixed')
+  completedAssistant.createdAt = '2026-04-27T11:59:59.000Z'
+
+  const result = mergeOptimisticUserMessages(
+    persisted,
+    [...persisted, completedAssistant],
+    new Set(),
+    { preserveAssistantMessageIds: new Set(['local-assistant']) }
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), ['server-1', 'server-assistant'])
+  assert.deepEqual([...result.preservedAssistantMessageIds], [])
+})
+
+test('drops a preserved completed assistant once a newer persisted assistant appears', () => {
+  const persisted = [
+    message('server-1', 'user', 'please fix it'),
+    message('server-assistant', 'assistant', 'fixed with final persisted content')
+  ]
+  const completedAssistant = message('local-assistant', 'assistant', 'fixed')
+  completedAssistant.createdAt = '2026-04-27T11:59:59.000Z'
+
+  const result = mergeOptimisticUserMessages(
+    persisted,
+    [...persisted, completedAssistant],
+    new Set(),
+    { preserveAssistantMessageIds: new Set(['local-assistant']) }
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), ['server-1', 'server-assistant'])
+  assert.deepEqual([...result.preservedAssistantMessageIds], [])
+})
