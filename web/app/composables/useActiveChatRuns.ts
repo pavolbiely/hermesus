@@ -190,6 +190,16 @@ export function useActiveChatRuns() {
     for (const callback of finishedCallbacks) void callback(run.sessionId, run.runId)
   }
 
+  function clearSessionRun(sessionId: string) {
+    const runs = [...trackedRuns.values()].filter(run => run.sessionId === sessionId)
+    if (!runs.length) {
+      markFinished(sessionId)
+      return
+    }
+
+    for (const run of runs) finishRun(run)
+  }
+
   function openSessionFromNotification(sessionId: string) {
     notificationOpenedSessionId.value = sessionId
     void router.push(`/chat/${sessionId}`)
@@ -414,12 +424,13 @@ export function useActiveChatRuns() {
 
   async function stop(sessionId: string) {
     const run = [...trackedRuns.values()].find(run => run.sessionId === sessionId)
-    if (!run) return
+    if (!run) return false
 
     await $fetch(`/api/web-chat/runs/${run.runId}/stop`, {
       method: 'POST',
       headers: hermesToken() ? { 'X-Hermes-Session-Token': hermesToken()! } : undefined
     })
+    return true
   }
 
   function isRunFinished(runId: string) {
@@ -445,6 +456,7 @@ export function useActiveChatRuns() {
     trackRun,
     subscribe,
     stop,
+    clearSessionRun,
     isRunFinished,
     onFinished
   }

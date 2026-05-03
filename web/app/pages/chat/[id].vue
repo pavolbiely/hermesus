@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { playNotificationSound, prepareNotificationSound } from '../../utils/notificationSound'
-import { recoverActiveRun } from '../../utils/activeRunRecovery'
+import { reconcileActiveRunSnapshot } from '../../utils/activeRunRecovery'
 import { connectRouteRun } from '../../utils/routeRunConnection'
 import type { GitFileSelection, SessionDetailResponse, WebChatAttachment, WebChatMessage } from '~/types/web-chat'
 import { type QueuedMessage, shouldAutoSendQueuedMessage } from '~/utils/queuedMessages'
@@ -479,8 +479,28 @@ async function generateCommitMessage() {
   }
 }
 
+function isMissingOrInactiveRunError(err: unknown) {
+  if (typeof err !== 'object' || !err) return false
+  const statusCode = (err as { statusCode?: unknown, status?: unknown }).statusCode ?? (err as { status?: unknown }).status
+  return statusCode === 404 || statusCode === 409
+}
+
 async function stopRun() {
-  await activeChatRuns.stop(sessionId.value)
+  const targetSessionId = sessionId.value
+  try {
+    const stopSent = await activeChatRuns.stop(targetSessionId)
+    if (!stopSent) activeChatRuns.clearSessionRun(targetSessionId)
+  } catch (err) {
+    if (!isMissingOrInactiveRunError(err)) {
+      showError(err, 'Could not stop run')
+      return
+    }
+    activeChatRuns.clearSessionRun(targetSessionId)
+  }
+
+  await refresh()
+  const activeRun = data.value?.session.id === targetSessionId ? data.value.activeRun : null
+  if (!activeRun) activeChatRuns.clearSessionRun(targetSessionId)
 }
 
 function warnAttachmentsCannotBeQueued() {
@@ -1185,11 +1205,13 @@ watch(
     if (activeRun?.sessionId === sessionId.value && activeRun.eta) {
       currentEta.value = activeRun.eta
     }
-    recoverActiveRun({
+    reconcileActiveRunSnapshot({
       sessionId: sessionId.value,
       activeRun,
+      isRunning: activeChatRuns.isRunning,
       hasConnectedRun,
-      connectRun
+      connectRun,
+      clearSessionRun: activeChatRuns.clearSessionRun
     })
   },
   { immediate: true }

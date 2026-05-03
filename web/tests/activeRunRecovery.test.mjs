@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { recoverActiveRun } from '../app/utils/activeRunRecovery.ts'
+import { recoverActiveRun, reconcileActiveRunSnapshot } from '../app/utils/activeRunRecovery.ts'
 
 test('connects active run from session detail when route query is absent', () => {
   const calls = []
@@ -45,4 +45,34 @@ test('ignores active run from another session', () => {
   })
 
   assert.deepEqual(calls, [])
+})
+
+test('clears stale local running state when session snapshot has no active run', () => {
+  const cleared = []
+
+  reconcileActiveRunSnapshot({
+    sessionId: 'session-1',
+    activeRun: null,
+    isRunning: sessionId => sessionId === 'session-1',
+    clearSessionRun: sessionId => cleared.push(sessionId),
+    hasConnectedRun: () => false,
+    connectRun: () => assert.fail('should not connect a missing run')
+  })
+
+  assert.deepEqual(cleared, ['session-1'])
+})
+
+test('does not clear idle sessions when session snapshot has no active run', () => {
+  const cleared = []
+
+  reconcileActiveRunSnapshot({
+    sessionId: 'session-1',
+    activeRun: null,
+    isRunning: () => false,
+    clearSessionRun: sessionId => cleared.push(sessionId),
+    hasConnectedRun: () => false,
+    connectRun: () => assert.fail('should not connect a missing run')
+  })
+
+  assert.deepEqual(cleared, [])
 })
