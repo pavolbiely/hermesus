@@ -22,6 +22,7 @@ type CachedSpeechBlob = {
 }
 type ReadAloudOptions = {
   queue?: boolean
+  skipReadableSummary?: boolean
 }
 type PreparedReadAloud =
   | { engine: 'web-speech', text: string }
@@ -217,9 +218,9 @@ export function useMessageReadAloud() {
     clearAllPlaybackCacheStatuses()
   }
 
-  async function resolveReadAloudText(message: WebChatMessage, attempt: number) {
+  async function resolveReadAloudText(message: WebChatMessage, attempt: number, options: ReadAloudOptions = {}) {
     const text = speechTextForMessage(message)
-    if (!text || readAloudContentMode() !== 'summary') return text
+    if (!text || options.skipReadableSummary || readAloudContentMode() !== 'summary') return text
 
     generatingMessageId.value = message.id
     setPlaybackSource(message.id, 'readable-summary')
@@ -457,8 +458,8 @@ export function useMessageReadAloud() {
     await playBackendTtsBlob(message, blob, attempt)
   }
 
-  async function prepareReadAloud(message: WebChatMessage, attempt: number): Promise<PreparedReadAloud | null> {
-    const text = await resolveReadAloudText(message, attempt)
+  async function prepareReadAloud(message: WebChatMessage, attempt: number, options: ReadAloudOptions = {}): Promise<PreparedReadAloud | null> {
+    const text = await resolveReadAloudText(message, attempt, options)
     if (!text || readAttempt !== attempt) return null
 
     const engine = readAloudEngine()
@@ -478,8 +479,8 @@ export function useMessageReadAloud() {
     await readWithWebSpeech(message, prepared.text, attempt)
   }
 
-  async function readImmediately(message: WebChatMessage, attempt: number) {
-    const prepared = await prepareReadAloud(message, attempt)
+  async function readImmediately(message: WebChatMessage, attempt: number, options: ReadAloudOptions = {}) {
+    const prepared = await prepareReadAloud(message, attempt, options)
     if (!prepared || readAttempt !== attempt) return
     await playPreparedReadAloud(message, prepared, attempt)
   }
@@ -518,7 +519,7 @@ export function useMessageReadAloud() {
     readQueue.push({
       message,
       attempt,
-      prepared: prepareReadAloud(message, attempt)
+      prepared: prepareReadAloud(message, attempt, options)
     })
     await processQueue()
   }

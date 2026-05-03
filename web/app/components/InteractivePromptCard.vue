@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import type { InteractivePrompt, InteractivePromptChoice } from '~/types/web-chat'
+import type { InteractivePrompt, InteractivePromptChoice, WebChatMessage } from '~/types/web-chat'
+import { readAloudAutoReadResponsesEnabled } from '~/utils/readAloudPreferences'
+
+const autoReadPromptIds = new Set<string>()
 
 const props = defineProps<{
   prompt: InteractivePrompt
@@ -7,6 +10,7 @@ const props = defineProps<{
 
 const api = useHermesApi()
 const toast = useToast()
+const { read: readAloud } = useMessageReadAloud()
 const localPrompt = ref<InteractivePrompt>(props.prompt)
 const submittingChoice = ref<string | null>(null)
 const responseText = ref('')
@@ -51,6 +55,37 @@ function answeredLabel(prompt: InteractivePrompt) {
   if (prompt.responseText) return 'You responded'
   return 'Answered'
 }
+
+function promptReadAloudText(prompt: InteractivePrompt) {
+  return [prompt.title, prompt.description]
+    .map(value => value?.trim())
+    .filter(Boolean)
+    .join('. ')
+}
+
+function promptReadAloudMessage(prompt: InteractivePrompt, text: string): WebChatMessage {
+  return {
+    id: `interactive-prompt-${prompt.id}`,
+    role: 'assistant',
+    parts: [{ type: 'text', text }],
+    createdAt: prompt.createdAt
+  }
+}
+
+function maybeAutoReadPrompt(prompt: InteractivePrompt) {
+  if (prompt.status !== 'pending' || !readAloudAutoReadResponsesEnabled() || autoReadPromptIds.has(prompt.id)) return
+  const text = promptReadAloudText(prompt)
+  if (!text) return
+
+  autoReadPromptIds.add(prompt.id)
+  void readAloud(promptReadAloudMessage(prompt, text), { queue: true, skipReadableSummary: true })
+}
+
+watch(
+  localPrompt,
+  prompt => maybeAutoReadPrompt(prompt),
+  { immediate: true }
+)
 
 async function respond(choice?: string) {
   const text = responseText.value.trim()
