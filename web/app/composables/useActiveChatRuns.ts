@@ -391,8 +391,10 @@ export function useActiveChatRuns() {
     })
 
     source.onerror = () => {
-      const error = new Error('Temporarily lost connection to Hermes run stream; reconnecting…')
-      notify(run, subscriber => subscriber.onError?.(error))
+      // EventSource also reports transient disconnects while it is reconnecting.
+      // Treat only explicit `run.failed` events as failed runs; otherwise a normal
+      // reconnect/stop transition can incorrectly disable the composer and show a
+      // false failure toast.
     }
 
     return true

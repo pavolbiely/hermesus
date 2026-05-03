@@ -171,7 +171,6 @@ async function onSubmit() {
             <UChatPrompt
               v-model="input"
               :maxrows="CHAT_PROMPT_MAX_ROWS"
-              :error="error || context.contextError.value"
               @submit="onSubmit"
               @paste="onPromptPaste"
               @keydown.down="onPromptArrowDown"

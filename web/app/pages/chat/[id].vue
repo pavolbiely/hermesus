@@ -155,7 +155,6 @@ const {
     if (readAloudAutoReadResponsesEnabled()) void readMessageAloud(message, { queue: true })
   }
 })
-const error = computed(() => streamError.value)
 const {
   input,
   slashCommands,
@@ -1427,7 +1426,6 @@ onBeforeUnmount(() => {
                 :maxrows="CHAT_PROMPT_MAX_ROWS"
                 :aria-hidden="isLoadingSession"
                 :class="isLoadingSession ? 'pointer-events-none invisible' : undefined"
-                :error="error || context.contextError.value"
                 @submit="onSubmit"
                 @paste="onPromptPaste"
                 @keydown.down="onPromptArrowDown"
