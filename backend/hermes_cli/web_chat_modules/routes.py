@@ -182,7 +182,13 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
     @router.post("/read-aloud-summary", response_model=ReadAloudSummaryResponse)
     def summarize_read_aloud(payload: ReadAloudSummaryRequest) -> ReadAloudSummaryResponse:
         return ReadAloudSummaryResponse(
-            text=generate_read_aloud_summary(payload.text, hidden_agent=services.hidden_agent_response)
+            text=generate_read_aloud_summary(
+                payload.text,
+                hidden_agent=services.hidden_agent_response,
+                model=payload.model,
+                provider=payload.provider,
+                reasoning_effort=payload.reasoningEffort,
+            )
         )
 
     @router.get("/profiles", response_model=WebChatProfilesResponse)

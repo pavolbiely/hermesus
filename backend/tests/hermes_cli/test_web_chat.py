@@ -209,29 +209,135 @@ def test_synthesizes_edge_speech_with_slovak_language_voice(client, tmp_path, mo
     assert tts_tool._load_tts_config() == {"provider": "edge", "edge": {"voice": "en-US-AriaNeural"}}
 
 
-def test_generates_read_aloud_summary_with_hidden_agent(client, monkeypatch):
-    from hermes_cli import web_chat
+def test_returns_short_plain_read_aloud_text_without_llm(client, monkeypatch):
+    import agent.auxiliary_client as auxiliary_client
+
+    def call_llm(**_kwargs):
+        raise AssertionError("short plain read-aloud text should not call an LLM")
+
+    monkeypatch.setattr(auxiliary_client, "call_llm", call_llm)
+
+    response = client.post(
+        "/api/web-chat/read-aloud-summary",
+        json={"text": "Upravil som nastavenia. Testy prešli bez chýb."},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "Upravil som nastavenia. Testy prešli bez chýb."}
+
+
+def test_generates_read_aloud_summary_with_auxiliary_llm(client, monkeypatch):
+    import agent.auxiliary_client as auxiliary_client
 
     calls = []
 
-    def hidden_agent(prompt, *, conversation_history, **kwargs):
-        calls.append({"prompt": prompt, "conversation_history": conversation_history, "kwargs": kwargs})
-        return "Ľudsky prerozprávané: upravil som nastavenia čítania a overil som kontroly."
+    def call_llm(**kwargs):
+        calls.append(kwargs)
+        message = types.SimpleNamespace(
+            content="Ľudsky prerozprávané: upravil som nastavenia čítania a overil som kontroly."
+        )
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
 
-    monkeypatch.setattr(web_chat, "_hidden_session_summary_agent", hidden_agent)
+    monkeypatch.setattr(auxiliary_client, "call_llm", call_llm)
 
     response = client.post("/api/web-chat/read-aloud-summary", json={
-        "text": "Updated `web/app/components/SettingsModal.vue`.\n```css\n.foo-bar-baz { color: red; }\n```\npnpm typecheck passed."
+        "text": "Updated `web/app/components/SettingsModal.vue`.\n```css\n.foo-bar-baz { color: red; }\n```\npnpm typecheck passed.",
+        "model": "gpt-5.5",
+        "provider": "openai-codex",
+        "reasoningEffort": "low",
     })
 
     assert response.status_code == 200
     assert response.json() == {
         "text": "Ľudsky prerozprávané: upravil som nastavenia čítania a overil som kontroly."
     }
+    assert calls[0]["task"] == "title_generation"
+    assert calls[0]["provider"] == "openai-codex"
+    assert calls[0]["model"] == "gpt-5.5"
+    assert calls[0]["max_tokens"] == 2_000
+    assert calls[0]["temperature"] == 0.2
+    assert calls[0]["timeout"] == 90
+    prompt = calls[0]["messages"][0]["content"]
+    assert "Fast task" in prompt
+    assert "Do not browse, inspect files, run tools, execute commands, read history, or gather extra context" in prompt
+    assert "Use only the text provided" in prompt
+    assert "Do not shorten just for speed" in prompt
+    assert "natural spoken read-aloud version" in prompt
+    assert "Do not read raw code" in prompt
+    assert "SettingsModal.vue" in prompt
+
+
+def test_generates_read_aloud_summary_with_hidden_agent_fallback(client, monkeypatch):
+    from hermes_cli import web_chat
+    import hermes_cli.web_chat_modules.read_aloud_summaries as read_aloud_summaries
+
+    calls = []
+
+    def hidden_agent(prompt, *, conversation_history, **kwargs):
+        calls.append({"prompt": prompt, "conversation_history": conversation_history, "kwargs": kwargs})
+        return "Fallback summary"
+
+    def unavailable_auxiliary(_prompt, **_kwargs):
+        raise ImportError("no auxiliary client")
+
+    monkeypatch.setattr(read_aloud_summaries, "_generate_summary_with_auxiliary_llm", unavailable_auxiliary)
+    monkeypatch.setattr(web_chat, "_hidden_session_summary_agent", hidden_agent)
+
+    response = client.post(
+        "/api/web-chat/read-aloud-summary",
+        json={
+            "text": "Updated `file.py` after a long assistant response",
+            "model": "gpt-5.5",
+            "provider": "openai-codex",
+            "reasoningEffort": "low",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "Fallback summary"}
     assert calls[0]["conversation_history"] == []
-    assert "natural, human-friendly spoken read-aloud version" in calls[0]["prompt"]
-    assert "Do not read raw code" in calls[0]["prompt"]
-    assert "SettingsModal.vue" in calls[0]["prompt"]
+    assert calls[0]["kwargs"] == {
+        "model": "gpt-5.5",
+        "provider": "openai-codex",
+        "reasoning_effort": "low",
+    }
+
+
+def test_generates_read_aloud_summary_with_hidden_agent_when_auxiliary_returns_empty(client, monkeypatch):
+    from hermes_cli import web_chat
+    import agent.auxiliary_client as auxiliary_client
+
+    calls = []
+
+    def call_llm(**_kwargs):
+        message = types.SimpleNamespace(content="")
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+    def hidden_agent(prompt, *, conversation_history, **kwargs):
+        calls.append({"prompt": prompt, "conversation_history": conversation_history, "kwargs": kwargs})
+        return "Fallback after empty auxiliary summary"
+
+    monkeypatch.setattr(auxiliary_client, "call_llm", call_llm)
+    monkeypatch.setattr(web_chat, "_hidden_session_summary_agent", hidden_agent)
+
+    response = client.post(
+        "/api/web-chat/read-aloud-summary",
+        json={
+            "text": "Updated `file.py` after a long assistant response",
+            "model": "gpt-5.5",
+            "provider": "openai-codex",
+            "reasoningEffort": "low",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "Fallback after empty auxiliary summary"}
+    assert calls[0]["conversation_history"] == []
+    assert calls[0]["kwargs"] == {
+        "model": "gpt-5.5",
+        "provider": "openai-codex",
+        "reasoning_effort": "low",
+    }
 
 
 def test_session_preview_reports_missing_summary(client):

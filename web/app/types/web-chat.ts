@@ -213,6 +213,9 @@ export type SynthesizeSpeechRequest = {
 
 export type ReadAloudSummaryRequest = {
   text: string
+  model?: string | null
+  provider?: string | null
+  reasoningEffort?: string | null
 }
 
 export type ReadAloudSummaryResponse = {

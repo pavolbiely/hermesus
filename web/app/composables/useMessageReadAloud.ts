@@ -113,20 +113,20 @@ function rememberCachedValue<TKey, TValue>(cache: Map<TKey, Promise<TValue>>, ke
   }
 }
 
-function cachedReadAloudSummary(text: string, generate: () => Promise<string>) {
-  const cached = summaryCache.get(text)
+function cachedReadAloudSummary(key: string, generate: () => Promise<string>) {
+  const cached = summaryCache.get(key)
   if (cached) {
-    rememberCachedValue(summaryCache, text, cached)
+    rememberCachedValue(summaryCache, key, cached)
     return cached
   }
 
   const summary = generate()
     .then(cleanSpeechText)
     .catch((error: unknown) => {
-      summaryCache.delete(text)
+      summaryCache.delete(key)
       throw error
     })
-  rememberCachedValue(summaryCache, text, summary)
+  rememberCachedValue(summaryCache, key, summary)
   return summary
 }
 
@@ -154,6 +154,7 @@ function cachedSpeechBlob(text: string, speed: number, synthesize: () => Promise
 export function useMessageReadAloud() {
   const api = useHermesApi()
   const toast = useToast()
+  const { selectedModel, selectedProvider, selectedReasoningEffort } = useChatComposerCapabilities()
   const speakingMessageId = useState<string | null>('chat-speaking-message-id', () => null)
   const generatingMessageId = useState<string | null>('chat-generating-speech-message-id', () => null)
   const playbackSources = useState<Record<string, ReadAloudPlaybackSource>>('chat-read-aloud-playback-sources', () => ({}))
@@ -223,8 +224,12 @@ export function useMessageReadAloud() {
     generatingMessageId.value = message.id
     setPlaybackSource(message.id, 'readable-summary')
     try {
-      const summary = await cachedReadAloudSummary(text, async () => {
-        const response = await api.generateReadAloudSummary({ text })
+      const model = selectedModel.value
+      const provider = selectedProvider.value
+      const reasoningEffort = selectedReasoningEffort.value
+      const cacheKey = JSON.stringify({ text, model, provider, reasoningEffort })
+      const summary = await cachedReadAloudSummary(cacheKey, async () => {
+        const response = await api.generateReadAloudSummary({ text, model, provider, reasoningEffort })
         return response.text
       })
       if (readAttempt !== attempt) return ''
