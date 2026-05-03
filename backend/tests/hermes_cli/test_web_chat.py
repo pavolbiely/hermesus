@@ -219,11 +219,33 @@ def test_returns_short_plain_read_aloud_text_without_llm(client, monkeypatch):
 
     response = client.post(
         "/api/web-chat/read-aloud-summary",
+        json={"text": "Testy prešli bez chýb."},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "Testy prešli bez chýb."}
+
+
+def test_generates_read_aloud_summary_for_multi_sentence_plain_text(client, monkeypatch):
+    import agent.auxiliary_client as auxiliary_client
+
+    calls = []
+
+    def call_llm(**kwargs):
+        calls.append(kwargs)
+        message = types.SimpleNamespace(content="Stručne: upravil som nastavenia a testy prešli.")
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+    monkeypatch.setattr(auxiliary_client, "call_llm", call_llm)
+
+    response = client.post(
+        "/api/web-chat/read-aloud-summary",
         json={"text": "Upravil som nastavenia. Testy prešli bez chýb."},
     )
 
     assert response.status_code == 200
-    assert response.json() == {"text": "Upravil som nastavenia. Testy prešli bez chýb."}
+    assert response.json() == {"text": "Stručne: upravil som nastavenia a testy prešli."}
+    assert len(calls) == 1
 
 
 def test_generates_read_aloud_summary_with_auxiliary_llm(client, monkeypatch):
@@ -261,8 +283,10 @@ def test_generates_read_aloud_summary_with_auxiliary_llm(client, monkeypatch):
     assert "Fast task" in prompt
     assert "Do not browse, inspect files, run tools, execute commands, read history, or gather extra context" in prompt
     assert "Use only the text provided" in prompt
-    assert "Do not shorten just for speed" in prompt
-    assert "natural spoken read-aloud version" in prompt
+    assert "human, listenable spoken retelling" in prompt
+    assert "Do not narrate the message line by line" in prompt
+    assert "Retell it like a helpful person speaking naturally" in prompt
+    assert "compress repetitive or low-value detail" in prompt
     assert "Do not read raw code" in prompt
     assert "SettingsModal.vue" in prompt
 

@@ -107,12 +107,12 @@ _TECHNICAL_MARKERS = re.compile(
 
 
 def _plain_short_message_summary(source: str) -> str:
-    """Return already-spoken-friendly short messages without paying LLM latency."""
+    """Return only tiny, already-spoken-friendly messages without LLM latency."""
     if len(source) > 1_000 or _TECHNICAL_MARKERS.search(source):
         return ""
 
     sentences = re.findall(r"[^.!?…]+[.!?…]+|[^.!?…]+$", source)
-    if len([sentence for sentence in sentences if sentence.strip()]) > 4:
+    if len([sentence for sentence in sentences if sentence.strip()]) > 1:
         return ""
 
     return _clean_spoken_summary(source)
@@ -120,16 +120,16 @@ def _plain_short_message_summary(source: str) -> str:
 
 def _build_read_aloud_summary_prompt(source: str) -> str:
     return (
-        "Fast task: rewrite the assistant message below into a natural spoken read-aloud version.\n"
+        "Fast task: turn the assistant message below into a human, listenable spoken retelling.\n"
         "Do not browse, inspect files, run tools, execute commands, read history, or gather extra context.\n"
         "Use only the text provided in this prompt and answer immediately.\n"
         "Use the same language as the message.\n"
-        "Do not shorten just for speed; keep the spoken version complete enough to preserve all important meaning.\n"
-        "Explain what was done, decided, found, verified, or what remains next in clear prose.\n"
+        "Do not narrate the message line by line and do not preserve the original structure.\n"
+        "Retell it like a helpful person speaking naturally: what matters, what changed, what was verified, what failed, and what remains next.\n"
+        "Keep all important meaning, warnings, failures, verification results, and next steps, but compress repetitive or low-value detail.\n"
         "Do not read raw code, CSS classes, long file paths, exact filenames lists, stack traces, JSON, diffs, or command output in detail.\n"
         "Mention technical artifacts only when important, and describe them generally.\n"
-        "Preserve important warnings, failures, verification results, and next steps.\n"
-        "Do not say that this is a summary.\n"
+        "Do not say that this is a summary or retelling.\n"
         "Do not include secrets, credentials, tokens, or API keys.\n"
         "Return only the spoken text.\n\n"
         "Assistant message:\n"
