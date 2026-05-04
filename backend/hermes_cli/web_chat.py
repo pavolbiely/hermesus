@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, UploadFile
 
+import hermes_state
 from hermes_state import SessionDB
 
 router = APIRouter(prefix="/api/web-chat", tags=["web-chat"])
@@ -26,6 +27,9 @@ MAX_PATCH_BYTES_PER_FILE = 96 * 1024
 MAX_PATCH_BYTES_PER_RUN = 512 * 1024
 _KNOWN_ATTACHMENT_ROOTS: set[Path] = set()
 _PROJECT_SETTINGS_LOCK = threading.Lock()
+_DB_LOCK = threading.Lock()
+_DB_INSTANCE: SessionDB | None = None
+_DB_PATH: Path | None = None
 
 
 from .web_chat_modules.agent_runner import (
@@ -226,7 +230,26 @@ def _conversation_history_for_agent(session_id: str) -> list[dict[str, str]]:
 
 
 def _db() -> SessionDB:
-    return SessionDB()
+    global _DB_INSTANCE, _DB_PATH
+
+    db_path = Path(hermes_state.DEFAULT_DB_PATH)
+    with _DB_LOCK:
+        if (
+            _DB_INSTANCE is not None
+            and _DB_PATH == db_path
+            and getattr(_DB_INSTANCE, "_conn", None) is not None
+        ):
+            return _DB_INSTANCE
+
+        if _DB_INSTANCE is not None:
+            try:
+                _DB_INSTANCE.close()
+            except Exception:
+                pass
+
+        _DB_INSTANCE = SessionDB(db_path)
+        _DB_PATH = db_path
+        return _DB_INSTANCE
 
 
 def _ensure_workspace_schema(db: SessionDB) -> None:

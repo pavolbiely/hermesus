@@ -9,6 +9,14 @@ import types
 from web_chat_test_helpers import assert_iso_timestamp
 
 
+def test_web_chat_db_reuses_connection_for_stable_db_path(client):
+    import hermes_cli.web_chat as web_chat
+
+    first = web_chat._db()
+    second = web_chat._db()
+
+    assert second is first
+
 
 def test_lists_sessions_for_chat_sidebar(client):
     from hermes_state import SessionDB
