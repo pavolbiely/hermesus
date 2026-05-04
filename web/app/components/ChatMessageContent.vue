@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="messageContentRoot" @click="onPreviewClick" @keydown="onPreviewKeydown">
+  <div ref="messageContentRoot" class="min-w-0 max-w-full" @click="onPreviewClick" @keydown="onPreviewKeydown">
     <template v-for="(group, index) in groupMessageParts(message.parts)" :key="`${message.id}-${group.type}-${index}`">
     <RunDetailsGroup
       v-if="group.type === 'process'"
@@ -424,7 +424,7 @@ onBeforeUnmount(() => {
             </template>
           </UChatPrompt>
         </div>
-        <p v-else class="whitespace-pre-wrap">
+        <p v-else class="chat-message-plain whitespace-pre-wrap">
           {{ partText(group.part) }}
         </p>
       </template>
