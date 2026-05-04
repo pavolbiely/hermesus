@@ -6,6 +6,7 @@ UPSTREAM="${HERMES_AGENT_SOURCE:-$HOME/.hermes/hermes-agent}"
 RUNTIME="$ROOT/.runtime/hermes-agent"
 WEB="$ROOT/web"
 PORT="${PORT:-9119}"
+WEB_DEV_HOST="${WEB_DEV_HOST:-127.0.0.1}"
 WEB_DEV_PORT="${WEB_DEV_PORT:-3019}"
 PYTHON="$UPSTREAM/venv/bin/python"
 WATCH=0
@@ -34,6 +35,7 @@ Environment:
   HERMES_AGENT_SOURCE     Path to the upstream Hermes checkout.
   HERMES_DEV_SESSION_TOKEN Optional fixed dev auth token for --dev.
   PORT                    Dashboard port. Default: 9119.
+  WEB_DEV_HOST            Nuxt dev server host for --dev. Default: 127.0.0.1.
   WEB_DEV_PORT            Nuxt dev server port for --dev. Default: 3019.
   WATCH_INTERVAL          Poll interval in seconds in watch mode. Default: 1.
   PORT_STOP_TIMEOUT       Seconds to wait before force-stopping stale listeners. Default: 5.
@@ -313,7 +315,7 @@ start_dashboard() {
     cd "$RUNTIME"
     local env_args=("HERMES_WEB_DIST=$WEB/.output/public" "HERMESUM_ENABLE_SELF_RESTART=1")
     if [[ "$DEV" == "1" ]]; then
-      env_args+=("HERMES_DEV_WEB_ORIGIN=http://127.0.0.1:$WEB_DEV_PORT")
+      env_args+=("HERMES_DEV_WEB_ORIGIN=http://$WEB_DEV_HOST:$WEB_DEV_PORT")
     fi
     if [[ -n "${HERMES_SESSION_TOKEN_OVERRIDE:-}" ]]; then
       env_args+=("HERMES_SESSION_TOKEN=$HERMES_SESSION_TOKEN_OVERRIDE")
@@ -435,13 +437,13 @@ kill_existing_port_processes() {
 }
 
 start_nuxt_dev() {
-  echo "Starting Nuxt dev server on http://127.0.0.1:$WEB_DEV_PORT"
+  echo "Starting Nuxt dev server on http://$WEB_DEV_HOST:$WEB_DEV_PORT"
   echo "Proxying /api to http://127.0.0.1:$PORT"
   (
     cd "$WEB"
     HERMES_API_ORIGIN="http://127.0.0.1:$PORT" \
       NUXT_PUBLIC_HERMES_SESSION_TOKEN="$HERMES_SESSION_TOKEN_OVERRIDE" \
-      exec pnpm dev --host 127.0.0.1 --port "$WEB_DEV_PORT"
+      exec pnpm dev --host "$WEB_DEV_HOST" --port "$WEB_DEV_PORT"
   ) &
   WEB_DEV_PID=$!
   WEB_DEV_STARTED=1
@@ -555,11 +557,11 @@ run_dev() {
   start_nuxt_dev
   wait_for_port "$PORT" "Hermes dashboard backend" || true
   if wait_for_port "$WEB_DEV_PORT" "Nuxt dev server"; then
-    open_browser_once "http://127.0.0.1:$WEB_DEV_PORT"
+    open_browser_once "http://$WEB_DEV_HOST:$WEB_DEV_PORT"
   fi
 
   echo ""
-  echo "Fast dev mode ready: http://127.0.0.1:$WEB_DEV_PORT"
+  echo "Fast dev mode ready: http://$WEB_DEV_HOST:$WEB_DEV_PORT"
   echo "Frontend changes use Nuxt HMR; Python changes restart only the Hermes backend."
   echo ""
 

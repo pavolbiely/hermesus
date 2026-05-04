@@ -127,10 +127,11 @@ This mode:
 - restarts the backend when watched Python files change
 - cleans up stale local server ports before startup
 
-Useful override:
+Useful overrides:
 
 ```bash
 PORT=9120 WEB_DEV_PORT=3020 ./run-local.sh --dev
+WEB_DEV_HOST=0.0.0.0 ./run-local.sh --dev
 ```
 
 ### Frontend-only mode

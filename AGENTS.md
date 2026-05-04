@@ -102,7 +102,7 @@ Use fast dev mode for normal work:
 This starts:
 
 - Hermes backend/dashboard runtime on `http://127.0.0.1:9119`.
-- Nuxt dev server on `http://127.0.0.1:3019`.
+- Nuxt dev server on `http://127.0.0.1:3019` by default; override bind host with `WEB_DEV_HOST`.
 - Nuxt `/api/...` proxy to the Hermes backend.
 - Shared ephemeral dev session token for authenticated API/SSE calls.
 
