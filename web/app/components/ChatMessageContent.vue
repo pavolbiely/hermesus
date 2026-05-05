@@ -39,6 +39,7 @@ const markdownPlugins = [createMarkdownHighlightPlugin()]
 
 const props = defineProps<{
   message: WebChatMessage
+  sessionId: string
   copiedMessageId: string | null
   editingMessageId: string | null
   savingEditedMessageId: string | null
@@ -367,6 +368,7 @@ onBeforeUnmount(() => {
       <InteractivePromptCard
         v-else-if="group.part.type === 'interactive_prompt' && group.part.prompt"
         :prompt="group.part.prompt"
+        :session-id="sessionId"
       />
 
       <div
@@ -443,6 +445,7 @@ onBeforeUnmount(() => {
   <ChatMessageFooter
     v-if="showMessageFooter"
     :message="message"
+    :session-id="sessionId"
     :copied-message-id="copiedMessageId"
     :saving-edited-message-id="savingEditedMessageId"
     :is-running="isRunning"

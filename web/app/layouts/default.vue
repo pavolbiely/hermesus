@@ -17,6 +17,11 @@ const activeChatRuns = useActiveChatRuns()
 const sessionTitleOverrides = useSessionTitleOverrides()
 const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
+const {
+  activeSessionId: readAloudSessionId,
+  status: readAloudStatus,
+  stopSession: stopReadAloudSession
+} = useMessageReadAloud()
 
 const dataRefreshKey = 'web-chat-sessions'
 const { data, refresh } = await useAsyncData(dataRefreshKey, () => api.listSessions({ includeArchived: true }))
@@ -705,6 +710,8 @@ provide('requestedSessionId', readonly(requestedSessionId))
           :read-message-counts-loaded="readMessageCountsLoaded"
           :is-session-running="isSessionRunning"
           :has-local-unread="hasLocalUnread"
+          :read-aloud-session-id="readAloudSessionId"
+          :read-aloud-status="readAloudStatus"
           @edit-workspace="beginEditWorkspace"
           @start-workspace-chat="startWorkspaceChat"
           @reorder-workspaces="reorderWorkspaces"
@@ -714,6 +721,7 @@ provide('requestedSessionId', readonly(requestedSessionId))
           @toggle-session-pinned="toggleSessionPinned"
           @restore-session="restoreSession"
           @confirm-session-action="beginConfirmAction"
+          @stop-read-aloud="stopReadAloudSession"
         />
       </template>
 

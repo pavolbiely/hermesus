@@ -34,7 +34,7 @@ const activeChatRuns = useActiveChatRuns()
 const notificationOpenedSessionId = useState<string | null>('chat-notification-opened-session-id', () => null)
 const context = useChatComposerContext()
 const toast = useToast()
-const { read: readMessageAloud, stop: stopReadAloud } = useMessageReadAloud()
+const { read: readMessageAloud } = useMessageReadAloud()
 const spellcheck = useChatInputSpellcheck()
 const generatingCommitMessage = ref(false)
 const generatedCommitMessage = ref('')
@@ -161,7 +161,7 @@ const {
   activeChatRuns,
   onAssistantCompleted(message) {
     finalizedAssistantMessageIds.add(message.id)
-    if (readAloudAutoReadResponsesEnabled()) void readMessageAloud(message, { queue: true })
+    if (readAloudAutoReadResponsesEnabled()) void readMessageAloud(message, { queue: true, sessionId: sessionId.value })
   }
 })
 const {
@@ -320,8 +320,7 @@ watch(
   { immediate: true }
 )
 
-watch(sessionId, (newSessionId, previousSessionId) => {
-  if (previousSessionId && newSessionId !== previousSessionId) stopReadAloud()
+watch(sessionId, () => {
   stopInitialScrollStabilizer()
   initialScrollSettledSessionId.value = null
 })
@@ -1316,7 +1315,6 @@ onBeforeUnmount(() => {
   readScrollRoot?.removeEventListener('scroll', scheduleReadVisibilityCheck)
   readScrollRoot = null
   if (readScrollAnimationFrame !== undefined) cancelAnimationFrame(readScrollAnimationFrame)
-  stopReadAloud()
   stopQueuedAutoSend?.()
   cleanupRunMessages()
 })
@@ -1406,6 +1404,7 @@ onBeforeUnmount(() => {
               <ChatMessageContent
                 v-model:editing-text="editingText"
                 :message="message"
+                :session-id="sessionId"
                 :copied-message-id="copiedMessageId"
                 :editing-message-id="editingMessageId"
                 :saving-edited-message-id="savingEditedMessageId"

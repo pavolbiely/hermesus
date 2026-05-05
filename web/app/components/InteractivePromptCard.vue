@@ -6,6 +6,7 @@ const autoReadPromptIds = new Set<string>()
 
 const props = defineProps<{
   prompt: InteractivePrompt
+  sessionId: string
 }>()
 
 const api = useHermesApi()
@@ -78,7 +79,7 @@ function maybeAutoReadPrompt(prompt: InteractivePrompt) {
   if (!text) return
 
   autoReadPromptIds.add(prompt.id)
-  void readAloud(promptReadAloudMessage(prompt, text), { queue: true, skipReadableSummary: true })
+  void readAloud(promptReadAloudMessage(prompt, text), { queue: true, sessionId: props.sessionId, skipReadableSummary: true })
 }
 
 watch(

@@ -12,6 +12,7 @@ import {
 
 const props = defineProps<{
   message: WebChatMessage
+  sessionId: string
   copiedMessageId: string | null
   savingEditedMessageId: string | null
   isRunning: boolean
@@ -29,7 +30,7 @@ const richTooltipUi = {
   content: 'h-auto max-w-none items-stretch rounded-md bg-elevated px-3 py-2 text-default shadow-lg ring ring-default'
 }
 
-const { generatingMessageId, playbackCacheStatuses, playbackSources, speakingMessageId, read: readAloud, stop: stopReadAloud } = useMessageReadAloud()
+const { generatingMessageId, playbackCacheStatuses, playbackSources, speakingMessageId, read: readAloud } = useMessageReadAloud()
 
 const tokenCount = computed(() => props.message.role === 'assistant' ? formatMessageTokenCount(props.message) : '')
 const generationDuration = computed(() => props.message.role === 'assistant' ? formatMessageGenerationDuration(props.message) : '')
@@ -73,9 +74,9 @@ function setTooltipOpen(key: string, open: boolean) {
   }
 }
 
-onBeforeUnmount(() => {
-  if (isReadingAloud.value) stopReadAloud()
-})
+function toggleReadAloud() {
+  void readAloud(props.message, { sessionId: props.sessionId })
+}
 </script>
 
 <template>
@@ -193,7 +194,7 @@ onBeforeUnmount(() => {
       class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50"
       :class="isReadingAloud || isGeneratingAloud ? 'text-primary hover:text-primary' : ''"
       :aria-label="readAloudAriaLabel"
-      @click="readAloud(message)"
+      @click.stop.prevent="toggleReadAloud"
     >
       <UIcon
         :name="isReadingAloud ? 'i-lucide-square' : (isGeneratingAloud ? 'i-lucide-loader-circle' : 'i-lucide-volume-2')"

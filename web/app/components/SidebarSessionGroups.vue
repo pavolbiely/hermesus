@@ -14,6 +14,8 @@ const props = defineProps<{
   readMessageCountsLoaded: boolean
   isSessionRunning: (session: WebChatSession) => boolean
   hasLocalUnread?: (session: WebChatSession) => boolean
+  readAloudSessionId?: string | null
+  readAloudStatus?: 'generating' | 'speaking' | 'idle'
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +28,7 @@ const emit = defineEmits<{
   restoreSession: [session: WebChatSession]
   confirmSessionAction: [action: 'duplicate' | 'archive' | 'delete', session: WebChatSession]
   reorderWorkspaces: [workspaceIds: string[]]
+  stopReadAloud: [sessionId: string]
 }>()
 
 const OTHER_CHATS_GROUP_ID = '__other__'
@@ -60,6 +63,16 @@ function sessionTime(updatedAt: string) {
 
 function isActiveSession(session: WebChatSession) {
   return props.activeSessionId === session.id
+}
+
+function isReadAloudSession(session: WebChatSession) {
+  return props.readAloudSessionId === session.id
+}
+
+function readAloudSessionLabel(session: WebChatSession) {
+  return props.readAloudStatus === 'generating'
+    ? `Stop generating speech for ${sessionTitle(session)}`
+    : `Stop reading ${sessionTitle(session)}`
 }
 
 function previewState(session: WebChatSession) {
@@ -634,7 +647,49 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
             @dblclick.stop.prevent="isActiveSession(session) && renameSession(session)"
             @contextmenu.prevent="openSessionContextMenu(session, $event)"
           >
+            <UPopover
+              v-if="isReadAloudSession(session)"
+              mode="hover"
+              :open-delay="300"
+              :close-delay="100"
+              :content="{ side: 'right', align: 'center', sideOffset: 8 }"
+              :ui="{ content: 'w-56 p-2' }"
+            >
+              <button
+                type="button"
+                :aria-label="readAloudSessionLabel(session)"
+                class="group/read-aloud flex size-3.5 shrink-0 items-center justify-center rounded text-primary outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/50"
+                @click.stop.prevent="emit('stopReadAloud', session.id)"
+              >
+                <UIcon
+                  :name="readAloudStatus === 'generating' ? 'i-lucide-loader-circle' : 'i-lucide-volume-2'"
+                  class="size-3.5 group-hover/read-aloud:hidden group-focus/read-aloud:hidden"
+                  :class="readAloudStatus === 'generating' ? 'animate-spin' : ''"
+                />
+                <UIcon name="i-lucide-square" class="hidden size-3 group-hover/read-aloud:block group-focus/read-aloud:block" />
+              </button>
+
+              <template #content>
+                <div class="space-y-1 text-xs leading-5">
+                  <div class="select-text font-medium text-highlighted">
+                    {{ readAloudStatus === 'generating' ? 'Generating speech' : 'Reading aloud' }}
+                  </div>
+                  <div class="select-text text-muted">
+                    {{ sessionTitle(session) }}
+                  </div>
+                  <button
+                    type="button"
+                    class="mt-1 inline-flex items-center gap-1 text-primary hover:text-primary/80"
+                    @click.stop.prevent="emit('stopReadAloud', session.id)"
+                  >
+                    <UIcon name="i-lucide-square" class="size-3" />
+                    <span>Stop</span>
+                  </button>
+                </div>
+              </template>
+            </UPopover>
             <span
+              v-else
               class="flex size-3.5 shrink-0 items-center justify-center"
               aria-hidden="true"
             >
