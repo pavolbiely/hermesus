@@ -1,4 +1,4 @@
-import { highlightCodeBlocks } from '@comark/nuxt/plugins/highlight'
+import { getHighlighter, highlightCodeBlocks } from '@comark/nuxt/plugins/highlight'
 import type { LanguageRegistration } from 'shiki'
 
 type LanguageImport = () => Promise<{ default: LanguageRegistration | LanguageRegistration[] }>
@@ -51,9 +51,21 @@ export function createMarkdownHighlightPlugin() {
     name: 'markdown-highlight',
     async post(state: MarkdownHighlightState) {
       const languages = await loadLanguages(findCodeBlockLanguages(state.tree.nodes))
+      await ensureHighlighterLanguages(languages)
       state.tree = await highlightCodeBlocks(state.tree as Parameters<typeof highlightCodeBlocks>[0], { languages })
     }
   }
+}
+
+async function ensureHighlighterLanguages(languages: Array<LanguageRegistration | LanguageRegistration[] | null>) {
+  const resolvedLanguages = languages.filter(language => language !== null)
+  if (!resolvedLanguages.length) return
+
+  // Comark's singleton highlighter can be created by a concurrent render without
+  // the language set from this render. A second pass ensures the resolved
+  // languages are loaded after any in-flight highlighter initialization settles.
+  await getHighlighter({ languages: resolvedLanguages })
+  await getHighlighter({ languages: resolvedLanguages })
 }
 
 function findCodeBlockLanguages(nodes: unknown[]) {
