@@ -12,7 +12,7 @@ type ReconcileActiveRunSnapshotOptions = RecoverActiveRunOptions & {
   clearSessionRun: (sessionId: string) => void
 }
 
-const terminalRunStatuses = new Set(['completed', 'stopped', 'failed'])
+const terminalRunStatuses = new Set(['completed', 'stopped', 'failed', 'interrupted'])
 
 export function recoverActiveRun(options: RecoverActiveRunOptions) {
   const { activeRun, sessionId, hasConnectedRun, connectRun } = options

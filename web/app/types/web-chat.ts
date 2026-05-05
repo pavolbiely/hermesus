@@ -418,7 +418,7 @@ export interface WebChatSessionPreviewResponse {
 export interface ActiveRunSummary {
   runId: string
   sessionId: string
-  status: 'running' | 'stopping' | 'completed' | 'stopped' | 'failed'
+  status: 'running' | 'stopping' | 'completed' | 'stopped' | 'failed' | 'interrupted'
   prompts: InteractivePrompt[]
   eta?: WebChatRunEta | null
 }

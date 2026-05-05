@@ -487,7 +487,7 @@ class WebChatRunEta(BaseModel):
 class ActiveRunSummary(BaseModel):
     runId: str
     sessionId: str
-    status: Literal["running", "stopping", "completed", "stopped", "failed"]
+    status: Literal["running", "stopping", "completed", "stopped", "failed", "interrupted"]
     prompts: list[WebChatPrompt] = Field(default_factory=list)
     eta: WebChatRunEta | None = None
 

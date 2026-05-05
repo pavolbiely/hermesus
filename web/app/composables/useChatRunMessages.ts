@@ -463,6 +463,19 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
           dedupeKey: `run_failed:${payload.messageId || runId}`
         })
       },
+      onRunInterrupted: (payload) => {
+        if (targetSessionId !== options.sessionId.value) return
+        finishTaskPlans('cancelled')
+        appendSystemEvent({
+          eventType: 'run_interrupted',
+          severity: 'warning',
+          title: 'Run interrupted',
+          description: payload.message || 'Backend restarted while this run was in progress.',
+          occurredAt: payload.occurredAt,
+          messageId: payload.messageId,
+          dedupeKey: `run_interrupted:${payload.messageId || runId}`
+        })
+      },
       onRunSteered: (payload) => {
         if (targetSessionId !== options.sessionId.value) return
         appendSystemEvent({

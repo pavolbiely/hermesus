@@ -42,6 +42,7 @@ type ActiveRunHandlers = {
   onPromptCancelled?: (prompt: InteractivePrompt) => void
   onRunStopped?: (payload: RunLifecyclePayload) => void
   onRunCompleted?: (payload: RunLifecyclePayload) => void
+  onRunInterrupted?: (payload: RunLifecyclePayload) => void
   onRunFailed?: (payload: RunFailedPayload) => void
   onRunSteered?: (payload: RunSteeredPayload) => void
   onSessionChanged?: (sessionId: string) => void
@@ -370,6 +371,24 @@ export function useActiveChatRuns() {
       finishRun(run)
     })
 
+    source.addEventListener('run.interrupted', (event) => {
+      const payload = parseRunEventPayload(event)
+      retargetRunFromEvent(run, payload)
+      recordAndNotify(run, 'onRunInterrupted', {
+        message: typeof payload.message === 'string' ? payload.message : undefined,
+        messageId: typeof payload.messageId === 'string' ? payload.messageId : undefined,
+        occurredAt: eventTimestamp()
+      })
+      showRunFinishedDesktopNotification({
+        sessionId: run.sessionId,
+        runId: run.runId,
+        status: 'failed',
+        chatTitle: run.sessionTitle,
+        onClick: openSessionFromNotification
+      })
+      finishRun(run)
+    })
+
     source.addEventListener('run.steered', (event) => {
       const payload = parseRunEventPayload(event)
       retargetRunFromEvent(run, payload)
@@ -404,8 +423,12 @@ export function useActiveChatRuns() {
     let disconnectTimer: ReturnType<typeof setTimeout> | undefined
     const handleDisconnected = () => {
       if (!trackedRuns.has(run.runId)) return
-      notify(run, subscriber => subscriber.onDisconnected?.())
+      // Clear the local running state before asking subscribers to refresh.
+      // Otherwise the refreshed session snapshot can be merged while
+      // `isRunning(sessionId)` is still true, preserving stale streaming UI over
+      // recovered interrupted-run messages until a manual page refresh.
       finishRun(run)
+      notify(run, subscriber => subscriber.onDisconnected?.())
     }
 
     source.onopen = () => {

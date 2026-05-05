@@ -15,15 +15,17 @@ test('connects active run from session detail when route query is absent', () =>
   assert.deepEqual(calls, [{ runId: 'run-1', sessionId: 'session-1' }])
 })
 
-test('does not reconnect completed or already connected active runs', () => {
+test('does not reconnect terminal or already connected active runs', () => {
   const calls = []
 
-  recoverActiveRun({
-    sessionId: 'session-1',
-    activeRun: { runId: 'run-1', sessionId: 'session-1', status: 'completed', prompts: [] },
-    hasConnectedRun: () => false,
-    connectRun: (runId, sessionId) => calls.push({ runId, sessionId })
-  })
+  for (const status of ['completed', 'stopped', 'failed', 'interrupted']) {
+    recoverActiveRun({
+      sessionId: 'session-1',
+      activeRun: { runId: `run-${status}`, sessionId: 'session-1', status, prompts: [] },
+      hasConnectedRun: () => false,
+      connectRun: (runId, sessionId) => calls.push({ runId, sessionId })
+    })
+  }
   recoverActiveRun({
     sessionId: 'session-1',
     activeRun: { runId: 'run-2', sessionId: 'session-1', status: 'running', prompts: [] },
