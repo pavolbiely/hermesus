@@ -136,10 +136,6 @@ function enterSessionPreviewTrigger(session: WebChatSession, event: Event) {
   suppressNativeTitleTooltip(event)
 }
 
-function leaveSessionPreviewTrigger(session: WebChatSession) {
-  closeSessionPreview(session.id)
-}
-
 function openSessionFromPointer(session: WebChatSession, event: MouseEvent) {
   suppressPreviewOpenUntil.value = Date.now() + 1500
   closeSessionPreview()
@@ -638,7 +634,6 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
               isUnreadSession(session) ? 'font-bold text-black dark:text-white' : 'font-normal'
             ]"
             @pointerenter.capture="enterSessionPreviewTrigger(session, $event)"
-            @pointerleave="leaveSessionPreviewTrigger(session)"
             @mouseenter.capture="suppressNativeTitleTooltip"
             @focus.capture="suppressNativeTitleTooltip"
             @click="openSessionFromPointer(session, $event)"
@@ -647,47 +642,20 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
             @dblclick.stop.prevent="isActiveSession(session) && renameSession(session)"
             @contextmenu.prevent="openSessionContextMenu(session, $event)"
           >
-            <UPopover
+            <button
               v-if="isReadAloudSession(session)"
-              mode="hover"
-              :open-delay="300"
-              :close-delay="100"
-              :content="{ side: 'right', align: 'center', sideOffset: 8 }"
-              :ui="{ content: 'w-56 p-2' }"
+              type="button"
+              :aria-label="readAloudSessionLabel(session)"
+              class="group/read-aloud flex size-3.5 shrink-0 items-center justify-center rounded text-primary outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/50"
+              @click.stop.prevent="emit('stopReadAloud', session.id)"
             >
-              <button
-                type="button"
-                :aria-label="readAloudSessionLabel(session)"
-                class="group/read-aloud flex size-3.5 shrink-0 items-center justify-center rounded text-primary outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/50"
-                @click.stop.prevent="emit('stopReadAloud', session.id)"
-              >
-                <UIcon
-                  :name="readAloudStatus === 'generating' ? 'i-lucide-loader-circle' : 'i-lucide-volume-2'"
-                  class="size-3.5 group-hover/read-aloud:hidden group-focus/read-aloud:hidden"
-                  :class="readAloudStatus === 'generating' ? 'animate-spin' : ''"
-                />
-                <UIcon name="i-lucide-square" class="hidden size-3 group-hover/read-aloud:block group-focus/read-aloud:block" />
-              </button>
-
-              <template #content>
-                <div class="space-y-1 text-xs leading-5">
-                  <div class="select-text font-medium text-highlighted">
-                    {{ readAloudStatus === 'generating' ? 'Generating speech' : 'Reading aloud' }}
-                  </div>
-                  <div class="select-text text-muted">
-                    {{ sessionTitle(session) }}
-                  </div>
-                  <button
-                    type="button"
-                    class="mt-1 inline-flex items-center gap-1 text-primary hover:text-primary/80"
-                    @click.stop.prevent="emit('stopReadAloud', session.id)"
-                  >
-                    <UIcon name="i-lucide-square" class="size-3" />
-                    <span>Stop</span>
-                  </button>
-                </div>
-              </template>
-            </UPopover>
+              <UIcon
+                :name="readAloudStatus === 'generating' ? 'i-lucide-loader-circle' : 'i-lucide-volume-2'"
+                class="size-3.5 group-hover/read-aloud:hidden group-focus/read-aloud:hidden"
+                :class="readAloudStatus === 'generating' ? 'animate-spin' : ''"
+              />
+              <UIcon name="i-lucide-square" class="hidden size-3 group-hover/read-aloud:block group-focus/read-aloud:block" />
+            </button>
             <span
               v-else
               class="flex size-3.5 shrink-0 items-center justify-center"
@@ -746,6 +714,29 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
             <div class="w-80 p-3 text-sm">
               <div class="truncate font-medium text-highlighted">
                 {{ sessionTitle(session) }}
+              </div>
+              <div
+                v-if="isReadAloudSession(session)"
+                class="mt-2 flex items-center justify-between gap-3 rounded-md bg-primary/10 px-2 py-1.5 text-xs text-primary"
+              >
+                <span class="select-text inline-flex min-w-0 items-center gap-1.5">
+                  <UIcon
+                    :name="readAloudStatus === 'generating' ? 'i-lucide-loader-circle' : 'i-lucide-volume-2'"
+                    class="size-3 shrink-0"
+                    :class="readAloudStatus === 'generating' ? 'animate-spin' : ''"
+                  />
+                  <span class="truncate">
+                    {{ readAloudStatus === 'generating' ? 'Generating speech' : 'Reading aloud' }}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  class="inline-flex shrink-0 items-center gap-1 rounded px-1 hover:bg-primary/10"
+                  @click.stop.prevent="emit('stopReadAloud', session.id)"
+                >
+                  <UIcon name="i-lucide-square" class="size-3" />
+                  <span>Stop</span>
+                </button>
               </div>
               <p v-if="sessionPreviewSummary(session)" class="mt-2 text-sm leading-5 text-muted">
                 {{ sessionPreviewSummary(session) }}
