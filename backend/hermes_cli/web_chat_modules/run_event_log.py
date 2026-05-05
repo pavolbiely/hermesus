@@ -101,8 +101,8 @@ def recover_interrupted_run_for_session(db: Any, session_id: str) -> None:
     if not events:
         return
 
-    assistant = assistant_recovery_from_events(events)
     interrupted_at = datetime.now(timezone.utc).isoformat()
+    assistant = assistant_recovery_from_events(events, interrupted_at=interrupted_at)
     appended_message = False
     if assistant["content"] or assistant["reasoning"] or assistant["parts"]:
         db.append_message(
@@ -139,7 +139,7 @@ def recover_interrupted_run_for_session(db: Any, session_id: str) -> None:
     _mark_run_recovered(db, run_id)
 
 
-def assistant_recovery_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+def assistant_recovery_from_events(events: list[dict[str, Any]], *, interrupted_at: str | None = None) -> dict[str, Any]:
     content_chunks: list[str] = []
     reasoning_chunks: list[str] = []
     parts: list[dict[str, Any]] = []
@@ -177,6 +177,8 @@ def assistant_recovery_from_events(events: list[dict[str, Any]]) -> dict[str, An
     if latest_task_plan:
         parts.append({"type": "task_plan", "taskPlan": latest_task_plan})
 
+    _interrupt_unfinished_tool_parts(parts, interrupted_at=interrupted_at)
+
     return {
         "content": "".join(content_chunks).strip(),
         "reasoning": "".join(reasoning_chunks).strip(),
@@ -212,6 +214,17 @@ def _complete_latest_tool_part(parts: list[dict[str, Any]], event: dict[str, Any
     part["completedAt"] = event.get("occurredAt") if isinstance(event.get("occurredAt"), str) else None
     part["output"] = event.get("output")
     parts.append(part)
+
+
+def _interrupt_unfinished_tool_parts(parts: list[dict[str, Any]], *, interrupted_at: str | None) -> None:
+    for part in parts:
+        if part.get("type") != "tool":
+            continue
+        if part.get("status") not in {"running", "started", "thinking", "streaming"}:
+            continue
+        part["status"] = "interrupted"
+        if interrupted_at and not part.get("completedAt"):
+            part["completedAt"] = interrupted_at
 
 
 def _finalized_task_plan(task_plan: dict[str, Any]) -> dict[str, Any]:

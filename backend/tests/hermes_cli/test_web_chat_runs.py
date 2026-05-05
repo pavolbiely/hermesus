@@ -789,6 +789,7 @@ def test_session_detail_recovers_partial_response_for_orphaned_run(client):
     assistant = messages[1]
     assert assistant["parts"][0]["type"] == "tool"
     assert assistant["parts"][0]["name"] == "terminal"
+    assert assistant["parts"][0]["status"] == "interrupted"
     assert assistant["parts"][1]["type"] == "task_plan"
     assert assistant["parts"][1]["taskPlan"]["items"][0]["status"] == "cancelled"
     assert assistant["parts"][2]["type"] == "reasoning"

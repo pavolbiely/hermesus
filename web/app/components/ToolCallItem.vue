@@ -71,7 +71,14 @@ const summary = computed(() => {
   return toolOutputSummary(props.part)
 })
 
-const statusLabel = computed(() => isRunning.value ? 'Running' : (props.part.status || 'Completed'))
+function humanizeStatus(value?: string | null) {
+  if (!value) return 'Completed'
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
+const statusLabel = computed(() => isRunning.value ? 'Running' : humanizeStatus(props.part.status))
 const secondarySummary = computed(() => {
   if (!summary.value || summary.value.toLowerCase() === statusLabel.value.toLowerCase()) return undefined
   return summary.value

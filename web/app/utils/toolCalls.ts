@@ -363,8 +363,15 @@ export function toolInputSummary(part: Pick<WebChatPart, 'name' | 'input'>) {
   return bestInputSummary(part.input, toolRawName(part))
 }
 
+function humanizeToolStatus(status?: string | null) {
+  if (!status) return undefined
+  return status
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
 export function toolOutputSummary(part: Pick<WebChatPart, 'output' | 'status'>) {
-  return outputStatusSummary(part.output) || part.status || undefined
+  return outputStatusSummary(part.output) || humanizeToolStatus(part.status)
 }
 
 export function toolCallTitle(part: Pick<WebChatPart, 'name' | 'input'>) {

@@ -282,10 +282,18 @@ def message_recovered_parts(message: dict[str, Any]) -> list[WebChatPart]:
             if not isinstance(part, dict):
                 continue
             try:
-                parts.append(WebChatPart(**part))
+                parts.append(WebChatPart(**_normalize_recovered_part(part)))
             except Exception:
                 continue
     return parts
+
+
+def _normalize_recovered_part(part: dict[str, Any]) -> dict[str, Any]:
+    if part.get("type") != "tool":
+        return part
+    if part.get("status") not in {"running", "started", "thinking", "streaming"}:
+        return part
+    return {**part, "status": "interrupted"}
 
 
 def message_metrics(message: dict[str, Any]) -> dict[str, Any]:

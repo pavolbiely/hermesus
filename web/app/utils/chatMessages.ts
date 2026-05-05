@@ -66,6 +66,11 @@ function isFailedTool(part: WebChatPart) {
   return false
 }
 
+function isInterruptedTool(part: WebChatPart) {
+  const status = String(part.status || '').toLowerCase()
+  return status.includes('interrupt') || status.includes('cancel') || status.includes('stop')
+}
+
 function classifyTool(part: WebChatPart) {
   const name = toolName(part)
   if (['read_file', 'search_files'].includes(name)) return 'read'
@@ -86,6 +91,7 @@ export function processGroupSummary(parts: WebChatPart[]) {
   const statusCount = parts.filter(part => part.type === 'status').length
   const warningCount = parts.filter(part => part.type === 'status' && part.status === 'warn').length
   const failedCount = tools.filter(isFailedTool).length
+  const interruptedCount = tools.filter(isInterruptedTool).length
 
   const counts = tools.reduce<Record<string, number>>((acc, part) => {
     const kind = classifyTool(part)
@@ -109,6 +115,7 @@ export function processGroupSummary(parts: WebChatPart[]) {
   else if (otherCount > 0) labels.push(plural(otherCount, 'other action'))
 
   if (failedCount) labels.push(`${failedCount} failed`)
+  else if (interruptedCount) labels.push(`${interruptedCount} interrupted`)
   else if (tools.length) labels.push('completed')
 
   return labels.join(' · ')
