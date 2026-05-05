@@ -48,6 +48,13 @@ def ensure_run_event_log_schema(db: Any) -> None:
             ON web_chat_run_events(session_id, run_id, id)
             """
         )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_web_chat_run_events_terminal_run
+            ON web_chat_run_events(run_id)
+            WHERE terminal = 1
+            """
+        )
 
     db._execute_write(_do)
     _SCHEMA_READY_DB_PATHS.add(db_path)

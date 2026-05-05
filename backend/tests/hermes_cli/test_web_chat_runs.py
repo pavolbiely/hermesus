@@ -747,6 +747,19 @@ def test_run_events_can_be_replayed_from_event_id(client, monkeypatch):
 
 
 
+def test_run_event_recovery_schema_indexes_terminal_lookup():
+    from hermes_cli.web_chat_modules.run_event_log import ensure_run_event_log_schema
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    ensure_run_event_log_schema(db)
+
+    with db._lock:
+        indexes = {row["name"] for row in db._conn.execute("PRAGMA index_list('web_chat_run_events')")}
+
+    assert "idx_web_chat_run_events_terminal_run" in indexes
+
+
 def test_session_detail_recovers_partial_response_for_orphaned_run(client):
     from hermes_cli.web_chat_modules.run_event_log import record_run_event
     from hermes_state import SessionDB
