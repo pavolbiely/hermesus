@@ -35,6 +35,7 @@ const notificationOpenedSessionId = useState<string | null>('chat-notification-o
 const context = useChatComposerContext()
 const toast = useToast()
 const { read: readMessageAloud, stop: stopReadAloud } = useMessageReadAloud()
+const spellcheck = useChatInputSpellcheck()
 const generatingCommitMessage = ref(false)
 const generatedCommitMessage = ref('')
 const commitMessageModalOpen = ref(false)
@@ -1519,6 +1520,8 @@ onBeforeUnmount(() => {
                 v-else
                 v-model="input"
                 :maxrows="CHAT_PROMPT_MAX_ROWS"
+                :spellcheck="spellcheck.spellcheck.value"
+                :lang="spellcheck.lang.value"
                 :aria-hidden="isLoadingSession"
                 :class="isLoadingSession ? 'pointer-events-none invisible' : undefined"
                 @submit="onSubmit"

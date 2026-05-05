@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { DesktopNotificationPermission } from '~/utils/desktopNotifications'
 import type { ReadAloudContentMode, ReadAloudEngine, VoiceInputProvider } from '~/utils/readAloudPreferences'
+import type { SpellcheckLanguage } from '~/utils/spellcheckPreferences'
 import {
   desktopNotificationPermission,
   desktopNotificationsEnabled,
@@ -26,6 +27,7 @@ import {
   voiceInputOpenAIApiKey,
   voiceInputProvider
 } from '~/utils/readAloudPreferences'
+import { spellcheckLanguageItems } from '~/utils/spellcheckPreferences'
 
 const props = defineProps<{
   open: boolean
@@ -55,6 +57,7 @@ const openAIApiKey = ref('')
 const openAIApiKeyVisible = ref(false)
 const webSpeechVoiceURI = ref<string | null>(null)
 const browserVoices = ref<SpeechSynthesisVoice[]>([])
+const spellcheck = useChatInputSpellcheck()
 
 const speechEngineItems = [
   {
@@ -211,6 +214,10 @@ function updateOpenAIApiKey(value: string) {
   setVoiceInputOpenAIApiKey(value)
 }
 
+function updateSpellcheckLanguage(value: SpellcheckLanguage) {
+  spellcheck.updateLanguage(value)
+}
+
 function toggleElevenLabsApiKeyVisible() {
   elevenLabsApiKeyVisible.value = !elevenLabsApiKeyVisible.value
 }
@@ -283,6 +290,45 @@ onBeforeUnmount(() => {
   >
     <template #body>
       <div class="space-y-5">
+        <section class="space-y-3">
+          <div class="space-y-1">
+            <h3 class="text-sm font-medium text-highlighted">
+              Composer
+            </h3>
+            <p class="text-sm text-muted">
+              Configure local writing preferences for the chat input.
+            </p>
+          </div>
+
+          <UFormField
+            name="chatInputSpellcheck"
+            label="Spellcheck"
+            description="Use the browser's native spellchecker in the chat input. The selected dictionary must be installed in your browser or operating system."
+          >
+            <USwitch
+              :model-value="spellcheck.enabled.value"
+              @update:model-value="spellcheck.updateEnabled"
+            />
+          </UFormField>
+
+          <UFormField
+            name="chatInputSpellcheckLanguage"
+            label="Spellcheck language"
+            description="Sets the input language hint for native browser spellcheck. Browser default does not inspect the message text."
+          >
+            <USelect
+              :model-value="spellcheck.language.value"
+              :items="spellcheckLanguageItems"
+              value-key="value"
+              class="w-full"
+              :disabled="!spellcheck.enabled.value"
+              @update:model-value="updateSpellcheckLanguage"
+            />
+          </UFormField>
+        </section>
+
+        <USeparator />
+
         <section class="space-y-3">
           <div class="space-y-1">
             <h3 class="text-sm font-medium text-highlighted">

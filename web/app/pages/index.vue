@@ -21,6 +21,7 @@ const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
 const toast = useToast()
 const slashCommands = useSlashCommands({ input })
+const spellcheck = useChatInputSpellcheck()
 
 onMounted(() => {
   void initializeComposer()
@@ -171,6 +172,8 @@ async function onSubmit() {
             <UChatPrompt
               v-model="input"
               :maxrows="CHAT_PROMPT_MAX_ROWS"
+              :spellcheck="spellcheck.spellcheck.value"
+              :lang="spellcheck.lang.value"
               @submit="onSubmit"
               @paste="onPromptPaste"
               @keydown.down="onPromptArrowDown"
