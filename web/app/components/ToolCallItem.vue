@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { WebChatPart } from '~/types/web-chat'
+import type { SkillFilePreviewRequest, WebChatFilePreview, WebChatPart } from '~/types/web-chat'
 import type { ToolDetailSection } from '~/utils/toolCallDetails'
 import { writeClipboardText } from '~/utils/clipboard'
 import { toolCallTitle, toolDisplayInfo, toolOutputSummary } from '~/utils/toolCalls'
-import { toolDetailOverview, toolDetailSections } from '~/utils/toolCallDetails'
+import { normalizeDetailValue, toolDetailOverview, toolDetailSections } from '~/utils/toolCallDetails'
 import { formatProcessPartDuration } from '~/utils/chatMessages'
 
 const props = defineProps<{
@@ -11,11 +11,16 @@ const props = defineProps<{
 }>()
 
 const toolInfo = computed(() => toolDisplayInfo(props.part))
+const api = useHermesApi()
 const toolName = computed(() => toolInfo.value.label)
 const rawToolName = computed(() => toolInfo.value.rawName)
 const isRunning = computed(() => ['running', 'thinking', 'streaming', 'started'].includes(String(props.part.status || '')))
 const now = ref(new Date())
 const open = ref(false)
+const skillPreviewOpen = ref(false)
+const skillPreviewLoading = ref(false)
+const skillPreviewError = ref<string | null>(null)
+const skillPreview = ref<WebChatFilePreview | null>(null)
 const rawOpen = ref(false)
 const copiedSection = ref<string | null>(null)
 const wrappedSections = ref<Record<string, boolean>>({})
@@ -73,10 +78,162 @@ const secondarySummary = computed(() => {
 })
 
 const actionLabel = computed(() => toolCallTitle(props.part))
+const isSkillView = computed(() => rawToolName.value.replace(/^functions\./, '') === 'skill_view')
+const outputSkillPreview = computed(() => isSkillView.value ? createSkillPreview(props.part) : null)
+
+async function openSkillPreview() {
+  skillPreviewOpen.value = true
+  skillPreviewError.value = null
+  skillPreviewLoading.value = false
+
+  const outputPreview = outputSkillPreview.value
+  if (outputPreview) {
+    skillPreview.value = outputPreview
+    return
+  }
+
+  const request = skillPreviewRequest(props.part)
+  if (!request) {
+    skillPreview.value = null
+    skillPreviewError.value = 'Skill name is not available in this tool call.'
+    return
+  }
+
+  skillPreview.value = null
+  skillPreviewLoading.value = true
+  try {
+    skillPreview.value = await api.fetchSkillFilePreview(request)
+  } catch (err) {
+    skillPreviewError.value = err instanceof Error ? err.message : 'Could not load skill file preview'
+  } finally {
+    skillPreviewLoading.value = false
+  }
+}
+
+function skillPreviewRequest(part: WebChatPart): SkillFilePreviewRequest | null {
+  const output = normalizeDetailValue(part.output)
+  const outputRecord = isRecord(output) ? output : null
+  const result = outputRecord ? normalizeDetailValue(outputRecord.result) : null
+  const resultRecord = isRecord(result) ? result : null
+  const args = skillInputArguments(part)
+
+  const name = stringValue(args?.name)
+    || stringValue(outputRecord?.name)
+    || stringValue(outputRecord?.skill)
+    || stringValue(resultRecord?.name)
+    || stringValue(resultRecord?.skill)
+  if (!name) return null
+
+  const filePath = stringValue(args?.file_path)
+    || stringValue(args?.filePath)
+    || stringValue(outputRecord?.file_path)
+    || stringValue(outputRecord?.filePath)
+    || stringValue(resultRecord?.file_path)
+    || stringValue(resultRecord?.filePath)
+    || null
+
+  return { name, filePath }
+}
+
+function skillInputArguments(part: WebChatPart): Record<string, unknown> | null {
+  const input = normalizeDetailValue(part.input)
+  if (!isRecord(input)) return null
+
+  const directArgs = normalizeDetailValue(input.arguments)
+  if (isRecord(directArgs)) return directArgs
+
+  const functionValue = normalizeDetailValue(input.function)
+  if (isRecord(functionValue)) {
+    const functionArgs = normalizeDetailValue(functionValue.arguments)
+    if (isRecord(functionArgs)) return functionArgs
+  }
+
+  return input
+}
+
+function createSkillPreview(part: WebChatPart): WebChatFilePreview | null {
+  const output = normalizeDetailValue(part.output)
+  if (!isRecord(output)) return null
+
+  const content = skillContent(output)
+  if (!content) return null
+  const path = stringValue(output.path) || skillPreviewPath(output)
+  const name = stringValue(output.file_path) || fileName(path) || 'SKILL.md'
+  const isMarkdown = name.endsWith('.md') || path.endsWith('.md')
+
+  return {
+    path,
+    requestedPath: path,
+    relativePath: path,
+    name,
+    mediaType: isMarkdown ? 'text/markdown' : 'text/plain',
+    size: content.length,
+    language: isMarkdown ? 'markdown' : 'text',
+    content,
+    truncated: Boolean(output.truncated),
+    previewable: true
+  }
+}
+
+function skillContent(output: Record<string, unknown>) {
+  const direct = stringValue(output.content)
+  if (direct) return direct
+
+  const result = normalizeDetailValue(output.result)
+  if (isRecord(result)) return stringValue(result.content)
+
+  return ''
+}
+
+function skillPreviewPath(output: Record<string, unknown>) {
+  const skillName = stringValue(output.name) || stringValue(output.skill) || 'skill'
+  const filePath = stringValue(output.file_path) || 'SKILL.md'
+  return `${skillName}/${filePath}`
+}
+
+function fileName(path: string) {
+  return path.split('/').filter(Boolean).pop() || ''
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : ''
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
 </script>
 
 <template>
+  <button
+    v-if="isSkillView"
+    type="button"
+    class="group flex w-full max-w-full items-center gap-1.5 overflow-hidden text-left text-sm text-muted transition-colors hover:text-default"
+    @click="void openSkillPreview()"
+  >
+    <UIcon
+      :name="isRunning ? 'i-lucide-cpu' : toolInfo.icon"
+      class="size-3.5 shrink-0 text-dimmed"
+      :class="{ 'animate-spin': isRunning }"
+    />
+    <span class="min-w-0 truncate" :class="{ 'tool-call-shimmer': isRunning }">
+      {{ actionLabel }}
+    </span>
+    <span v-if="summary" class="min-w-0 truncate text-dimmed" :class="{ 'tool-call-shimmer': isRunning }">
+      {{ summary }}
+    </span>
+    <span
+      v-if="durationLabel"
+      class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] leading-none text-dimmed tabular-nums"
+      :title="isRunning ? 'Elapsed time' : 'Duration'"
+    >
+      <span v-if="isRunning" class="size-1.5 rounded-full bg-primary/70 animate-pulse" aria-hidden="true" />
+      {{ durationLabel }}
+    </span>
+  </button>
+
   <UModal
+    v-else
     v-model:open="open"
     scrollable
     :ui="{ content: 'sm:max-w-2xl', header: 'hidden', body: 'p-0' }"
@@ -216,4 +373,12 @@ const actionLabel = computed(() => toolCallTitle(props.part))
       </div>
     </template>
   </UModal>
+
+  <ChatFilePreviewModal
+    v-if="isSkillView"
+    v-model:open="skillPreviewOpen"
+    :preview="skillPreview"
+    :loading="skillPreviewLoading"
+    :error="skillPreviewError"
+  />
 </template>

@@ -35,6 +35,7 @@ from .models import (
     SaveWorkspaceRequest,
     SessionDetailResponse,
     SessionListResponse,
+    SkillFilePreviewRequest,
     StartRunRequest,
     StartRunResponse,
     SteerRunRequest,
@@ -94,6 +95,7 @@ class WebChatRouteServices:
     store_upload: Callable[[UploadFile, str | None], Awaitable[WebChatAttachment]]
     load_attachment: Callable[[str, str | None], WebChatAttachment]
     validate_workspace: Callable[[str | None], Path | None]
+    profile_dependencies: Callable[[], tuple]
     workspace_changes: Callable[[str | None], WebChatWorkspaceChanges]
     git_status: Callable[[str | None], GitStatusResponse]
     generate_commit_message: Callable[[GenerateCommitMessageRequest], CommitMessageSuggestion]
@@ -294,6 +296,14 @@ def register_web_chat_routes(router: APIRouter, services: WebChatRouteServices) 
             payload.path,
             payload.workspace,
             validate_workspace=services.validate_workspace,
+        )
+
+    @router.post("/skill-file-preview", response_model=WebChatFilePreview, response_model_exclude_none=True)
+    def get_skill_file_preview(payload: SkillFilePreviewRequest) -> WebChatFilePreview:
+        return file_previews.preview_skill_file(
+            payload.name,
+            payload.filePath,
+            profile_dependencies_func=services.profile_dependencies,
         )
 
     @router.post("/file-preview/resolve", response_model=list[WebChatFilePreviewReference], response_model_exclude_none=True)

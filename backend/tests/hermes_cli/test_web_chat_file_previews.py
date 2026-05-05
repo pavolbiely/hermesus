@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from web_chat_test_helpers import git_repo
 
 
@@ -17,6 +19,53 @@ def post_resolve(client, paths: list[str], workspace: str | None):
     if workspace is not None:
         payload["workspace"] = workspace
     return client.post("/api/web-chat/file-preview/resolve", json=payload)
+
+
+def stub_active_profile(monkeypatch, profile_dir, name: str = "main"):
+    from hermes_cli import web_chat
+
+    monkeypatch.setattr(web_chat, "_profile_dependencies", lambda: (
+        lambda: name,
+        lambda: [SimpleNamespace(name=name, path=profile_dir)],
+        lambda requested: requested == name,
+        lambda requested: str(profile_dir),
+        lambda requested: None,
+        lambda requested: None,
+    ))
+
+
+def test_skill_file_preview_loads_skill_from_active_profile(client, monkeypatch, tmp_path):
+    profile = tmp_path / "profiles" / "main"
+    skill = profile / "skills" / "software-development" / "demo-skill"
+    skill.mkdir(parents=True)
+    skill_file = skill / "SKILL.md"
+    skill_file.write_text("---\nname: demo-skill\n---\n\n# Demo\n", encoding="utf-8")
+    stub_active_profile(monkeypatch, profile)
+
+    response = client.post("/api/web-chat/skill-file-preview", json={"name": "demo-skill"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["path"] == str(skill_file)
+    assert body["requestedPath"] == "demo-skill/SKILL.md"
+    assert body["relativePath"] == "demo-skill/SKILL.md"
+    assert body["name"] == "SKILL.md"
+    assert body["mediaType"] == "text/markdown"
+    assert body["language"] == "markdown"
+    assert body["content"] == "---\nname: demo-skill\n---\n\n# Demo\n"
+
+
+def test_skill_file_preview_rejects_path_traversal(client, monkeypatch, tmp_path):
+    profile = tmp_path / "profiles" / "main"
+    skill = profile / "skills" / "demo-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Demo\n", encoding="utf-8")
+    stub_active_profile(monkeypatch, profile)
+
+    response = client.post("/api/web-chat/skill-file-preview", json={"name": "demo-skill", "filePath": "../secret.md"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Skill file is outside the selected skill"
 
 
 def test_file_preview_loads_relative_markdown_from_workspace(client, tmp_path):

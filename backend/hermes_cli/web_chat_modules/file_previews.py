@@ -116,6 +116,7 @@ MEDIA_TYPE_BY_EXTENSION = {
 }
 
 WorkspaceValidator = Callable[[str | None], Path | None]
+ProfileDependencies = Callable[[], tuple]
 
 
 def is_within(path: Path, root: Path) -> bool:
@@ -146,10 +147,37 @@ def preview_file(requested_path: str, workspace: str | None, *, validate_workspa
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
+    relative_path = _relative_path(path, git_root_path) or _relative_path(path, workspace_root_path)
+    return _preview_local_file(path, requested_path=requested_path, relative_path=relative_path)
+
+
+def preview_skill_file(
+    skill_name: str,
+    file_path: str | None,
+    *,
+    profile_dependencies_func: ProfileDependencies,
+) -> WebChatFilePreview:
+    """Preview a skill file from the active Hermes profile directory."""
+    name = skill_name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Skill name is required")
+
+    profile_dir = _active_profile_dir(profile_dependencies_func)
+    skill_dir = _find_profile_skill_dir(profile_dir, name)
+    requested_path = (file_path or "SKILL.md").strip()
+    path = _resolve_skill_file_path(skill_dir, requested_path)
+
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill file not found")
+
+    relative_path = f"{name}/{_relative_path(path, skill_dir) or path.name}"
+    return _preview_local_file(path, requested_path=relative_path, relative_path=relative_path)
+
+
+def _preview_local_file(path: Path, *, requested_path: str, relative_path: str | None) -> WebChatFilePreview:
     media_type = _media_type(path)
     size = path.stat().st_size
     language = _language(path)
-    relative_path = _relative_path(path, git_root_path) or _relative_path(path, workspace_root_path)
 
     if not _is_text_previewable(path, media_type):
         return WebChatFilePreview(
@@ -186,6 +214,45 @@ def preview_file(requested_path: str, workspace: str | None, *, validate_workspa
         truncated=truncated,
         previewable=True,
     )
+
+
+def _active_profile_dir(profile_dependencies_func: ProfileDependencies) -> Path:
+    try:
+        get_active_profile, list_profiles, _, resolve_profile_env, _, _ = profile_dependencies_func()
+        active = get_active_profile()
+        for profile in list_profiles():
+            if getattr(profile, "name", None) == active:
+                return Path(getattr(profile, "path")).expanduser().resolve()
+        return Path(resolve_profile_env(active)).expanduser().resolve()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not resolve active Hermes profile: {exc}",
+        ) from exc
+
+
+def _find_profile_skill_dir(profile_dir: Path, skill_name: str) -> Path:
+    skills_dir = (profile_dir / "skills").resolve()
+    if not skills_dir.is_dir():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found in active profile")
+
+    matches = [
+        path.parent
+        for path in sorted(skills_dir.rglob("SKILL.md"))
+        if ".git" not in path.parts and ".hub" not in path.parts and path.parent.name == skill_name
+    ]
+    if not matches:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found in active profile")
+    return matches[0].resolve()
+
+
+def _resolve_skill_file_path(skill_dir: Path, requested_path: str) -> Path:
+    candidate = (skill_dir / requested_path).resolve()
+    if not is_within(candidate, skill_dir):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Skill file is outside the selected skill")
+    return candidate
 
 
 def resolve_existing_files(

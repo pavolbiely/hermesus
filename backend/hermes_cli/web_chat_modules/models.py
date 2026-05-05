@@ -25,6 +25,11 @@ class FilePreviewRequest(BaseModel):
     workspace: str | None = None
 
 
+class SkillFilePreviewRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    filePath: str | None = Field(default=None, min_length=1, max_length=1024)
+
+
 class FilePreviewResolveRequest(BaseModel):
     paths: list[str] = Field(default_factory=list, max_length=100)
     workspace: str | None = None

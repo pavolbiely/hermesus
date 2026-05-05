@@ -328,6 +328,11 @@ export type FilePreviewRequest = {
   workspace?: string | null
 }
 
+export type SkillFilePreviewRequest = {
+  name: string
+  filePath?: string | null
+}
+
 export type FilePreviewResolveRequest = {
   paths: string[]
   workspace?: string | null

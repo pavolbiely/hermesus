@@ -10,6 +10,7 @@ import type {
   ReorderWorkspacesRequest,
   SaveWorkspaceRequest,
   SynthesizeSpeechRequest,
+  SkillFilePreviewRequest,
   SpeechInputTranscriptionResponse,
   ReadAloudSummaryRequest,
   ReadAloudSummaryResponse,
@@ -190,6 +191,10 @@ export function useHermesApi() {
       body: payload
     }),
     fetchFilePreview: (payload: FilePreviewRequest) => request<WebChatFilePreview>('/api/web-chat/file-preview', {
+      method: 'POST',
+      body: payload
+    }),
+    fetchSkillFilePreview: (payload: SkillFilePreviewRequest) => request<WebChatFilePreview>('/api/web-chat/skill-file-preview', {
       method: 'POST',
       body: payload
     }),
