@@ -175,7 +175,7 @@ button.chat-preview-path {
 }
 
 .tool-call-shimmer {
-  background: linear-gradient(90deg, currentColor 0%, color-mix(in oklab, currentColor 35%, transparent) 35%, currentColor 70%);
+  background: linear-gradient(90deg, var(--ui-text-muted) 0%, color-mix(in oklab, var(--ui-text-muted) 35%, transparent) 35%, var(--ui-text-muted) 70%);
   background-size: 220% 100%;
   background-clip: text;
   color: transparent;
