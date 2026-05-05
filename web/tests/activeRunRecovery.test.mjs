@@ -49,7 +49,22 @@ test('ignores active run from another session', () => {
   assert.deepEqual(calls, [])
 })
 
-test('clears stale local running state when session snapshot has no active run', () => {
+test('does not clear local running state before a session snapshot is loaded', () => {
+  const cleared = []
+
+  reconcileActiveRunSnapshot({
+    sessionId: 'session-1',
+    activeRun: undefined,
+    isRunning: sessionId => sessionId === 'session-1',
+    clearSessionRun: sessionId => cleared.push(sessionId),
+    hasConnectedRun: () => false,
+    connectRun: () => assert.fail('should not connect before a snapshot is loaded')
+  })
+
+  assert.deepEqual(cleared, [])
+})
+
+test('clears stale local running state when loaded session snapshot has no active run', () => {
   const cleared = []
 
   reconcileActiveRunSnapshot({
@@ -64,7 +79,7 @@ test('clears stale local running state when session snapshot has no active run',
   assert.deepEqual(cleared, ['session-1'])
 })
 
-test('does not clear idle sessions when session snapshot has no active run', () => {
+test('does not clear idle sessions when loaded session snapshot has no active run', () => {
   const cleared = []
 
   reconcileActiveRunSnapshot({
