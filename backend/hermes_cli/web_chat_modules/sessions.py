@@ -315,8 +315,11 @@ def message_parts(message: dict[str, Any]) -> list[WebChatPart]:
     parts.extend(message_recovered_parts(message))
     if message.get("reasoning") or message.get("reasoning_content"):
         parts.append(WebChatPart(type="reasoning", text=message.get("reasoning") or message.get("reasoning_content")))
-    if message.get("content") and message.get("role") != "tool":
-        parts.append(WebChatPart(type="text", text=message["content"]))
+    content = message.get("content")
+    if isinstance(content, str) and content.strip() and message.get("role") != "tool":
+        parts.append(WebChatPart(type="text", text=content))
+    elif content and not isinstance(content, str) and message.get("role") != "tool":
+        parts.append(WebChatPart(type="text", text=str(content)))
     if message.get("role") == "tool":
         parts.append(WebChatPart(type="tool", name=message.get("tool_name"), output=parse_jsonish(message.get("content"))))
     elif message.get("tool_name") or message.get("tool_calls"):
@@ -451,6 +454,8 @@ def serialize_messages(
         changes = (changes_by_message or {}).get(str(message.get("id")))
         if changes and changes.files:
             web_message.parts.append(WebChatPart(type="changes", changes=changes.model_dump()))
+        if not web_message.parts:
+            continue
         serialized.append(web_message)
     return serialized
 

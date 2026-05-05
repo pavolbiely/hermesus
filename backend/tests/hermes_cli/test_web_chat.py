@@ -50,6 +50,22 @@ def test_lists_sessions_for_chat_sidebar(client):
     assert_iso_timestamp(data["sessions"][0]["updatedAt"])
 
 
+def test_serialize_messages_omits_empty_renderless_messages(client):
+    import hermes_cli.web_chat as web_chat
+
+    messages = web_chat._serialize_messages(
+        [
+            {"id": 1, "role": "user", "content": "Hello"},
+            {"id": 2, "role": "assistant", "content": "   \n\n   "},
+            {"id": 3, "role": "system", "content": None},
+            {"id": 4, "role": "assistant", "content": "Visible answer"},
+        ]
+    )
+
+    assert [(message.id, message.role) for message in messages] == [("1", "user"), ("4", "assistant")]
+    assert messages[1].parts[0].text == "Visible answer"
+
+
 def test_synthesizes_speech_with_request_voice_override(client, tmp_path, monkeypatch):
     import tools.tts_tool as tts_tool
 
