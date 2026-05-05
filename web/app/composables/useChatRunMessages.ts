@@ -474,6 +474,16 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
           dedupeKey: `run_steered:${payload.messageId || payload.text || runId}`
         })
       },
+      onDisconnected: async () => {
+        if (targetSessionId !== options.sessionId.value) return
+        finishTaskPlans('cancelled')
+        submitStatus.value = 'ready'
+        clearActivity()
+        clearEta()
+        stopActivityTimer()
+        await options.refresh()
+        await options.refreshSessions?.()
+      },
       onSessionChanged: (nextSessionId) => {
         if (targetSessionId !== options.sessionId.value || nextSessionId === options.sessionId.value) return
         connectedRunIds.delete(runId)

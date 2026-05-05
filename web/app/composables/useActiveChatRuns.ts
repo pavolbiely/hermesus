@@ -45,6 +45,7 @@ type ActiveRunHandlers = {
   onRunFailed?: (payload: RunFailedPayload) => void
   onRunSteered?: (payload: RunSteeredPayload) => void
   onSessionChanged?: (sessionId: string) => void
+  onDisconnected?: () => void
   onError?: (error: Error) => void
   onFinished?: () => void
 }
@@ -400,11 +401,33 @@ export function useActiveChatRuns() {
       finishRun(run)
     })
 
+    let disconnectTimer: ReturnType<typeof setTimeout> | undefined
+    const handleDisconnected = () => {
+      if (!trackedRuns.has(run.runId)) return
+      notify(run, subscriber => subscriber.onDisconnected?.())
+      finishRun(run)
+    }
+
+    source.onopen = () => {
+      if (disconnectTimer) clearTimeout(disconnectTimer)
+      disconnectTimer = undefined
+    }
+
     source.onerror = () => {
       // EventSource also reports transient disconnects while it is reconnecting.
-      // Treat only explicit `run.failed` events as failed runs; otherwise a normal
-      // reconnect/stop transition can incorrectly disable the composer and show a
-      // false failure toast.
+      // Treat only explicit `run.failed` events as failed runs. If the backend
+      // restarted and lost the in-memory run, the stream closes or stays down;
+      // then let the chat page refresh persisted recovery state instead of
+      // leaving the UI stuck in `thinking…` until manual refresh.
+      if (source.readyState === EventSource.CLOSED) {
+        handleDisconnected()
+        return
+      }
+      if (disconnectTimer) return
+      disconnectTimer = setTimeout(() => {
+        disconnectTimer = undefined
+        if (source.readyState !== EventSource.OPEN) handleDisconnected()
+      }, 5000)
     }
 
     return true
