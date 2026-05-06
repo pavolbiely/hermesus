@@ -36,6 +36,11 @@ const resolvedUpdateCompleted = computed(() => hasProp('updateCompleted') ? prop
 const resolvedUpdateLabel = computed(() => props.updateLabel || updates.hermes.label.value)
 const resolvedUpdateColor = computed(() => props.updateColor || updates.hermes.color.value)
 const resolvedUpdateTitle = computed(() => props.updateTitle || updates.hermes.title.value)
+const resolvedUpdateCommits = computed(() => updates.hermes.commits.value)
+const resolvedUpdateHasMoreCommits = computed(() => updates.hermes.hasMoreCommits.value)
+const resolvedUpdateCompareUrl = computed(() => updates.hermes.compareUrl.value)
+const resolvedUpdateRevisionSummary = computed(() => updates.hermes.revisionSummary.value)
+const resolvedUpdatePopoverMessage = computed(() => updates.hermes.popoverMessage.value)
 const resolvedAppUpdateVisible = computed(() => updates.app.visible.value)
 const resolvedAppUpdatePending = computed(() => updates.app.pending.value)
 const resolvedAppUpdateCompleted = computed(() => updates.app.completed.value)
@@ -77,19 +82,79 @@ function submitAppUpdate() {
           :disabled="commitDisabled || commitLoading"
           @click="emit('generateCommit')"
         />
-        <UButton
+        <UPopover
           v-if="resolvedUpdateVisible"
-          size="xs"
-          variant="solid"
-          icon="i-lucide-refresh-cw"
-          loading-icon="i-lucide-cpu"
-          :label="resolvedUpdateLabel"
-          :color="resolvedUpdateColor"
-          :loading="resolvedUpdatePending"
-          :disabled="resolvedUpdatePending || resolvedUpdateCompleted"
-          :title="resolvedUpdateTitle"
-          @click="submitUpdate"
-        />
+          mode="hover"
+          :open-delay="350"
+          :content="{ side: 'bottom', align: 'end', sideOffset: 8 }"
+          :ui="{ content: 'w-[31rem] p-0' }"
+        >
+          <UButton
+            size="xs"
+            variant="solid"
+            icon="i-lucide-refresh-cw"
+            loading-icon="i-lucide-cpu"
+            :label="resolvedUpdateLabel"
+            :color="resolvedUpdateColor"
+            :loading="resolvedUpdatePending"
+            :disabled="resolvedUpdatePending || resolvedUpdateCompleted"
+            @click="submitUpdate"
+          />
+
+          <template #content>
+            <div class="w-[31rem] space-y-3 p-3 text-left text-xs leading-relaxed">
+              <div class="space-y-1 border-b border-default pb-2">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0 font-medium text-highlighted">{{ resolvedUpdateTitle }}</div>
+                  <a
+                    v-if="resolvedUpdateCompareUrl"
+                    :href="resolvedUpdateCompareUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex shrink-0 items-center gap-1 text-primary hover:underline"
+                  >
+                    GitHub
+                    <UIcon name="i-lucide-external-link" class="size-3" />
+                  </a>
+                </div>
+                <div v-if="resolvedUpdateRevisionSummary" class="text-muted">
+                  {{ resolvedUpdateRevisionSummary }}
+                </div>
+              </div>
+
+              <div v-if="resolvedUpdateCommits.length" class="space-y-2">
+                <div class="divide-y divide-default/60 rounded-md border border-default/70 bg-muted/40 dark:bg-muted/20">
+                  <component
+                    :is="commit.url ? 'a' : 'div'"
+                    v-for="commit in resolvedUpdateCommits"
+                    :key="commit.hash"
+                    :href="commit.url || undefined"
+                    :target="commit.url ? '_blank' : undefined"
+                    :rel="commit.url ? 'noopener noreferrer' : undefined"
+                    class="group flex min-w-0 items-center gap-2 px-2 py-1.5"
+                    :class="commit.url ? 'transition hover:bg-primary/5' : ''"
+                  >
+                    <code class="shrink-0 font-mono text-[10px] leading-4" :class="commit.url ? 'text-primary' : 'text-muted'">{{ commit.shortHash }}</code>
+                    <span class="min-w-0 flex-1 truncate text-highlighted" :class="commit.url ? 'group-hover:underline' : ''">
+                      {{ commit.subject }}
+                    </span>
+                    <span v-if="commit.formattedCommittedAt" class="hidden shrink-0 text-[10px] leading-4 text-muted sm:inline">
+                      {{ commit.formattedCommittedAt }}
+                    </span>
+                    <UIcon v-if="commit.url" name="i-lucide-external-link" class="size-3 shrink-0 text-muted opacity-70" />
+                  </component>
+                </div>
+                <div v-if="resolvedUpdateHasMoreCommits" class="text-muted">
+                  And more commits are included.
+                </div>
+              </div>
+
+              <div v-else class="text-muted">
+                {{ resolvedUpdatePopoverMessage }}
+              </div>
+            </div>
+          </template>
+        </UPopover>
         <UButton
           v-if="resolvedAppUpdateVisible"
           size="xs"

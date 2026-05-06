@@ -233,6 +233,15 @@ class SpeechInputTranscriptionResponse(BaseModel):
     provider: str
 
 
+class WebChatUpdateCommit(BaseModel):
+    hash: str
+    shortHash: str
+    subject: str
+    author: str | None = None
+    committedAt: str | None = None
+    url: str | None = None
+
+
 class WebChatUpdateStatusResponse(BaseModel):
     updateAvailable: bool
     runtimeOutOfSync: bool
@@ -242,6 +251,9 @@ class WebChatUpdateStatusResponse(BaseModel):
     currentRevision: str | None = None
     remoteRevision: str | None = None
     runtimeRevision: str | None = None
+    commits: list[WebChatUpdateCommit] = Field(default_factory=list)
+    hasMoreCommits: bool = False
+    compareUrl: str | None = None
 
 
 class WebChatAppUpdateStatusResponse(BaseModel):

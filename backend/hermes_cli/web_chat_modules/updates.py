@@ -7,10 +7,15 @@ import subprocess
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 
-from .models import WebChatAppUpdateStatusResponse, WebChatUpdateStatusResponse
+from .models import (
+    WebChatAppUpdateStatusResponse,
+    WebChatUpdateCommit,
+    WebChatUpdateStatusResponse,
+)
 
 RUNTIME_SOURCE_MARKER = ".hermesum-runtime-source"
 APP_RESTART_EXIT_CODE = 42
@@ -82,6 +87,14 @@ def _remote_head(root: Path, branch: str) -> str | None:
     return output or None
 
 
+def _remote_url(root: Path) -> str | None:
+    try:
+        output = _run_git(root, ["remote", "get-url", "origin"]).stdout
+    except Exception:
+        return None
+    return output or None
+
+
 def _has_remote_update(root: Path, current_head: str | None, remote_head: str | None) -> bool:
     if not current_head or not remote_head or current_head == remote_head:
         return False
@@ -98,6 +111,77 @@ def _has_remote_update(root: Path, current_head: str | None, remote_head: str | 
     if result.returncode == 1:
         return False
     raise RuntimeError((result.stderr or result.stdout or "git merge-base failed").strip())
+
+
+def _github_repo_url(remote_url: str | None) -> str | None:
+    if not remote_url:
+        return None
+
+    if remote_url.startswith("git@github.com:"):
+        repo = remote_url.removeprefix("git@github.com:")
+    else:
+        parsed = urlparse(remote_url)
+        if parsed.netloc != "github.com":
+            return None
+        repo = parsed.path.lstrip("/")
+
+    repo = repo.removesuffix(".git").strip("/")
+    if not repo or repo.count("/") < 1:
+        return None
+    return f"https://github.com/{repo}"
+
+
+def _github_compare_url(remote_url: str | None, current_head: str | None, remote_head: str | None) -> str | None:
+    repo_url = _github_repo_url(remote_url)
+    if not repo_url or not current_head or not remote_head:
+        return None
+    return f"{repo_url}/compare/{current_head}...{remote_head}"
+
+
+def _github_commit_url(remote_url: str | None, commit_hash: str | None) -> str | None:
+    repo_url = _github_repo_url(remote_url)
+    if not repo_url or not commit_hash:
+        return None
+    return f"{repo_url}/commit/{commit_hash}"
+
+
+def _update_commits(
+    root: Path,
+    current_head: str | None,
+    remote_head: str | None,
+    *,
+    remote_url: str | None = None,
+    limit: int = 11,
+) -> list[WebChatUpdateCommit]:
+    if not _has_remote_update(root, current_head, remote_head):
+        return []
+
+    output = _run_git(
+        root,
+        [
+            "log",
+            f"--max-count={limit}",
+            "--format=%H%x00%h%x00%s%x00%an%x00%cI",
+            f"{current_head}..{remote_head}",
+        ],
+    ).stdout
+    commits: list[WebChatUpdateCommit] = []
+    for line in output.splitlines():
+        parts = line.split("\0", 4)
+        if len(parts) != 5:
+            continue
+        full_hash, short_hash, subject, author, committed_at = parts
+        commits.append(
+            WebChatUpdateCommit(
+                hash=full_hash,
+                shortHash=short_hash,
+                subject=subject,
+                author=author or None,
+                committedAt=committed_at or None,
+                url=_github_commit_url(remote_url, full_hash),
+            )
+        )
+    return commits
 
 
 def _runtime_source_head(runtime: Path) -> str | None:
@@ -117,6 +201,7 @@ def update_status() -> WebChatUpdateStatusResponse:
         upstream_head = _git_head(upstream)
         branch = _git_branch(upstream)
         remote_head = _remote_head(upstream, branch)
+        remote_url = _remote_url(upstream)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -132,7 +217,9 @@ def update_status() -> WebChatUpdateStatusResponse:
     runtime_source_head = _runtime_source_head(runtime)
     runtime_exists = (runtime / "hermes_cli" / "web_chat.py").is_file()
     runtime_out_of_sync = not runtime_exists or runtime_source_head != upstream_head
-    update_available = _has_remote_update(upstream, upstream_head, remote_head)
+    commits = _update_commits(upstream, upstream_head, remote_head, remote_url=remote_url)
+    update_available = bool(commits)
+    has_more_commits = len(commits) > 10
 
     return WebChatUpdateStatusResponse(
         updateAvailable=update_available,
@@ -143,6 +230,9 @@ def update_status() -> WebChatUpdateStatusResponse:
         currentRevision=_short(upstream_head),
         remoteRevision=_short(remote_head),
         runtimeRevision=_short(runtime_source_head),
+        commits=commits[:10],
+        hasMoreCommits=has_more_commits,
+        compareUrl=_github_compare_url(remote_url, upstream_head, remote_head),
     )
 
 

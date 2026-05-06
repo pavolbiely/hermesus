@@ -229,6 +229,15 @@ export type ReadAloudSummaryResponse = {
   text: string
 }
 
+export type WebChatUpdateCommit = {
+  hash: string
+  shortHash: string
+  subject: string
+  author?: string | null
+  committedAt?: string | null
+  url?: string | null
+}
+
 export type WebChatUpdateStatusResponse = {
   updateAvailable: boolean
   runtimeOutOfSync: boolean
@@ -238,6 +247,9 @@ export type WebChatUpdateStatusResponse = {
   currentRevision?: string | null
   remoteRevision?: string | null
   runtimeRevision?: string | null
+  commits?: WebChatUpdateCommit[]
+  hasMoreCommits?: boolean
+  compareUrl?: string | null
 }
 
 export type WebChatAppUpdateStatusResponse = {

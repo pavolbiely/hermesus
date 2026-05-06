@@ -3,6 +3,18 @@ import { launchUpdateFireworks } from '~/utils/updateFireworks'
 
 const UPDATE_STATUS_CHECK_INTERVAL_MS = 20 * 60 * 1000
 
+function formatUpdateCommitDate(value?: string | null) {
+  if (!value) return null
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(date)
+}
+
 export function useHermesUpdateControls() {
   const api = useHermesApi()
   const runtimeConfig = useRuntimeConfig()
@@ -30,6 +42,25 @@ export function useHermesUpdateControls() {
     if (updateStatus.value?.runtimeOutOfSync) return 'Sync Hermes runtime'
     return 'Update Hermes Agent'
   })
+  const updateCommits = computed(() => (updateStatus.value?.commits ?? []).slice(0, 10).map(commit => ({
+    ...commit,
+    formattedCommittedAt: formatUpdateCommitDate(commit.committedAt)
+  })))
+  const updateRevisionSummary = computed(() => {
+    const status = updateStatus.value
+    if (!status?.currentRevision && !status?.remoteRevision && !status?.runtimeRevision) return ''
+
+    const source = status.currentRevision || 'unknown'
+    const remote = status.remoteRevision || 'unknown'
+    const runtime = status.runtimeRevision || 'missing'
+    return `${status.branch}: ${source} → ${remote}; runtime ${runtime}`
+  })
+  const updatePopoverMessage = computed(() => {
+    if (updateStatus.value?.runtimeOutOfSync) return 'No remote commits are pending; this update will sync the disposable Hermes runtime.'
+    return 'No commit details are available for this update.'
+  })
+  const updateHasMoreCommits = computed(() => Boolean(updateStatus.value?.hasMoreCommits))
+  const updateCompareUrl = computed(() => updateStatus.value?.compareUrl || null)
 
   const appUpdateNeeded = computed(() => Boolean(appUpdateStatus.value?.updateAvailable))
   const showAppUpdateButton = computed(() => appUpdatePending.value || appUpdateCompleted.value || appUpdateNeeded.value)
@@ -141,6 +172,11 @@ export function useHermesUpdateControls() {
       label: updateButtonLabel,
       color: updateButtonColor,
       title: updateButtonTitle,
+      commits: updateCommits,
+      hasMoreCommits: updateHasMoreCommits,
+      compareUrl: updateCompareUrl,
+      revisionSummary: updateRevisionSummary,
+      popoverMessage: updatePopoverMessage,
       update: updateHermes
     },
     app: {
