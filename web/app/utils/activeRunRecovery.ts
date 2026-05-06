@@ -14,11 +14,15 @@ type ReconcileActiveRunSnapshotOptions = RecoverActiveRunOptions & {
 
 const terminalRunStatuses = new Set(['completed', 'stopped', 'failed', 'interrupted'])
 
+export function isLiveActiveRun(activeRun?: ActiveRunSummary | null) {
+  return Boolean(activeRun && !terminalRunStatuses.has(activeRun.status))
+}
+
 export function recoverActiveRun(options: RecoverActiveRunOptions) {
   const { activeRun, sessionId, hasConnectedRun, connectRun } = options
   if (activeRun === undefined || activeRun === null) return
   if (activeRun.sessionId !== sessionId) return
-  if (terminalRunStatuses.has(activeRun.status)) return
+  if (!isLiveActiveRun(activeRun)) return
   if (hasConnectedRun(activeRun.runId)) return
 
   connectRun(activeRun.runId, sessionId)

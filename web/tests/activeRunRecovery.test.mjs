@@ -1,6 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { recoverActiveRun, reconcileActiveRunSnapshot } from '../app/utils/activeRunRecovery.ts'
+import { isLiveActiveRun, recoverActiveRun, reconcileActiveRunSnapshot } from '../app/utils/activeRunRecovery.ts'
+
+test('treats running and stopping session snapshots as live active runs', () => {
+  assert.equal(isLiveActiveRun({ runId: 'run-1', sessionId: 'session-1', status: 'running', prompts: [] }), true)
+  assert.equal(isLiveActiveRun({ runId: 'run-1', sessionId: 'session-1', status: 'stopping', prompts: [] }), true)
+  assert.equal(isLiveActiveRun({ runId: 'run-1', sessionId: 'session-1', status: 'stopped', prompts: [] }), false)
+  assert.equal(isLiveActiveRun(null), false)
+  assert.equal(isLiveActiveRun(undefined), false)
+})
 
 test('connects active run from session detail when route query is absent', () => {
   const calls = []

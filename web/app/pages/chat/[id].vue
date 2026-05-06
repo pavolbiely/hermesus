@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { playNotificationSound, prepareNotificationSound } from '../../utils/notificationSound'
-import { reconcileActiveRunSnapshot } from '../../utils/activeRunRecovery'
+import { isLiveActiveRun, reconcileActiveRunSnapshot } from '../../utils/activeRunRecovery'
 import { connectRouteRun } from '../../utils/routeRunConnection'
 import type { GitFileSelection, SessionDetailResponse, WebChatAttachment, WebChatMessage } from '~/types/web-chat'
 import { type QueuedMessage, shouldAutoSendQueuedMessage } from '~/utils/queuedMessages'
@@ -199,6 +199,15 @@ const canAutoSendQueuedMessage = computed(() => shouldAutoSendQueuedMessage({
 const activeRunAssistantMessageId = computed(() => {
   if (!isRunning.value) return null
   return [...messages.value].reverse().find(message => message.role === 'assistant')?.id ?? null
+})
+const activeRunForCurrentSession = computed(() => {
+  const activeRun = displayedData.value?.activeRun
+  return activeRun?.sessionId === sessionId.value ? activeRun : null
+})
+const hasLiveSnapshotRun = computed(() => isLiveActiveRun(activeRunForCurrentSession.value))
+const promptSubmitStatus = computed(() => {
+  if (chatStatus.value !== 'ready') return chatStatus.value
+  return hasLiveSnapshotRun.value ? 'streaming' : 'ready'
 })
 const showRunActivityIndicator = computed(() => Boolean(currentActivityLabel.value))
 const promptContextUsage = computed(() => {
@@ -499,8 +508,9 @@ function isMissingOrInactiveRunError(err: unknown) {
 
 async function stopRun() {
   const targetSessionId = sessionId.value
+  const fallbackRunId = activeRunForCurrentSession.value?.runId
   try {
-    const stopSent = await activeChatRuns.stop(targetSessionId)
+    const stopSent = await activeChatRuns.stop(targetSessionId, fallbackRunId)
     if (!stopSent) activeChatRuns.clearSessionRun(targetSessionId)
   } catch (err) {
     if (!isMissingOrInactiveRunError(err)) {
@@ -1532,7 +1542,7 @@ onBeforeUnmount(() => {
               >
                 <template #footer>
                   <ChatPromptFooter
-                    :submit-status="chatStatus"
+                    :submit-status="promptSubmitStatus"
                     :submit-disabled="!input.trim()"
                     :context-usage="promptContextUsage"
                     :workspaces="context.workspaces.value"

@@ -468,11 +468,12 @@ export function useActiveChatRuns() {
     }
   }
 
-  async function stop(sessionId: string) {
+  async function stop(sessionId: string, fallbackRunId?: string | null) {
     const run = [...trackedRuns.values()].find(run => run.sessionId === sessionId)
-    if (!run) return false
+    const runId = run?.runId || fallbackRunId
+    if (!runId) return false
 
-    await $fetch(`/api/web-chat/runs/${run.runId}/stop`, {
+    await $fetch(`/api/web-chat/runs/${runId}/stop`, {
       method: 'POST',
       headers: hermesToken() ? { 'X-Hermes-Session-Token': hermesToken()! } : undefined
     })
