@@ -23,6 +23,7 @@ const STREAM_AUTO_SCROLL_FOLLOWING_MS = 220
 const INITIAL_SCROLL_STABILIZE_MS = 2500
 
 const { route, sessionId } = useChatRouteState()
+const router = useRouter()
 const api = useHermesApi()
 const sessionCache = useWebChatSessionCache(api)
 const composer = useChatComposerCapabilities()
@@ -730,6 +731,11 @@ async function startRunForLocalMessage(
     playNotificationSound('sent')
     void refreshSessions?.()
     connectRun(run.runId, targetSessionId)
+    void router.replace({
+      path: `/chat/${targetSessionId}`,
+      query: { ...route.query, run: run.runId }
+    })
+    void refresh()
   } catch (err) {
     const errorMessage = getHermesErrorMessage(err, 'Not sent')
     messages.value = markLocalMessageFailed(messages.value, userMessage.id, errorMessage)
