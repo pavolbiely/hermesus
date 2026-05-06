@@ -208,3 +208,45 @@ test('drops a preserved completed assistant once a newer persisted assistant app
   assert.deepEqual(result.messages.map(item => item.id), ['server-1', 'server-assistant'])
   assert.deepEqual([...result.preservedAssistantMessageIds], [])
 })
+
+test('drops a preserved completed assistant when the same turn is already persisted with an older timestamp', () => {
+  const user = message('server-user', 'user', 'reply exactly OK3')
+  user.createdAt = '2026-04-27T12:00:00.000Z'
+  const persistedAssistant = message('server-assistant', 'assistant', 'OK3')
+  persistedAssistant.createdAt = '2026-04-27T12:00:01.000Z'
+  const completedAssistant = message('local-assistant', 'assistant', 'OK3')
+  completedAssistant.createdAt = '2026-04-27T12:00:12.000Z'
+
+  const result = mergeOptimisticUserMessages(
+    [user, persistedAssistant],
+    [user, completedAssistant],
+    new Set(),
+    { preserveAssistantMessageIds: new Set(['local-assistant']) }
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), ['server-user', 'server-assistant'])
+  assert.deepEqual([...result.preservedAssistantMessageIds], [])
+})
+
+test('keeps a repeated preserved assistant when the same text is only persisted for an older turn', () => {
+  const olderUser = message('server-user-1', 'user', 'reply exactly OK')
+  const olderAssistant = message('server-assistant-1', 'assistant', 'OK')
+  const currentUser = message('server-user-2', 'user', 'reply exactly OK again')
+  const completedAssistant = message('local-assistant', 'assistant', 'OK')
+  completedAssistant.createdAt = '2026-04-27T12:00:12.000Z'
+
+  const result = mergeOptimisticUserMessages(
+    [olderUser, olderAssistant, currentUser],
+    [olderUser, olderAssistant, currentUser, completedAssistant],
+    new Set(),
+    { preserveAssistantMessageIds: new Set(['local-assistant']) }
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), [
+    'server-user-1',
+    'server-assistant-1',
+    'server-user-2',
+    'local-assistant'
+  ])
+  assert.deepEqual([...result.preservedAssistantMessageIds], ['local-assistant'])
+})

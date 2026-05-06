@@ -42,6 +42,25 @@ function hasNewerPersistedAssistant(messages: WebChatMessage[], assistant: WebCh
   ))
 }
 
+function hasPersistedAssistantAfterLatestUser(messages: WebChatMessage[], assistant: WebChatMessage) {
+  const assistantText = textParts(assistant)
+  if (!assistantText) return false
+
+  let latestUserIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') {
+      latestUserIndex = index
+      break
+    }
+  }
+  if (latestUserIndex < 0) return false
+
+  return messages.slice(latestUserIndex + 1).some(message => (
+    message.role === 'assistant'
+    && textParts(message) === assistantText
+  ))
+}
+
 type MergeOptimisticUserMessagesOptions = {
   preserveStreamingAssistant?: boolean
   preserveAssistantMessageIds?: Set<string>
@@ -105,7 +124,10 @@ export function mergeOptimisticUserMessages(
     if (preserveAssistant) {
       if (
         nextPreservedAssistantIds.has(message.id)
-        && (hasEquivalentPersistedMessage(persistedMessages, message) || hasNewerPersistedAssistant(persistedMessages, message))
+        && (
+          hasPersistedAssistantAfterLatestUser(persistedMessages, message)
+          || hasNewerPersistedAssistant(persistedMessages, message)
+        )
       ) {
         nextPreservedAssistantIds.delete(message.id)
         continue
