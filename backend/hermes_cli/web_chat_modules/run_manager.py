@@ -180,6 +180,14 @@ class RunManager:
                     detail="Message was already submitted. Refresh the chat before retrying.",
                 )
 
+        if request.sessionId:
+            running_run = self._running_run_for_session(session_id)
+            if running_run:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A run is already active for this chat. Wait for it to finish or steer it instead.",
+                )
+
         effective_provider = request.provider or session_provider(session)
         model_config_updates = {"reasoningEffort": effective_reasoning_effort}
         if effective_provider:
@@ -379,6 +387,16 @@ class RunManager:
             candidates = [
                 active for active in self._runs.values()
                 if active.context.session_id == session_id and active.client_message_id == client_message_id
+            ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda run: run.created_at)
+
+    def _running_run_for_session(self, session_id: str) -> ActiveRun | None:
+        with self._lock:
+            candidates = [
+                active for active in self._runs.values()
+                if active.context.session_id == session_id and not active.terminal
             ]
         if not candidates:
             return None

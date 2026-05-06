@@ -533,6 +533,42 @@ def test_start_run_reports_later_edits_when_git_status_is_already_dirty(client, 
     assert "+two" not in second_changes["patch"]["files"][0]["patch"]
 
 
+def test_start_run_rejects_parallel_run_for_existing_session(client, monkeypatch, tmp_path):
+    import hermes_cli.web_chat as web_chat
+
+    repo = git_repo(tmp_path)
+    release_executor = threading.Event()
+    executor_started = threading.Event()
+    seen_inputs = []
+
+    def blocking_executor(context, emit):
+        seen_inputs.append(context.input)
+        executor_started.set()
+        assert release_executor.wait(timeout=2)
+        return "Done"
+
+    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(blocking_executor))
+
+    first = client.post("/api/web-chat/runs", json={"input": "First", "workspace": str(repo)})
+    assert first.status_code == 202
+    assert executor_started.wait(timeout=2)
+
+    second = client.post(
+        "/api/web-chat/runs",
+        json={"sessionId": first.json()["sessionId"], "input": "Second", "workspace": str(repo)},
+    )
+    assert second.status_code == 409
+    assert second.json()["detail"] == "A run is already active for this chat. Wait for it to finish or steer it instead."
+
+    detail = client.get(f"/api/web-chat/sessions/{first.json()['sessionId']}")
+    assert [message["role"] for message in detail.json()["messages"]] == ["user"]
+    assert seen_inputs == ["First"]
+
+    release_executor.set()
+    with client.stream("GET", f"/api/web-chat/runs/{first.json()['runId']}/events") as stream:
+        stream.read()
+
+
 def test_start_run_is_idempotent_for_retried_client_message_id(client, monkeypatch, tmp_path):
     import hermes_cli.web_chat as web_chat
 
