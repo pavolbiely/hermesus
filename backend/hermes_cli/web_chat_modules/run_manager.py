@@ -23,23 +23,13 @@ from .models import (
     SteerRunResponse,
     StopRunResponse,
     WebChatPrompt,
-    WebChatRunEta,
     WebChatWorkspaceChanges,
 )
-from .run_eta import looks_like_progress_text
 from .run_event_log import recover_interrupted_run_for_session, record_run_event
 from .run_events import MESSAGE_ITEMS_FIELD, client_message_id_from_message, system_event_part, task_plan_from_event
 from .sessions import session_archived, session_provider
 
 RunExecutor = Callable[["RunContext", Callable[[dict[str, Any]], None]], str]
-EstimateRunEta = Callable[[Any, "RunContext", dict[str, Any] | None], WebChatRunEta | None]
-RecordRunEtaSample = Callable[..., None]
-
-ETA_MIN_REFRESH_INTERVAL_SECONDS = 15
-ETA_STALE_REFRESH_SECONDS = 45
-ETA_INITIAL_REFRESH_DELAY_SECONDS = 5
-
-
 @dataclass
 class RunContext:
     run_id: str
@@ -84,12 +74,6 @@ class ActiveRun:
     prompt_wait_duration_ms: int = 0
     tool_started_at: dict[str, list[float]] = field(default_factory=dict)
     latest_task_plan: dict[str, Any] | None = None
-    latest_eta: WebChatRunEta | None = None
-    observed_commands: list[str] = field(default_factory=list)
-    progress_texts: list[str] = field(default_factory=list)
-    tool_event_count: int = 0
-    last_eta_emitted_at: float = 0.0
-    last_eta_tool_event_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -111,8 +95,6 @@ class RunManagerServices:
     workspace_file_snapshot: Callable[[str | None], dict[str, dict[str, Any]] | None]
     ensure_session_worktree: Callable[[Any, str, str | None, str | None], Any | None]
     persist_run_workspace_changes: Callable[[RunContext, int | None], WebChatWorkspaceChanges | None]
-    estimate_run_eta: EstimateRunEta
-    record_run_eta_sample: RecordRunEtaSample
     agent_executor: RunExecutor
     refresh_session_preview: Callable[[str], None] | None = None
 
@@ -271,7 +253,6 @@ class RunManager:
         def event_stream():
             nonlocal cursor
             while True:
-                self._refresh_eta_if_stale(active)
                 with active.event_condition:
                     while active.next_event_id <= cursor and not active.terminal:
                         active.event_condition.wait(timeout=15)
@@ -367,7 +348,6 @@ class RunManager:
                 sessionId=active.context.session_id,
                 status=active.status,  # type: ignore[arg-type]
                 prompts=prompts,
-                eta=active.latest_eta,
             )
 
     def recover_interrupted_run_for_session(self, session_id: str) -> None:
@@ -415,8 +395,7 @@ class RunManager:
 
     def _emit(self, active: ActiveRun, event: dict[str, Any]) -> dict[str, Any]:
         self._track_event_duration(active, event)
-        self._track_eta_signals(active, event)
-        task_plan_updated = self._track_task_plan(active, event)
+        self._track_task_plan(active, event)
         system_message_id = self._persist_system_event(active, event)
         if system_message_id is not None and not event.get("messageId"):
             event = {**event, "messageId": str(system_message_id)}
@@ -429,8 +408,6 @@ class RunManager:
                 record_run_event(self._services.db(), emitted_event)
             active.events.append(emitted_event)
             active.event_condition.notify_all()
-        if task_plan_updated or self._should_refresh_eta(active, event):
-            self._emit_eta_update(active)
         return emitted_event
 
     def _track_task_plan(self, active: ActiveRun, event: dict[str, Any]) -> bool:
@@ -439,69 +416,6 @@ class RunManager:
             return False
         active.latest_task_plan = task_plan
         return True
-
-    def _emit_eta_update(self, active: ActiveRun, *, now: float | None = None) -> bool:
-        now_ts = now or time.time()
-        eta = self._services.estimate_run_eta(
-            self._services.db(),
-            active.context,
-            active.latest_task_plan,
-            started_at=active.created_at,
-            now=now_ts,
-            observed_commands=active.observed_commands,
-            progress_texts=active.progress_texts,
-            tool_event_count=active.tool_event_count,
-        )
-        if eta is None:
-            active.latest_eta = None
-            return False
-        active.latest_eta = eta
-        active.last_eta_emitted_at = now_ts
-        active.last_eta_tool_event_count = active.tool_event_count
-        emitted_event = {
-            "runId": active.context.run_id,
-            "sessionId": active.context.session_id,
-            "type": "eta.updated",
-            "eta": eta.model_dump(),
-        }
-        with active.event_condition:
-            event_id = active.next_event_id
-            active.next_event_id += 1
-            emitted_event = {"id": event_id, **emitted_event}
-            record_run_event(self._services.db(), emitted_event)
-            active.events.append(emitted_event)
-            active.event_condition.notify_all()
-        return True
-
-    def _refresh_eta_if_stale(self, active: ActiveRun, *, now: datetime | None = None) -> bool:
-        if active.terminal:
-            return False
-
-        now_dt = now or datetime.now(timezone.utc)
-        now_ts = now_dt.timestamp()
-        if active.last_eta_emitted_at and now_ts - active.last_eta_emitted_at < ETA_MIN_REFRESH_INTERVAL_SECONDS:
-            return False
-
-        eta = active.latest_eta
-        if eta is None:
-            if now_ts - active.created_at < ETA_INITIAL_REFRESH_DELAY_SECONDS:
-                return False
-            return self._emit_eta_update(active, now=now_ts)
-
-        expired = self._eta_completion_time(eta) <= now_dt
-        stale = bool(active.last_eta_emitted_at and now_ts - active.last_eta_emitted_at >= ETA_STALE_REFRESH_SECONDS)
-        if not expired and not stale:
-            return False
-        return self._emit_eta_update(active, now=now_ts)
-
-    def _eta_completion_time(self, eta: WebChatRunEta) -> datetime:
-        try:
-            parsed = datetime.fromisoformat(eta.estimatedCompletionAt.replace("Z", "+00:00"))
-        except ValueError:
-            return datetime.min.replace(tzinfo=timezone.utc)
-        if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
 
     def _persist_system_event(self, active: ActiveRun, event: dict[str, Any]) -> Any | None:
         system_event = self._system_event_part(active, event)
@@ -518,48 +432,8 @@ class RunManager:
     def _system_event_part(self, active: ActiveRun, event: dict[str, Any]) -> dict[str, Any] | None:
         return system_event_part(event, self._iso_now())
 
-    def _track_eta_signals(self, active: ActiveRun, event: dict[str, Any]) -> None:
-        event_type = event.get("type")
-        if event_type in {"tool.started", "tool.completed"}:
-            active.tool_event_count += 1
-
-        text = None
-        if event_type == "agent.status":
-            text = event.get("message")
-        elif event_type == "message.delta":
-            text = event.get("content")
-
-        if isinstance(text, str) and looks_like_progress_text(text):
-            active.progress_texts.append(text[-500:])
-            active.progress_texts = active.progress_texts[-30:]
-
-    def _should_refresh_eta(self, active: ActiveRun, event: dict[str, Any]) -> bool:
-        event_type = event.get("type")
-        if event_type == "run.started":
-            return False
-
-        progress_event = (
-            event_type == "agent.status" and looks_like_progress_text(str(event.get("message") or ""))
-        ) or (
-            event_type == "message.delta" and looks_like_progress_text(str(event.get("content") or ""))
-        )
-        if progress_event and getattr(active.latest_eta, "source", None) != "explicit_progress":
-            return True
-
-        now = time.time()
-        if active.last_eta_emitted_at and now - active.last_eta_emitted_at < 15:
-            return False
-
-        if progress_event:
-            return True
-        if event_type == "tool.completed" and active.tool_event_count - active.last_eta_tool_event_count >= 4:
-            return True
-        return False
-
     def _track_event_duration(self, active: ActiveRun, event: dict[str, Any]) -> None:
         event_type = event.get("type")
-        if event_type in {"tool.started", "tool.completed"}:
-            self._track_observed_command(active, event)
         if event_type not in {"tool.started", "tool.completed"}:
             return
 
@@ -572,21 +446,6 @@ class RunManager:
         starts = active.tool_started_at.get(key)
         if starts:
             active.tool_duration_ms += max(0, round((now - starts.pop()) * 1000))
-
-    def _track_observed_command(self, active: ActiveRun, event: dict[str, Any]) -> None:
-        parts = [event.get("name"), event.get("preview"), event.get("input")]
-        for part in parts:
-            if part is None:
-                continue
-            if isinstance(part, str):
-                text = part
-            else:
-                try:
-                    text = json.dumps(part, sort_keys=True)
-                except TypeError:
-                    text = str(part)
-            if text and text not in active.observed_commands:
-                active.observed_commands.append(text)
 
     def _finish(self, active: ActiveRun, status: str) -> None:
         active.status = status
@@ -684,21 +543,6 @@ class RunManager:
 
         return items or None
 
-    def _record_eta_sample(self, active: ActiveRun, generation_duration_ms: int, changes: WebChatWorkspaceChanges | None) -> None:
-        self._services.record_run_eta_sample(
-            self._services.db(),
-            active.context,
-            active.latest_task_plan,
-            duration_ms=generation_duration_ms,
-            tool_duration_ms=active.tool_duration_ms,
-            prompt_wait_duration_ms=active.prompt_wait_duration_ms,
-            status="completed",
-            workspace_changes=changes,
-            observed_commands=active.observed_commands,
-            progress_texts=active.progress_texts,
-            tool_event_count=active.tool_event_count,
-        )
-
     def _refresh_session_preview_async(self, session_id: str) -> None:
         refresh = self._services.refresh_session_preview
         if not refresh:
@@ -714,8 +558,6 @@ class RunManager:
             active.context.request_prompt = lambda prompt, timeout_seconds=600: self._request_prompt(active, prompt, timeout_seconds)
             final_text = self._executor(active.context, lambda event: self._emit(active, event))
             active.context.session_id = visible_session_id
-            if active.latest_eta is None:
-                self._emit_eta_update(active)
             if active.context.stop_requested.is_set():
                 self._emit(active, {"type": "run.stopped"})
                 self._finish(active, "stopped")
@@ -732,7 +574,6 @@ class RunManager:
                     message_items=self._message_items(active, metrics),
                 )
                 changes = self._services.persist_run_workspace_changes(active.context, assistant_message_id)
-                self._record_eta_sample(active, generation_duration_ms, changes)
                 self._emit(
                     active,
                     {

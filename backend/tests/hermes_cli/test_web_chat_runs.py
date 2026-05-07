@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
 
 from web_chat_test_helpers import committed_git_repo, git_repo
@@ -186,119 +185,6 @@ def test_start_run_streams_and_persists_task_plan(client, monkeypatch, tmp_path)
         "updatedAt": "2026-04-30T00:00:00+00:00",
     }
     assert assistant["parts"][1]["text"] == "Done"
-
-
-def test_start_run_streams_eta_from_progress_without_task_plan(client, monkeypatch, tmp_path):
-    import hermes_cli.web_chat as web_chat
-
-    repo = git_repo(tmp_path)
-
-    def fake_executor(context, emit):
-        emit({
-            "type": "agent.status",
-            "kind": "lifecycle",
-            "message": "Working through slice 2/6",
-        })
-        return "Done"
-
-    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
-
-    response = client.post("/api/web-chat/runs", json={"input": "Continue the refactor", "workspace": str(repo)})
-    assert response.status_code == 202
-    run = response.json()
-
-    with client.stream("GET", f"/api/web-chat/runs/{run['runId']}/events") as stream:
-        body = stream.read().decode()
-
-    assert "event: eta.updated" in body
-    assert '"source":"explicit_progress"' in body
-    assert '"totalSlices":6' in body
-    assert '"completedSlices":2' in body
-
-
-def test_start_run_streams_prompt_fallback_eta_without_task_plan(client, monkeypatch, tmp_path):
-    import hermes_cli.web_chat as web_chat
-
-    repo = git_repo(tmp_path)
-
-    def fake_executor(context, emit):
-        return "Done"
-
-    monkeypatch.setattr(web_chat, "run_manager", web_chat.RunManager(fake_executor))
-
-    response = client.post("/api/web-chat/runs", json={"input": "Refactor the chat footer", "workspace": str(repo)})
-    assert response.status_code == 202
-    run = response.json()
-
-    with client.stream("GET", f"/api/web-chat/runs/{run['runId']}/events") as stream:
-        body = stream.read().decode()
-
-    assert "event: eta.updated" in body
-    assert '"source":"prompt_fallback"' in body
-    assert '"isApproximate":true' in body
-
-
-def test_stale_active_run_eta_refresh_emits_updated_estimate():
-    from hermes_cli.web_chat_modules.models import WebChatRunEta
-    from hermes_cli.web_chat_modules.run_manager import ActiveRun, RunContext, RunManager, RunManagerServices
-
-    refreshed_eta = WebChatRunEta(
-        remainingMs=123_000,
-        estimatedCompletionAt="2026-05-01T12:02:03+00:00",
-        confidence="low",
-        basis="observed",
-        source="runtime_fallback",
-        isApproximate=True,
-        updatedAt="2026-05-01T12:00:00+00:00",
-    )
-    estimate_calls = []
-
-    def estimate_run_eta(*args, **kwargs):
-        estimate_calls.append(kwargs)
-        return refreshed_eta
-
-    services = RunManagerServices(
-        source="test",
-        db=lambda: object(),
-        resolve_requested_model=lambda *args, **kwargs: "test-model",
-        resolve_requested_reasoning_effort=lambda *args, **kwargs: None,
-        validate_workspace=lambda workspace: None,
-        session_workspace=lambda session: None,
-        validate_profile=lambda profile: profile,
-        resolve_attachments=lambda attachments, workspace: [],
-        validate_edited_message_continuation=lambda *args, **kwargs: None,
-        input_with_attachment_context=lambda input_text, attachments: input_text,
-        set_session_title_safely=lambda *args, **kwargs: None,
-        title_from_message=lambda message: message,
-        git_status_porcelain=lambda workspace: "",
-        workspace_change_fingerprint=lambda workspace: None,
-        workspace_file_snapshot=lambda workspace: None,
-        ensure_session_worktree=lambda *args, **kwargs: None,
-        persist_run_workspace_changes=lambda *args, **kwargs: None,
-        estimate_run_eta=estimate_run_eta,
-        record_run_eta_sample=lambda *args, **kwargs: None,
-        agent_executor=lambda context, emit: "Done",
-    )
-    manager = RunManager(services)
-    active = ActiveRun(context=RunContext(run_id="run-1", session_id="session-1", input="Keep working"))
-    active.latest_eta = WebChatRunEta(
-        remainingMs=1,
-        estimatedCompletionAt="2026-05-01T11:59:00+00:00",
-        confidence="low",
-        basis="default",
-        source="runtime_fallback",
-        isApproximate=True,
-        updatedAt="2026-05-01T11:58:59+00:00",
-    )
-    active.last_eta_emitted_at = 0
-
-    refreshed = manager._refresh_eta_if_stale(active, now=datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc))
-
-    assert refreshed is True
-    assert estimate_calls
-    assert active.latest_eta == refreshed_eta
-    assert active.events[-1]["type"] == "eta.updated"
-    assert active.events[-1]["eta"] == refreshed_eta.model_dump()
 
 
 def test_task_plan_from_todo_tool_result_normalizes_items():

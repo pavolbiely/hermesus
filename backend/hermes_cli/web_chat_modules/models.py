@@ -471,37 +471,11 @@ class WebChatSessionPreviewResponse(BaseModel):
     updatedAt: str | None = None
 
 
-class WebChatRunEta(BaseModel):
-    remainingMs: int
-    estimatedCompletionAt: str
-    confidence: Literal["low", "medium", "high"] = "low"
-    basis: Literal[
-        "default",
-        "profile",
-        "workspace",
-        "workspace_model",
-        "task_type",
-        "project_area",
-        "validation_profile",
-        "observed",
-    ] = "default"
-    source: Literal["task_plan", "explicit_progress", "runtime_fallback", "prompt_fallback"] = "task_plan"
-    isApproximate: bool = False
-    taskType: str | None = None
-    projectArea: str | None = None
-    validationProfile: str | None = None
-    totalSlices: int | None = None
-    completedSlices: int | None = None
-    sliceMs: int | None = None
-    updatedAt: str
-
-
 class ActiveRunSummary(BaseModel):
     runId: str
     sessionId: str
     status: Literal["running", "stopping", "completed", "stopped", "failed", "interrupted"]
     prompts: list[WebChatPrompt] = Field(default_factory=list)
-    eta: WebChatRunEta | None = None
 
 
 class SessionDetailResponse(BaseModel):

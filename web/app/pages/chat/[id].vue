@@ -145,9 +145,6 @@ const {
   streamError,
   chatStatus,
   currentActivityLabel,
-  currentEta,
-  currentEtaExpired,
-  currentEtaRemainingMs,
   latestTaskPlan,
   isRunning,
   connectRun,
@@ -227,42 +224,6 @@ const promptContextUsage = computed(() => {
   }
 })
 
-function formatPromptEta(ms: number) {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60)
-    const remainingMinutes = minutes % 60
-    return `${hours}h ${remainingMinutes.toString().padStart(2, '0')}m`
-  }
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`
-}
-
-const promptEtaLabel = computed(() => {
-  if (!currentEta.value) return null
-  if (currentEtaExpired.value) return '~updating…'
-  if (currentEtaRemainingMs.value === null || currentEtaRemainingMs.value === undefined) return null
-  return `${currentEta.value.isApproximate ? '~' : ''}${formatPromptEta(currentEtaRemainingMs.value)}`
-})
-
-const promptEtaTooltip = computed(() => {
-  const eta = currentEta.value
-  if (!eta) return 'Estimated time remaining'
-  if (currentEtaExpired.value) return 'Estimate is stale; waiting for update'
-  const slices = eta.totalSlices ? `${eta.completedSlices || 0}/${eta.totalSlices} slices` : null
-  const source = eta.source === 'task_plan'
-    ? 'Based on task plan progress'
-    : eta.source === 'explicit_progress'
-      ? 'Approximate — inferred from runtime progress'
-      : eta.source === 'runtime_fallback'
-        ? 'Approximate — inferred from runtime activity'
-        : eta.source === 'prompt_fallback'
-          ? 'Approximate — no explicit task plan yet'
-          : 'Approximate estimate'
-  const details = [eta.taskType, eta.projectArea, eta.validationProfile].filter(Boolean).join(' · ')
-  return [source, slices, details || eta.basis, eta.confidence].filter(Boolean).join(' · ')
-})
 const {
   editingMessageId,
   editingText,
@@ -1230,9 +1191,6 @@ watch(
 watch(
   () => displayedData.value?.activeRun,
   (activeRun) => {
-    if (activeRun?.sessionId === sessionId.value && activeRun.eta) {
-      currentEta.value = activeRun.eta
-    }
     reconcileActiveRunSnapshot({
       sessionId: sessionId.value,
       activeRun,
@@ -1589,14 +1547,6 @@ onBeforeUnmount(() => {
                   :usage="providerUsage.usage.value"
                   :loading="providerUsage.loading.value"
                 />
-                <div v-if="promptEtaLabel" class="ml-auto shrink-0">
-                  <UTooltip :text="promptEtaTooltip" :content="{ side: 'top', sideOffset: 8, align: 'end' }">
-                    <span class="inline-flex items-center gap-1 text-[11px] tabular-nums text-muted">
-                      <UIcon name="i-lucide-clock-3" class="size-3" />
-                      <span>ETA {{ promptEtaLabel }}</span>
-                    </span>
-                  </UTooltip>
-                </div>
               </div>
               <div
                 v-if="isDraggingFiles"
