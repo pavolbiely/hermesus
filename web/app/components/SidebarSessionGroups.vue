@@ -7,6 +7,7 @@ import { displayedGroupSessions, hiddenGroupSessionCount, MAX_COLLAPSED_SESSION_
 
 const props = defineProps<{
   groups: SessionGroup[]
+  workspaces: WebChatWorkspace[]
   activeSessionId?: string
   pendingSessionId?: string | null
   now: Date
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   openSession: [session: WebChatSession]
   prefetchSession: [session: WebChatSession]
   renameSession: [session: WebChatSession]
+  moveSessionToWorkspace: [session: WebChatSession, workspace: WebChatWorkspace]
   toggleSessionPinned: [session: WebChatSession]
   restoreSession: [session: WebChatSession]
   confirmSessionAction: [action: 'duplicate' | 'archive' | 'delete', session: WebChatSession]
@@ -490,6 +492,25 @@ function toggleSessionPinned(session: WebChatSession) {
   emit('toggleSessionPinned', session)
 }
 
+function moveSessionToWorkspace(session: WebChatSession, workspace: WebChatWorkspace) {
+  openMenuSessionId.value = null
+  contextMenuReference.value = null
+  emit('moveSessionToWorkspace', session, workspace)
+}
+
+function moveWorkspaceItems(session: WebChatSession): DropdownMenuItem[] {
+  const targetWorkspaces = props.workspaces.filter(workspace => workspace.path !== session.workspace)
+  if (!targetWorkspaces.length) {
+    return [{ label: 'No other workspaces', disabled: true }]
+  }
+
+  return targetWorkspaces.map(workspace => ({
+    label: workspace.label,
+    icon: 'i-lucide-folder',
+    onSelect: () => moveSessionToWorkspace(session, workspace)
+  }))
+}
+
 function restoreSession(session: WebChatSession) {
   openMenuSessionId.value = null
   contextMenuReference.value = null
@@ -534,6 +555,11 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
       label: 'Duplicate',
       icon: 'i-lucide-copy',
       onSelect: () => confirmSessionAction('duplicate', session)
+    },
+    {
+      label: 'Move to workspace...',
+      icon: 'i-lucide-folder-input',
+      children: moveWorkspaceItems(session)
     },
     {
       label: 'Archive',

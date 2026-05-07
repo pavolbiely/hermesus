@@ -557,6 +557,30 @@ async function toggleSessionPinned(session: WebChatSession) {
   }
 }
 
+async function moveSessionToWorkspace(session: WebChatSession, workspace: WebChatWorkspace) {
+  if (session.workspace === workspace.path) return
+
+  pendingSessionId.value = session.id
+  try {
+    const response = await api.setSessionWorkspace(session.id, workspace.path)
+    sessionCache.set(response)
+    await refresh()
+    toast.add({
+      title: 'Chat moved',
+      description: `Moved to ${workspace.label}.`,
+      color: 'success'
+    })
+  } catch (err) {
+    toast.add({
+      title: 'Failed to move chat',
+      description: err instanceof Error ? err.message : String(err),
+      color: 'error'
+    })
+  } finally {
+    pendingSessionId.value = null
+  }
+}
+
 async function setSessionArchived(session: WebChatSession, archived: boolean) {
   pendingSessionId.value = session.id
   try {
@@ -703,6 +727,7 @@ provide('requestedSessionId', readonly(requestedSessionId))
 
         <SidebarSessionGroups
           :groups="groupedSessions"
+          :workspaces="context.workspaces.value"
           :active-session-id="activeSidebarSessionId"
           :pending-session-id="pendingSessionId"
           :now="now"
@@ -718,6 +743,7 @@ provide('requestedSessionId', readonly(requestedSessionId))
           @open-session="openSession"
           @prefetch-session="prefetchSession"
           @rename-session="beginRename"
+          @move-session-to-workspace="moveSessionToWorkspace"
           @toggle-session-pinned="toggleSessionPinned"
           @restore-session="restoreSession"
           @confirm-session-action="beginConfirmAction"

@@ -226,6 +226,10 @@ export function useHermesApi() {
       method: 'PATCH',
       body: { pinned }
     }),
+    setSessionWorkspace: (id: string, workspace: string) => request<SessionDetailResponse>(`/api/web-chat/sessions/${id}`, {
+      method: 'PATCH',
+      body: { workspace }
+    }),
     editMessage: (sessionId: string, messageId: string, content: string) => request<SessionDetailResponse>(`/api/web-chat/sessions/${sessionId}/messages/${messageId}`, {
       method: 'PATCH',
       body: { content }

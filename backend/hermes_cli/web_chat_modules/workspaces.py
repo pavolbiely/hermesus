@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -108,7 +109,37 @@ def update_managed_workspace(
         settings["workspaces"] = [updated if entry["id"] == workspace_id else entry for entry in stored_entries]
         write_project_settings(settings)
 
+    if existing["path"] != path:
+        update_session_workspace_paths(db_factory(), existing["path"], path)
+
     return workspace_from_mapping({"id": workspace_id, "label": label, "path": path})
+
+
+def update_session_workspace_paths(db: SessionDB, old_path: str, new_path: str) -> int:
+    """Move sessions that referenced a renamed workspace path to the new path."""
+    if old_path == new_path:
+        return 0
+
+    def _do(conn: Any) -> int:
+        rows = conn.execute("SELECT id, model_config FROM sessions WHERE model_config IS NOT NULL").fetchall()
+        updated_count = 0
+        for row in rows:
+            try:
+                config = json.loads(row["model_config"] or "{}")
+            except Exception:
+                continue
+            if not isinstance(config, dict) or config.get("workspace") != old_path:
+                continue
+
+            config["workspace"] = new_path
+            conn.execute(
+                "UPDATE sessions SET model_config = ? WHERE id = ?",
+                (json.dumps(config), row["id"]),
+            )
+            updated_count += 1
+        return updated_count
+
+    return db._execute_write(_do) or 0
 
 
 def reorder_managed_workspaces(

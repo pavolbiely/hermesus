@@ -381,6 +381,38 @@ def test_manages_workspaces_for_composer(client, tmp_path):
     assert client.get("/api/web-chat/workspaces").json() == {"workspaces": [], "activeWorkspace": None}
 
 
+def test_workspace_path_update_moves_existing_sessions(client, tmp_path):
+    from hermes_state import SessionDB
+
+    old_workspace = tmp_path / "old-workspace"
+    new_workspace = tmp_path / "new-workspace"
+    other_workspace = tmp_path / "other-workspace"
+    old_workspace.mkdir()
+    new_workspace.mkdir()
+    other_workspace.mkdir()
+
+    create = client.post("/api/web-chat/workspaces", json={"label": "Old", "path": str(old_workspace)})
+    assert create.status_code == 201
+    workspace_id = create.json()["workspace"]["id"]
+
+    db = SessionDB()
+    db.create_session("session-to-move", source="web-chat", model_config={"workspace": str(old_workspace.resolve()), "pinned": True})
+    db.append_message("session-to-move", "user", "Move me")
+    db.create_session("session-to-keep", source="web-chat", model_config={"workspace": str(other_workspace.resolve())})
+    db.append_message("session-to-keep", "user", "Keep me")
+
+    update = client.patch(
+        f"/api/web-chat/workspaces/{workspace_id}",
+        json={"label": "New", "path": str(new_workspace)},
+    )
+
+    assert update.status_code == 200
+    sessions = {session["id"]: session for session in client.get("/api/web-chat/sessions").json()["sessions"]}
+    assert sessions["session-to-move"]["workspace"] == str(new_workspace.resolve())
+    assert sessions["session-to-move"]["pinned"] is True
+    assert sessions["session-to-keep"]["workspace"] == str(other_workspace.resolve())
+
+
 def test_reorders_managed_workspaces(client, tmp_path, monkeypatch):
     project = tmp_path / "settings-project"
     first = tmp_path / "first"
