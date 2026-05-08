@@ -204,6 +204,7 @@ export type SpeechInputTranscriptionResponse = {
 
 export type ReadAloudSummaryRequest = {
   text: string
+  purpose?: 'message' | 'interactive_prompt'
   model?: string | null
   provider?: string | null
   reasoningEffort?: string | null

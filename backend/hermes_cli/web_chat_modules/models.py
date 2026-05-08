@@ -219,6 +219,7 @@ class SynthesizeSpeechRequest(BaseModel):
 
 class ReadAloudSummaryRequest(BaseModel):
     text: str = Field(min_length=1, max_length=65536)
+    purpose: Literal["message", "interactive_prompt"] = "message"
     model: str | None = Field(default=None, max_length=512)
     provider: str | None = Field(default=None, max_length=256)
     reasoningEffort: str | None = Field(default=None, max_length=64)

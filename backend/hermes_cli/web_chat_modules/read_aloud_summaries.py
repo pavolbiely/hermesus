@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Callable
+from typing import Callable, Literal
 
 from fastapi import HTTPException, status
 
@@ -20,6 +20,7 @@ def generate_read_aloud_summary(
     text: str,
     *,
     hidden_agent: HiddenAgent,
+    purpose: Literal["message", "interactive_prompt"] = "message",
     model: str | None = None,
     provider: str | None = None,
     reasoning_effort: str | None = None,
@@ -29,11 +30,11 @@ def generate_read_aloud_summary(
     if not source:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No text to summarize")
 
-    fast_summary = _plain_short_message_summary(source)
+    fast_summary = _plain_short_message_summary(source) if purpose == "message" else ""
     if fast_summary:
         return fast_summary
 
-    prompt = _build_read_aloud_summary_prompt(source)
+    prompt = _build_read_aloud_summary_prompt(source, purpose=purpose)
 
     started = time.perf_counter()
     try:
@@ -118,7 +119,23 @@ def _plain_short_message_summary(source: str) -> str:
     return _clean_spoken_summary(source)
 
 
-def _build_read_aloud_summary_prompt(source: str) -> str:
+def _build_read_aloud_summary_prompt(source: str, *, purpose: Literal["message", "interactive_prompt"] = "message") -> str:
+    if purpose == "interactive_prompt":
+        return (
+            "Fast task: turn the interactive prompt below into a short, human spoken explanation of what the user needs to decide or provide.\n"
+            "Do not browse, inspect files, run tools, execute commands, read history, or gather extra context.\n"
+            "Use only the text provided in this prompt and answer immediately.\n"
+            "Use the same language as the prompt.\n"
+            "Explain the requested action naturally, like a helpful person speaking out loud.\n"
+            "Mention the important choice or required response, but do not narrate raw detail line by line.\n"
+            "Do not read raw hashes, IDs, tokens, paths, commands, JSON, stack traces, or long technical values in detail; describe them generally when relevant.\n"
+            "Do not say that this is a summary or retelling.\n"
+            "Do not include secrets, credentials, tokens, or API keys.\n"
+            "Return only the spoken text.\n\n"
+            "Interactive prompt:\n"
+            f"{source[:READ_ALOUD_SUMMARY_MAX_INPUT_CHARS]}"
+        )
+
     return (
         "Fast task: turn the assistant message below into a human, listenable spoken retelling.\n"
         "Do not browse, inspect files, run tools, execute commands, read history, or gather extra context.\n"

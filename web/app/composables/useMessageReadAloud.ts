@@ -25,6 +25,8 @@ type ReadAloudOptions = {
   queue?: boolean
   sessionId?: string | null
   skipReadableSummary?: boolean
+  forceReadableSummary?: boolean
+  readableSummaryPurpose?: 'message' | 'interactive_prompt'
 }
 type PreparedReadAloud =
   | { engine: 'web-speech', text: string }
@@ -275,7 +277,8 @@ export function useMessageReadAloud() {
 
   async function resolveReadAloudText(message: WebChatMessage, attempt: number, options: ReadAloudOptions = {}) {
     const text = speechTextForMessage(message)
-    if (!text || options.skipReadableSummary || readAloudContentMode() !== 'summary') return text
+    if (!text || options.skipReadableSummary) return text
+    if (!options.forceReadableSummary && readAloudContentMode() !== 'summary') return text
 
     generatingMessageId.value = message.id
     generatingSessionId.value = readSessionId(options)
@@ -284,9 +287,10 @@ export function useMessageReadAloud() {
       const model = selectedModel.value
       const provider = selectedProvider.value
       const reasoningEffort = selectedReasoningEffort.value
-      const cacheKey = JSON.stringify({ text, model, provider, reasoningEffort })
+      const purpose = options.readableSummaryPurpose ?? 'message'
+      const cacheKey = JSON.stringify({ text, purpose, model, provider, reasoningEffort })
       const summary = await cachedReadAloudSummary(cacheKey, async () => {
-        const response = await api.generateReadAloudSummary({ text, model, provider, reasoningEffort })
+        const response = await api.generateReadAloudSummary({ text, purpose, model, provider, reasoningEffort })
         return response.text
       })
       if (readAttempt !== attempt) return ''

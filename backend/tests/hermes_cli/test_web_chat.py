@@ -378,6 +378,38 @@ def test_returns_short_plain_read_aloud_text_without_llm(client, monkeypatch):
     assert response.json() == {"text": "Testy prešli bez chýb."}
 
 
+def test_generates_read_aloud_summary_for_interactive_prompt(client, monkeypatch):
+    import agent.auxiliary_client as auxiliary_client
+
+    calls = []
+
+    def call_llm(**kwargs):
+        calls.append(kwargs)
+        message = types.SimpleNamespace(content="Pýta sa, či chceš povoliť túto zmenu. Dlhý kontrolný hash netreba riešiť, stačí vybrať možnosť povoliť alebo zamietnuť.")
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+    monkeypatch.setattr(auxiliary_client, "call_llm", call_llm)
+
+    response = client.post(
+        "/api/web-chat/read-aloud-summary",
+        json={
+            "purpose": "interactive_prompt",
+            "text": "Approve tool call. Requires md5 abcdef0123456789abcdef0123456789. Available responses: Allow; Deny",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "text": "Pýta sa, či chceš povoliť túto zmenu. Dlhý kontrolný hash netreba riešiť, stačí vybrať možnosť povoliť alebo zamietnuť."
+    }
+    assert len(calls) == 1
+    prompt = calls[0]["messages"][0]["content"]
+    assert "interactive prompt" in prompt
+    assert "what the user needs to decide or provide" in prompt
+    assert "Do not read raw hashes" in prompt
+    assert "abcdef0123456789abcdef0123456789" in prompt
+
+
 def test_generates_read_aloud_summary_for_multi_sentence_plain_text(client, monkeypatch):
     import agent.auxiliary_client as auxiliary_client
 

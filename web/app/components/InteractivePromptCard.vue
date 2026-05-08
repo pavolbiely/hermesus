@@ -58,7 +58,12 @@ function answeredLabel(prompt: InteractivePrompt) {
 }
 
 function promptReadAloudText(prompt: InteractivePrompt) {
-  return [prompt.title, prompt.description]
+  const choices = prompt.choices
+    .map(choice => [choice.label, choice.description].map(value => value?.trim()).filter(Boolean).join(': '))
+    .filter(Boolean)
+    .join('; ')
+
+  return [prompt.title, prompt.description, prompt.detail, choices ? `Available responses: ${choices}` : null]
     .map(value => value?.trim())
     .filter(Boolean)
     .join('. ')
@@ -79,7 +84,12 @@ function maybeAutoReadPrompt(prompt: InteractivePrompt) {
   if (!text) return
 
   autoReadPromptIds.add(prompt.id)
-  void readAloud(promptReadAloudMessage(prompt, text), { queue: true, sessionId: props.sessionId, skipReadableSummary: true })
+  void readAloud(promptReadAloudMessage(prompt, text), {
+    queue: true,
+    sessionId: props.sessionId,
+    forceReadableSummary: true,
+    readableSummaryPurpose: 'interactive_prompt'
+  })
 }
 
 watch(
