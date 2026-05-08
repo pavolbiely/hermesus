@@ -12,6 +12,7 @@ Use this before broad repository search.
 - `web/app/composables/`: frontend API, run streaming, message/run state.
 - `web/app/types/web-chat.ts`: frontend API/event types.
 - `.runtime/`: disposable runtime mirror; do not edit as source.
+- `.github/workflows/tests.yml`: GitHub Actions CI for backend runtime-mirror tests and frontend checks.
 
 ## High-token hotspots
 

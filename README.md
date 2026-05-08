@@ -190,6 +190,8 @@ Key frontend areas include chat rendering, queued-message flows, attachments, fi
 
 ## Verification
 
+GitHub Actions runs the backend and frontend checks on every push and pull request via [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+
 Frontend verification from [`web/`](web):
 
 ```bash
