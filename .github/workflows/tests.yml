@@ -63,6 +63,9 @@ jobs:
           cp backend/tests/hermes_cli/web_chat_test_helpers.py .runtime/hermes-agent/tests/hermes_cli/
           cp backend/tests/hermes_cli/test_web_chat*.py .runtime/hermes-agent/tests/hermes_cli/
 
+      - name: Patch runtime web-chat integration
+        run: python3 scripts/patch-hermes-runtime.py
+
       - name: Run backend tests
         working-directory: .runtime/hermes-agent
         env:
