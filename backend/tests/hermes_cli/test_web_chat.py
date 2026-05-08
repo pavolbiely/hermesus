@@ -302,7 +302,10 @@ def test_streams_elevenlabs_speech_with_request_api_key_and_reuses_cache(client,
         "model_id": "eleven_flash_v2_5",
         "output_format": "mp3_44100_128",
     }
-    assert getattr(voice_settings, "speed", None) == 1.2
+    if isinstance(voice_settings, dict):
+        assert voice_settings.get("speed") == 1.2
+    else:
+        assert getattr(voice_settings, "speed", None) == 1.2
 
 
 def test_synthesizes_edge_speech_with_detected_language_voice(client, tmp_path, monkeypatch):
@@ -336,6 +339,7 @@ def test_synthesizes_edge_speech_with_detected_language_voice(client, tmp_path, 
 
 
 def test_synthesizes_edge_speech_with_slovak_language_voice(client, tmp_path, monkeypatch):
+    import hermes_cli.web_chat_modules.tts as web_chat_tts
     import tools.tts_tool as tts_tool
 
     audio_path = tmp_path / "speech.mp3"
@@ -357,7 +361,7 @@ def test_synthesizes_edge_speech_with_slovak_language_voice(client, tmp_path, mo
 
     assert response.status_code == 200
     assert response.content == b"fake mp3"
-    assert seen_configs == [{"provider": "edge", "edge": {"voice": "***"}}]
+    assert seen_configs == [{"provider": "edge", "edge": {"voice": web_chat_tts._EDGE_VOICE_BY_LANGUAGE["sk"]}}]
     assert tts_tool._load_tts_config() == {"provider": "edge", "edge": {"voice": "en-US-AriaNeural"}}
 
 
