@@ -37,6 +37,15 @@ export function useWebChatSessionCache(api: HermesApi = useHermesApi()) {
     sessions.value = { ...sessions.value, [sessionId]: response }
   }
 
+  function update(sessionId: string, updater: (current: SessionDetailResponse) => SessionDetailResponse) {
+    const current = get(sessionId)
+    if (!current) return null
+
+    const next = updater(current)
+    sessions.value = { ...sessions.value, [sessionId]: next }
+    return next
+  }
+
   function remove(sessionId: string) {
     const { [sessionId]: _removed, ...rest } = sessions.value
     sessions.value = rest
@@ -89,6 +98,7 @@ export function useWebChatSessionCache(api: HermesApi = useHermesApi()) {
     sessions,
     get,
     set,
+    update,
     remove,
     invalidate,
     generation,

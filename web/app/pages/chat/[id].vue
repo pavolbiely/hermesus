@@ -2,7 +2,7 @@
 import { playNotificationSound, prepareNotificationSound } from '../../utils/notificationSound'
 import { isLiveActiveRun, reconcileActiveRunSnapshot } from '../../utils/activeRunRecovery'
 import { connectRouteRun } from '../../utils/routeRunConnection'
-import type { GitFileSelection, SessionDetailResponse, WebChatAttachment, WebChatMessage } from '~/types/web-chat'
+import type { SessionDetailResponse, WebChatAttachment, WebChatMessage } from '~/types/web-chat'
 import { type QueuedMessage, shouldAutoSendQueuedMessage } from '~/utils/queuedMessages'
 import { latestChangePartKey, messageText } from '~/utils/chatMessages'
 import { writeClipboardText } from '~/utils/clipboard'
@@ -11,6 +11,7 @@ import { isElementVisibleInRoot, nearestScrollableAncestor, scrollElementTreeToB
 import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
 import { latestContextUsageTokens } from '~/utils/contextUsage'
 import { readAloudAutoReadResponsesEnabled } from '~/utils/readAloudPreferences'
+import { applySessionMessageUpdate } from '~/utils/sessionMessageUpdates'
 
 const INITIAL_SESSION_MESSAGE_LIMIT = 60
 const OLDER_SESSION_MESSAGE_LIMIT = 80
@@ -38,10 +39,6 @@ const context = useChatComposerContext()
 const toast = useToast()
 const { read: readMessageAloud } = useMessageReadAloud()
 const spellcheck = useChatInputSpellcheck()
-const generatingCommitMessage = ref(false)
-const generatedCommitMessage = ref('')
-const commitMessageModalOpen = ref(false)
-const commitMessageCopied = ref(false)
 const chatContainer = ref<HTMLElement | null>(null)
 const chatFooterContainer = ref<HTMLElement | null>(null)
 const chatPromptColumn = ref<HTMLElement | null>(null)
@@ -58,7 +55,6 @@ const loadingOlderMessages = ref(false)
 const olderMessagesError = ref<string | null>(null)
 let preserveScrollAfterPrepend: { root: Element, previousScrollHeight: number, previousScrollTop: number } | null = null
 let copiedMessageTimer: ReturnType<typeof setTimeout> | undefined
-let commitMessageCopiedTimer: ReturnType<typeof setTimeout> | undefined
 const refreshSessions = inject<() => Promise<void> | void>('refreshSessions')
 const markSessionRead = inject<(sessionId: string, messageCount: number) => void>('markSessionRead')
 const requestedSessionId = inject<Readonly<Ref<string | null>>>('requestedSessionId')
@@ -202,7 +198,7 @@ const {
   showError
 })
 const latestGitChangePartKey = computed(() => latestChangePartKey(messages.value))
-const chatMessagesStatus = computed(() => chatStatus.value === 'submitted' ? 'streaming' : chatStatus.value)
+const chatMessagesStatus = computed(() => chatStatus.value)
 const canAutoSendQueuedMessage = computed(() => shouldAutoSendQueuedMessage({
   hasSession: hasSession.value,
   queuedCount: queuedForSession.value.length,
@@ -382,6 +378,14 @@ function showError(err: unknown, fallback: string) {
   toast.add({ color: 'error', title: fallback, description: message })
 }
 
+const generatedCommitMessage = useGeneratedCommitMessage({
+  api,
+  sessionId,
+  selectedWorkspace: context.selectedWorkspace,
+  toast,
+  showError
+})
+
 function showVoiceError(message: string) {
   showError(new Error(message), 'Voice input failed')
 }
@@ -409,62 +413,6 @@ function updateSelectedReasoningEffort(reasoningEffort: string) {
 function rememberSubmittedSelection(submittedSessionId: string | null | undefined = sessionId.value) {
   composer.rememberLastUsedSelection()
   composer.rememberSessionSelection(submittedSessionId)
-}
-
-function showCommitMessageCopied() {
-  commitMessageCopied.value = true
-  if (commitMessageCopiedTimer) clearTimeout(commitMessageCopiedTimer)
-  commitMessageCopiedTimer = setTimeout(() => {
-    commitMessageCopied.value = false
-    commitMessageCopiedTimer = undefined
-  }, 2500)
-}
-
-async function copyGeneratedCommitMessage() {
-  if (!generatedCommitMessage.value) return
-
-  try {
-    await writeClipboardText(generatedCommitMessage.value)
-    showCommitMessageCopied()
-  } catch (err) {
-    toast.add({
-      color: 'error',
-      title: 'Could not copy commit message',
-      description: err instanceof Error ? err.message : String(err)
-    })
-  }
-}
-
-async function generateCommitMessage() {
-  if (!context.selectedWorkspace.value || generatingCommitMessage.value) return
-
-  generatingCommitMessage.value = true
-  generatedCommitMessage.value = ''
-  commitMessageCopied.value = false
-  if (commitMessageCopiedTimer) {
-    clearTimeout(commitMessageCopiedTimer)
-    commitMessageCopiedTimer = undefined
-  }
-  try {
-    const status = await api.getGitStatus(context.selectedWorkspace.value)
-    const selection: GitFileSelection[] = status.files.map(file => ({ area: file.area, path: file.path }))
-    if (!selection.length) {
-      toast.add({ color: 'warning', title: 'No Git changes', description: 'There are no changed files to generate a commit message from.' })
-      return
-    }
-
-    const suggestion = await api.generateCommitMessage({
-      workspace: context.selectedWorkspace.value,
-      sessionId: sessionId.value,
-      selection
-    })
-    generatedCommitMessage.value = [suggestion.subject, suggestion.body].filter(Boolean).join('\n\n')
-    commitMessageModalOpen.value = true
-  } catch (err) {
-    showError(err, 'Could not generate commit message')
-  } finally {
-    generatingCommitMessage.value = false
-  }
 }
 
 function isMissingOrInactiveRunError(err: unknown) {
@@ -676,6 +624,13 @@ function waitForAnimationFrame() {
   return new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
 }
 
+function updateVisibleSessionMessage(sessionToUpdate: string, message: WebChatMessage, mode: 'append' | 'replace') {
+  if (data.value?.session.id === sessionToUpdate) {
+    data.value = applySessionMessageUpdate(data.value, message, mode)
+  }
+  sessionCache.update(sessionToUpdate, snapshot => applySessionMessageUpdate(snapshot, message, mode))
+}
+
 async function startRunForLocalMessage(
   userMessage: WebChatMessage,
   text: string,
@@ -705,6 +660,7 @@ async function startRunForLocalMessage(
     }
     Object.assign(userMessage, sentMessage)
     messages.value = messages.value.map(message => message.id === userMessage.id || message.clientMessageId === clientMessageId ? sentMessage : message)
+    updateVisibleSessionMessage(targetSessionId, sentMessage, 'replace')
     rememberSubmittedSelection(targetSessionId)
     playNotificationSound('sent')
     void refreshSessions?.()
@@ -716,7 +672,9 @@ async function startRunForLocalMessage(
     void refresh()
   } catch (err) {
     const errorMessage = getHermesErrorMessage(err, 'Not sent')
+    const failedMessage = { ...userMessage, localStatus: 'failed' as const, localError: errorMessage }
     messages.value = markLocalMessageFailed(messages.value, userMessage.id, errorMessage)
+    updateVisibleSessionMessage(targetSessionId, failedMessage, 'replace')
     showError(err, 'Failed to send message')
     submitStatus.value = 'error'
     activeChatRuns.markFinished(sessionId.value)
@@ -1015,13 +973,15 @@ async function sendMessageNow(message: string, options: SendMessageOptions = {})
   const pendingAttachments = options.includeCurrentAttachments === false ? [] : [...context.attachments.value]
   void prepareNotificationSound()
   if (options.clearInput !== false) input.value = ''
-  submitStatus.value = 'submitted'
   const clientMessageId = crypto.randomUUID()
   const userMessage = createLocalMessage('user', message)
   userMessage.clientMessageId = clientMessageId
   userMessage.localStatus = 'sending'
   if (pendingAttachments.length) userMessage.parts.unshift({ type: 'media', attachments: pendingAttachments })
+
   timeline.addOptimisticUserMessage(userMessage)
+  updateVisibleSessionMessage(sessionId.value, userMessage, 'append')
+  submitStatus.value = 'submitted'
   scrollSubmittedMessageToBottom()
   if (options.includeCurrentAttachments !== false) context.clearAttachments()
 
@@ -1345,7 +1305,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (copiedMessageTimer) clearTimeout(copiedMessageTimer)
-  if (commitMessageCopiedTimer) clearTimeout(commitMessageCopiedTimer)
   if (previousScrollRestoration) history.scrollRestoration = previousScrollRestoration
   bottomReadObserver?.disconnect()
   olderMessagesObserver?.disconnect()
@@ -1380,121 +1339,50 @@ onBeforeUnmount(() => {
         :workspace-status="workspaceStatus"
         commit-visible
         :commit-disabled="!context.selectedWorkspace.value"
-        :commit-loading="generatingCommitMessage"
-        @generate-commit="generateCommitMessage"
+        :commit-loading="generatedCommitMessage.generating.value"
+        @generate-commit="generatedCommitMessage.generate"
       />
     </template>
 
     <template #body>
       <UContainer class="mx-auto w-full max-w-[740px] px-4 pt-6 pb-0 sm:px-6 lg:px-8">
-        <div ref="chatContainer">
-          <div v-if="isLoadingSession" class="min-h-[calc(100dvh-14rem)] space-y-6 pt-2" aria-label="Loading chat">
-          <div
-            v-for="index in loadingSkeletonCount"
-            :key="index"
-            class="flex animate-pulse"
-            :class="index % 2 === 0 ? 'justify-end' : 'justify-start'"
-          >
-            <USkeleton
-              class="rounded-2xl"
-              :class="[
-                index % 2 === 0 ? 'h-10 w-3/5' : 'h-20 w-4/5',
-                index === loadingSkeletonCount ? 'opacity-45' : 'opacity-70'
-              ]"
-            />
-          </div>
-        </div>
-
-        <div v-else-if="sessionError || !hasSession" class="flex min-h-[40vh] items-center justify-center text-center">
-          <div class="max-w-sm space-y-3">
-            <UIcon name="i-lucide-message-circle-warning" class="mx-auto size-8 text-muted" />
-            <div class="space-y-1">
-              <h2 class="font-medium text-highlighted">Could not load chat</h2>
-              <p class="text-sm text-muted">The chat may have been deleted or the backend is unavailable.</p>
-            </div>
-            <UButton color="neutral" variant="soft" label="Try again" @click="() => refresh()" />
-          </div>
-        </div>
-
-        <template v-else>
-          <div
-            v-if="hasOlderMessages || olderMessagesError"
-            ref="olderMessagesSentinel"
-            class="mb-4 flex flex-col items-center gap-2"
-          >
-            <UButton
-              v-if="hasOlderMessages"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              :label="olderMessagesLabel"
-              :loading="loadingOlderMessages"
-              :disabled="loadingOlderMessages"
-              @click="loadOlderMessages"
-            />
-            <p v-if="olderMessagesError" class="text-xs text-error">
-              {{ olderMessagesError }}
-            </p>
-          </div>
-          <UChatMessages
-            :messages="messages"
-            :status="chatMessagesStatus"
-            :shouldAutoScroll="false"
-            :shouldScrollToBottom="true"
-            :autoScroll="true"
-            :ui="{
-              viewport: 'fixed top-auto bottom-[var(--chat-auto-scroll-bottom,128px)] left-[var(--chat-auto-scroll-left,0px)] w-[var(--chat-auto-scroll-width,100vw)] z-50 flex justify-center pointer-events-none',
-              autoScroll: 'pointer-events-auto rounded-full shadow-sm'
-            }"
-            class="[--last-message-height:0px]"
-          >
-            <template #indicator>
-              <ChatRunActivityIndicator :label="currentActivityLabel || 'Working…'" />
-            </template>
-
-            <template #content="{ message }: { message: WebChatMessage }">
-              <ChatMessageContent
-                v-model:editing-text="editingText"
-                :message="message"
-                :session-id="sessionId"
-                :copied-message-id="copiedMessageId"
-                :editing-message-id="editingMessageId"
-                :saving-edited-message-id="savingEditedMessageId"
-                :is-running="isRunning"
-                :is-active-run-message="message.id === activeRunAssistantMessageId"
-                :workspace="context.selectedWorkspace.value"
-                :latest-change-part-key="latestGitChangePartKey"
-                :set-editing-message-container="setEditingMessageContainer"
-                @copy="copyMessage"
-                @regenerate="regenerateResponse"
-                @edit="startEditingMessage"
-                @cancel-edit="cancelEditingMessage"
-                @save-edit="saveEditedMessage"
-                @retry-failed="retryFailedMessage"
-                @edit-failed="editFailedMessage"
-              />
-            </template>
-          </UChatMessages>
-          <UChatMessage
-            v-if="showRunActivityIndicator"
-            id="run-activity-indicator"
-            role="assistant"
-            variant="naked"
-            :parts="[]"
-            class="px-2.5"
-          >
-            <template #content>
-              <ChatRunActivityIndicator :label="currentActivityLabel || 'Working…'" />
-            </template>
-          </UChatMessage>
-          <div
-            v-if="promptOverlayHeight"
-            :style="{ height: `${promptOverlayHeight + 12}px` }"
-            aria-hidden="true"
-          />
-          <div ref="bottomReadSentinel" class="h-px w-full" aria-hidden="true" />
-        </template>
-        </div>
+        <ChatSessionTranscript
+          v-model:editing-text="editingText"
+          :is-loading-session="isLoadingSession"
+          :loading-skeleton-count="loadingSkeletonCount"
+          :session-error="sessionError"
+          :has-session="hasSession"
+          :has-older-messages="hasOlderMessages"
+          :older-messages-error="olderMessagesError"
+          :older-messages-label="olderMessagesLabel"
+          :loading-older-messages="loadingOlderMessages"
+          :messages="messages"
+          :chat-messages-status="chatMessagesStatus"
+          :current-activity-label="currentActivityLabel"
+          :show-run-activity-indicator="showRunActivityIndicator"
+          :prompt-overlay-height="promptOverlayHeight"
+          :session-id="sessionId"
+          :copied-message-id="copiedMessageId"
+          :editing-message-id="editingMessageId"
+          :saving-edited-message-id="savingEditedMessageId"
+          :is-running="isRunning"
+          :active-run-assistant-message-id="activeRunAssistantMessageId"
+          :workspace="context.selectedWorkspace.value ?? null"
+          :latest-change-part-key="latestGitChangePartKey"
+          :set-editing-message-container="setEditingMessageContainer"
+          @retry-load="refresh"
+          @load-older-messages="loadOlderMessages"
+          @copy="copyMessage"
+          @regenerate="regenerateResponse"
+          @edit="startEditingMessage"
+          @cancel-edit="cancelEditingMessage"
+          @save-edit="saveEditedMessage"
+          @retry-failed="retryFailedMessage"
+          @edit-failed="editFailedMessage"
+          @update:chat-container="chatContainer = $event"
+          @update:older-messages-sentinel="olderMessagesSentinel = $event"
+          @update:bottom-read-sentinel="bottomReadSentinel = $event"
+        />
       </UContainer>
     </template>
 
@@ -1531,41 +1419,15 @@ onBeforeUnmount(() => {
                 />
               </div>
 
-              <div
+              <ChatArchivedRestorePanel
                 v-if="currentSessionArchived"
-                class="rounded-xl border border-dashed border-default bg-elevated/30 px-4 py-3"
-              >
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div class="min-w-0">
-                    <p class="text-sm font-medium text-highlighted">This chat is archived</p>
-                    <p class="text-xs text-muted">
-                      {{ restoreNeedsWorkspace ? 'The original workspace no longer exists. Choose where to restore it.' : 'Restore it before sending new messages.' }}
-                    </p>
-                  </div>
-                  <div class="flex min-w-0 items-center gap-2">
-                    <USelectMenu
-                      v-if="restoreNeedsWorkspace"
-                      v-model="restoreWorkspace"
-                      :items="restoreWorkspaceOptions"
-                      value-key="value"
-                      label-key="label"
-                      placeholder="Choose workspace"
-                      size="sm"
-                      class="min-w-52"
-                      :loading="context.workspacesLoading.value"
-                    />
-                    <UButton
-                      color="neutral"
-                      variant="soft"
-                      size="sm"
-                      icon="i-lucide-archive-restore"
-                      label="Restore"
-                      :loading="restoringArchivedSession"
-                      @click="restoreArchivedSession"
-                    />
-                  </div>
-                </div>
-              </div>
+                v-model:workspace="restoreWorkspace"
+                :needs-workspace="restoreNeedsWorkspace"
+                :workspace-options="restoreWorkspaceOptions"
+                :workspaces-loading="context.workspacesLoading.value"
+                :restoring="restoringArchivedSession"
+                @restore="restoreArchivedSession"
+              />
 
               <UChatPrompt
                 v-else
@@ -1639,39 +1501,10 @@ onBeforeUnmount(() => {
     </template>
   </UDashboardPanel>
 
-  <UModal
-    v-model:open="commitMessageModalOpen"
-    title="Generated commit message"
-    description="Review the generated message before copying it."
-    :ui="{ content: 'sm:max-w-lg' }"
-  >
-    <template #body>
-      <div class="space-y-3">
-        <UTextarea
-          v-model="generatedCommitMessage"
-          readonly
-          :rows="14"
-          class="w-full font-mono text-sm"
-          aria-label="Generated commit message"
-        />
-      </div>
-    </template>
-
-    <template #footer>
-      <div class="flex w-full justify-between gap-2">
-        <UButton
-          color="neutral"
-          variant="ghost"
-          label="Close"
-          @click="commitMessageModalOpen = false"
-        />
-        <UButton
-          color="neutral"
-          icon="i-lucide-copy"
-          :label="commitMessageCopied ? 'Copied' : 'Copy'"
-          @click="copyGeneratedCommitMessage"
-        />
-      </div>
-    </template>
-  </UModal>
+  <GeneratedCommitMessageModal
+    v-model:open="generatedCommitMessage.modalOpen.value"
+    v-model:message="generatedCommitMessage.message.value"
+    :copied="generatedCommitMessage.copied.value"
+    @copy="generatedCommitMessage.copy"
+  />
 </template>
