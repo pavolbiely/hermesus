@@ -678,6 +678,7 @@ async function startRunForLocalMessage(
       clientMessageId
     })
     const canonicalId = run.userMessageId || userMessage.id
+    sessionCache.invalidate(targetSessionId)
     optimisticUserMessageIds.delete(userMessage.id)
     optimisticUserMessageIds.add(canonicalId)
     const sentMessage = {
@@ -1001,6 +1002,7 @@ async function regenerateResponse(message: WebChatMessage) {
 
   try {
     const updated = await api.editMessage(targetSessionId, userMessage.id, content)
+    sessionCache.invalidate(targetSessionId)
     data.value = updated
     sessionCache.set(updated)
     messages.value = [...updated.messages]
@@ -1014,6 +1016,7 @@ async function regenerateResponse(message: WebChatMessage) {
       attachments: attachmentIdsForMessage(userMessage),
       editedMessageId: userMessage.id
     })
+    sessionCache.invalidate(targetSessionId)
     rememberSubmittedSelection(targetSessionId)
     playNotificationSound('sent')
     void refreshSessions?.()

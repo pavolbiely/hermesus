@@ -4,9 +4,20 @@ type HermesApi = ReturnType<typeof useHermesApi>
 type SessionDetailOptions = Parameters<HermesApi['getSession']>[1]
 
 const inflightSessionRequests = new Map<string, Promise<SessionDetailResponse>>()
+const sessionRequestGenerations = new Map<string, number>()
 
 function requestKey(sessionId: string, options: SessionDetailOptions = {}) {
   return [sessionId, options.messageLimit || '', options.messageBefore || ''].join(':')
+}
+
+function requestGeneration(sessionId: string) {
+  return sessionRequestGenerations.get(sessionId) || 0
+}
+
+function dropInflightSessionRequests(sessionId: string) {
+  for (const key of Array.from(inflightSessionRequests.keys())) {
+    if (key === sessionId || key.startsWith(`${sessionId}:`)) inflightSessionRequests.delete(key)
+  }
 }
 
 export function useWebChatSessionCache(api: HermesApi = useHermesApi()) {
@@ -25,23 +36,29 @@ export function useWebChatSessionCache(api: HermesApi = useHermesApi()) {
   function remove(sessionId: string) {
     const { [sessionId]: _removed, ...rest } = sessions.value
     sessions.value = rest
-    for (const key of Array.from(inflightSessionRequests.keys())) {
-      if (key === sessionId || key.startsWith(`${sessionId}:`)) inflightSessionRequests.delete(key)
-    }
+    dropInflightSessionRequests(sessionId)
   }
 
-  async function fetch(sessionId: string, options: SessionDetailOptions = {}) {
+  function invalidate(sessionId: string) {
+    sessionRequestGenerations.set(sessionId, requestGeneration(sessionId) + 1)
+    dropInflightSessionRequests(sessionId)
+  }
+
+  async function fetch(sessionId: string, options: SessionDetailOptions = {}): Promise<SessionDetailResponse> {
     const key = requestKey(sessionId, options)
+    const generation = requestGeneration(sessionId)
     const existing = inflightSessionRequests.get(key)
     if (existing) return await existing
 
-    const request = api.getSession(sessionId, options)
-      .then((response) => {
+    let request: Promise<SessionDetailResponse>
+    request = api.getSession(sessionId, options)
+      .then((response): Promise<SessionDetailResponse> | SessionDetailResponse => {
+        if (requestGeneration(sessionId) !== generation) return fetch(sessionId, options)
         set(response)
         return response
       })
       .finally(() => {
-        inflightSessionRequests.delete(key)
+        if (inflightSessionRequests.get(key) === request) inflightSessionRequests.delete(key)
       })
 
     inflightSessionRequests.set(key, request)
@@ -61,6 +78,7 @@ export function useWebChatSessionCache(api: HermesApi = useHermesApi()) {
     get,
     set,
     remove,
+    invalidate,
     fetch,
     prefetch
   }
