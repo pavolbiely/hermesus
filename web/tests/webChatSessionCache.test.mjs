@@ -25,6 +25,40 @@ function sessionResponse(id, marker) {
   }
 }
 
+test('paginated older-message fetches do not overwrite the canonical session cache', async () => {
+  states.clear()
+  const api = {
+    getSession(sessionId, options) {
+      return Promise.resolve(sessionResponse(sessionId, options.messageBefore ? 'older-page' : 'latest'))
+    }
+  }
+  const { useWebChatSessionCache } = await import('../app/composables/useWebChatSessionCache.ts')
+  const cache = useWebChatSessionCache(api)
+
+  await cache.fetch('session-cache-page', { messageLimit: 60 })
+  await cache.fetch('session-cache-page', { messageLimit: 80, messageBefore: 'message-1' })
+
+  assert.equal(cache.get('session-cache-page')?.session.title, 'latest')
+})
+
+test('cache generation changes on invalidation', async () => {
+  states.clear()
+  const api = {
+    getSession(sessionId) {
+      return Promise.resolve(sessionResponse(sessionId, 'latest'))
+    }
+  }
+  const { useWebChatSessionCache } = await import('../app/composables/useWebChatSessionCache.ts')
+  const cache = useWebChatSessionCache(api)
+
+  const generation = cache.generation('session-generation')
+  assert.equal(cache.isCurrentGeneration('session-generation', generation), true)
+
+  cache.invalidate('session-generation')
+
+  assert.equal(cache.isCurrentGeneration('session-generation', generation), false)
+})
+
 test('invalidated in-flight session snapshots refetch instead of overwriting newer state', async () => {
   states.clear()
   const first = deferred()

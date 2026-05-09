@@ -6,7 +6,6 @@ import type { GitFileSelection, SessionDetailResponse, WebChatAttachment, WebCha
 import { type QueuedMessage, shouldAutoSendQueuedMessage } from '~/utils/queuedMessages'
 import { latestChangePartKey, messageText } from '~/utils/chatMessages'
 import { writeClipboardText } from '~/utils/clipboard'
-import { mergeOptimisticUserMessages } from '~/utils/optimisticChatMessages'
 import { markLocalMessageFailed, markLocalMessageSending, removeLocalMessage } from '~/utils/failedChatMessages'
 import { isElementVisibleInRoot, nearestScrollableAncestor, scrollElementTreeToBottomAfterRender } from '~/utils/chatInitialScroll'
 import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
@@ -61,8 +60,7 @@ let commitMessageCopiedTimer: ReturnType<typeof setTimeout> | undefined
 const refreshSessions = inject<() => Promise<void> | void>('refreshSessions')
 const markSessionRead = inject<(sessionId: string, messageCount: number) => void>('markSessionRead')
 const requestedSessionId = inject<Readonly<Ref<string | null>>>('requestedSessionId')
-let optimisticUserMessageIds = new Set<string>()
-let finalizedAssistantMessageIds = new Set<string>()
+let markAssistantFinalized: ((message: WebChatMessage) => void) | undefined
 let bottomReadObserver: IntersectionObserver | undefined
 let olderMessagesObserver: IntersectionObserver | undefined
 let olderMessagesScrollRoot: Element | null = null
@@ -158,10 +156,20 @@ const {
   toast,
   activeChatRuns,
   onAssistantCompleted(message) {
-    finalizedAssistantMessageIds.add(message.id)
+    markAssistantFinalized?.(message)
     if (readAloudAutoReadResponsesEnabled()) void readMessageAloud(message, { queue: true, sessionId: sessionId.value })
   }
 })
+const timeline = useChatTimelineState({
+  sessionId,
+  displayedData,
+  messages,
+  activeChatRuns,
+  onRenderedMessageCount(count) {
+    lastRenderedMessageCount.value = count
+  }
+})
+markAssistantFinalized = timeline.markAssistantFinalized
 const {
   input,
   slashCommands,
@@ -255,38 +263,6 @@ watch(
   data,
   (response) => {
     if (response?.session.id === sessionId.value) sessionCache.set(response)
-  },
-  { immediate: true }
-)
-
-watch(
-  [sessionId, () => displayedData.value?.session.id, () => displayedData.value?.messages, () => displayedData.value?.activeRun],
-  ([currentSessionId, loadedSessionId, persistedMessages]) => {
-    if (loadedSessionId !== currentSessionId) {
-      messages.value = []
-      optimisticUserMessageIds = new Set()
-      finalizedAssistantMessageIds = new Set()
-      return
-    }
-
-    const activeRun = displayedData.value?.activeRun
-    const preserveStreamingAssistant = Boolean(
-      activeRun?.sessionId === currentSessionId
-      || activeChatRuns.isRunning(currentSessionId)
-    )
-    const merged = mergeOptimisticUserMessages(
-      persistedMessages ? [...persistedMessages] : [],
-      messages.value,
-      optimisticUserMessageIds,
-      {
-        preserveStreamingAssistant,
-        preserveAssistantMessageIds: finalizedAssistantMessageIds
-      }
-    )
-    messages.value = merged.messages
-    optimisticUserMessageIds = merged.optimisticMessageIds
-    finalizedAssistantMessageIds = merged.preservedAssistantMessageIds
-    lastRenderedMessageCount.value = messages.value.length
   },
   { immediate: true }
 )
@@ -522,7 +498,6 @@ function mergeOlderSessionMessages(current: SessionDetailResponse, older: Sessio
   const olderMessages = older.messages.filter(message => !seen.has(message.id))
   return {
     ...current,
-    session: older.session,
     messages: [...olderMessages, ...current.messages],
     messagesHasMoreBefore: older.messagesHasMoreBefore,
     messagesTotal: older.messagesTotal ?? current.messagesTotal
@@ -555,16 +530,28 @@ async function loadOlderMessages() {
   const beforeMessageId = current?.messages[0]?.id
   if (!current || current.session.id !== sessionId.value || !beforeMessageId) return
 
+  const targetSessionId = current.session.id
+  const cacheGeneration = sessionCache.generation(targetSessionId)
+
   loadingOlderMessages.value = true
   olderMessagesError.value = null
   preserveCurrentScrollPosition()
 
   try {
-    const older = await sessionCache.fetch(sessionId.value, {
+    const older = await sessionCache.fetch(targetSessionId, {
       messageLimit: OLDER_SESSION_MESSAGE_LIMIT,
       messageBefore: beforeMessageId
     })
-    const merged = mergeOlderSessionMessages(current, older)
+    if (sessionId.value !== targetSessionId || !sessionCache.isCurrentGeneration(targetSessionId, cacheGeneration)) {
+      preserveScrollAfterPrepend = null
+      return
+    }
+    const latest = displayedData.value
+    if (!latest || latest.session.id !== targetSessionId) {
+      preserveScrollAfterPrepend = null
+      return
+    }
+    const merged = mergeOlderSessionMessages(latest, older)
     data.value = merged
     sessionCache.set(merged)
     await restoreScrollPositionAfterPrepend()
@@ -667,6 +654,7 @@ async function startRunForLocalMessage(
   attachmentIds: string[]
 ) {
   const targetSessionId = sessionId.value
+  sessionCache.invalidate(targetSessionId)
   try {
     const run = await api.startRun(text, {
       sessionId: targetSessionId,
@@ -679,8 +667,7 @@ async function startRunForLocalMessage(
     })
     const canonicalId = run.userMessageId || userMessage.id
     sessionCache.invalidate(targetSessionId)
-    optimisticUserMessageIds.delete(userMessage.id)
-    optimisticUserMessageIds.add(canonicalId)
+    timeline.canonicalizeUserMessage(userMessage.id, canonicalId)
     const sentMessage = {
       ...userMessage,
       id: canonicalId,
@@ -945,9 +932,8 @@ async function sendMessageNow(message: string, options: SendMessageOptions = {})
   const userMessage = createLocalMessage('user', message)
   userMessage.clientMessageId = clientMessageId
   userMessage.localStatus = 'sending'
-  optimisticUserMessageIds.add(userMessage.id)
   if (pendingAttachments.length) userMessage.parts.unshift({ type: 'media', attachments: pendingAttachments })
-  messages.value.push(userMessage)
+  timeline.addOptimisticUserMessage(userMessage)
   scrollSubmittedMessageToBottom()
   if (options.includeCurrentAttachments !== false) context.clearAttachments()
 
@@ -1042,7 +1028,7 @@ async function retryFailedMessage(message: WebChatMessage) {
   if (activeChatRuns.isRunning(sessionId.value) || submitStatus.value === 'submitted') {
     enqueueMessage(text)
     messages.value = removeLocalMessage(messages.value, message.id)
-    optimisticUserMessageIds.delete(message.id)
+    timeline.removeOptimisticUserMessage(message.id)
     return
   }
 
@@ -1069,7 +1055,7 @@ function editFailedMessage(message: WebChatMessage) {
   input.value = messageText(message)
   context.attachments.value = attachmentsForMessage(message)
   messages.value = removeLocalMessage(messages.value, message.id)
-  optimisticUserMessageIds.delete(message.id)
+  timeline.removeOptimisticUserMessage(message.id)
 }
 
 async function onSubmit() {

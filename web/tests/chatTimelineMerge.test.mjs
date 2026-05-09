@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mergeOptimisticUserMessages } from '../app/utils/optimisticChatMessages.ts'
+import { mergeChatTimeline } from '../app/utils/chatTimelineMerge.ts'
 
 function message(id, role, text) {
   return {
@@ -24,7 +24,7 @@ test('keeps an optimistic user message when the session snapshot is stale', () =
   const persisted = [message('server-1', 'assistant', 'previous')]
   const optimistic = message('local-1', 'user', 'hello')
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [...persisted, optimistic],
     new Set(['local-1'])
@@ -39,7 +39,7 @@ test('drops an optimistic user message once an equivalent persisted message appe
   const optimistic = message('local-1', 'user', 'hello')
   optimistic.createdAt = '2026-04-27T11:59:59.000Z'
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [optimistic],
     new Set(['local-1'])
@@ -55,7 +55,7 @@ test('keeps a repeated optimistic user message when only an older equal message 
   const optimistic = message('local-1', 'user', 'hello')
   optimistic.createdAt = '2026-04-27T12:00:00.000Z'
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     [olderPersisted],
     [olderPersisted, optimistic],
     new Set(['local-1'])
@@ -71,7 +71,7 @@ test('drops an optimistic user message when the persisted message has the same c
   const optimistic = message('local-1', 'user', 'hello')
   optimistic.clientMessageId = 'client-1'
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     [persisted],
     [optimistic],
     new Set(['local-1'])
@@ -87,7 +87,7 @@ test('keeps a failed local user message when the session snapshot is stale', () 
   failed.clientMessageId = 'client-1'
   failed.localStatus = 'failed'
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [...persisted, failed],
     new Set(['local-1'])
@@ -102,7 +102,7 @@ test('does not preserve non-optimistic local messages across session refreshes',
   const persisted = [message('server-1', 'user', 'persisted')]
   const localAssistant = message('local-assistant', 'assistant', 'draft')
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [...persisted, localAssistant],
     new Set()
@@ -115,7 +115,7 @@ test('preserves local system events across session refreshes', () => {
   const persisted = [message('server-1', 'user', 'persisted')]
   const event = systemEvent('local-event', 'run_stopped', 'Run stopped')
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [...persisted, event],
     new Set()
@@ -128,7 +128,7 @@ test('does not duplicate equivalent system events after persistence', () => {
   const persisted = [systemEvent('server-event', 'run_stopped', 'Run stopped')]
   const local = systemEvent('local-event', 'run_stopped', 'Run stopped')
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [...persisted, local],
     new Set()
@@ -145,7 +145,7 @@ test('preserves streaming assistant tool history while a run is active', () => {
     { type: 'tool', name: 'read_file', status: 'running' }
   ]
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [...persisted, localAssistant],
     new Set(),
@@ -160,7 +160,7 @@ test('preserves a just-completed assistant message when the terminal session sna
   const persisted = [message('server-1', 'user', 'please fix it')]
   const completedAssistant = message('local-assistant', 'assistant', 'fixed')
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [...persisted, completedAssistant],
     new Set(),
@@ -179,7 +179,7 @@ test('drops a preserved completed assistant once an equivalent persisted message
   const completedAssistant = message('local-assistant', 'assistant', 'fixed')
   completedAssistant.createdAt = '2026-04-27T11:59:59.000Z'
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [...persisted, completedAssistant],
     new Set(),
@@ -198,7 +198,7 @@ test('drops a preserved completed assistant once a newer persisted assistant app
   const completedAssistant = message('local-assistant', 'assistant', 'fixed')
   completedAssistant.createdAt = '2026-04-27T11:59:59.000Z'
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     persisted,
     [...persisted, completedAssistant],
     new Set(),
@@ -217,7 +217,7 @@ test('drops a preserved completed assistant when the same turn is already persis
   const completedAssistant = message('local-assistant', 'assistant', 'OK3')
   completedAssistant.createdAt = '2026-04-27T12:00:12.000Z'
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     [user, persistedAssistant],
     [user, completedAssistant],
     new Set(),
@@ -235,7 +235,7 @@ test('keeps a repeated preserved assistant when the same text is only persisted 
   const completedAssistant = message('local-assistant', 'assistant', 'OK')
   completedAssistant.createdAt = '2026-04-27T12:00:12.000Z'
 
-  const result = mergeOptimisticUserMessages(
+  const result = mergeChatTimeline(
     [olderUser, olderAssistant, currentUser],
     [olderUser, olderAssistant, currentUser, completedAssistant],
     new Set(),

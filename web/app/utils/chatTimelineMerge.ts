@@ -91,7 +91,7 @@ function hasEquivalentSystemEvent(messages: WebChatMessage[], message: WebChatMe
   return Boolean(key && messages.some(candidate => systemEventKey(candidate) === key))
 }
 
-export function mergeOptimisticUserMessages(
+export function mergeChatTimeline(
   persistedMessages: WebChatMessage[],
   currentMessages: WebChatMessage[],
   optimisticMessageIds: Set<string>,

@@ -20,6 +20,10 @@ function dropInflightSessionRequests(sessionId: string) {
   }
 }
 
+function isCanonicalSessionRequest(options: SessionDetailOptions = {}) {
+  return !options.messageBefore
+}
+
 export function useWebChatSessionCache(api: HermesApi = useHermesApi()) {
   const sessions = useState<Record<string, SessionDetailResponse>>('web-chat-session-detail-cache', () => ({}))
 
@@ -44,6 +48,14 @@ export function useWebChatSessionCache(api: HermesApi = useHermesApi()) {
     dropInflightSessionRequests(sessionId)
   }
 
+  function generation(sessionId: string) {
+    return requestGeneration(sessionId)
+  }
+
+  function isCurrentGeneration(sessionId: string, generation: number) {
+    return requestGeneration(sessionId) === generation
+  }
+
   async function fetch(sessionId: string, options: SessionDetailOptions = {}): Promise<SessionDetailResponse> {
     const key = requestKey(sessionId, options)
     const generation = requestGeneration(sessionId)
@@ -53,8 +65,8 @@ export function useWebChatSessionCache(api: HermesApi = useHermesApi()) {
     let request: Promise<SessionDetailResponse>
     request = api.getSession(sessionId, options)
       .then((response): Promise<SessionDetailResponse> | SessionDetailResponse => {
-        if (requestGeneration(sessionId) !== generation) return fetch(sessionId, options)
-        set(response)
+        if (requestGeneration(sessionId) !== generation && isCanonicalSessionRequest(options)) return fetch(sessionId, options)
+        if (requestGeneration(sessionId) === generation && isCanonicalSessionRequest(options)) set(response)
         return response
       })
       .finally(() => {
@@ -79,6 +91,8 @@ export function useWebChatSessionCache(api: HermesApi = useHermesApi()) {
     set,
     remove,
     invalidate,
+    generation,
+    isCurrentGeneration,
     fetch,
     prefetch
   }
