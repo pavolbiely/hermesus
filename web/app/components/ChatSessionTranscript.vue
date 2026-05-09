@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { WebChatMessage } from '~/types/web-chat'
+import { shouldShowStandaloneActivityIndicator } from '~/utils/chatActivityIndicator'
 
 const props = defineProps<{
   isLoadingSession: boolean
@@ -49,6 +50,12 @@ function setElement(event: 'update:chatContainer' | 'update:olderMessagesSentine
   else if (event === 'update:olderMessagesSentinel') emit('update:olderMessagesSentinel', htmlElement)
   else emit('update:bottomReadSentinel', htmlElement)
 }
+
+const showStandaloneRunActivityIndicator = computed(() => shouldShowStandaloneActivityIndicator({
+  messages: props.messages,
+  status: props.chatMessagesStatus,
+  showRunActivityIndicator: props.showRunActivityIndicator
+}))
 </script>
 
 <template>
@@ -144,7 +151,7 @@ function setElement(event: 'update:chatContainer' | 'update:olderMessagesSentine
       </UChatMessages>
 
       <UChatMessage
-        v-if="showRunActivityIndicator"
+        v-if="showStandaloneRunActivityIndicator"
         id="run-activity-indicator"
         role="assistant"
         variant="naked"
