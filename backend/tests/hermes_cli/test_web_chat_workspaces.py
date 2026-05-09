@@ -243,6 +243,35 @@ def test_codex_provider_usage_maps_rate_limit_payload(monkeypatch):
     assert result.limits[1].label == "Other models"
 
 
+def test_provider_usage_prefers_runtime_codex_token(monkeypatch):
+    from hermes_cli.web_chat_modules import provider_usage
+
+    captured = {}
+
+    def request_get(url, **kwargs):
+        captured["authorization"] = kwargs["headers"].get("Authorization")
+
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"rate_limit": {"primary_window": {"used_percent": 25}}}
+
+        return Response()
+
+    monkeypatch.setattr(
+        provider_usage,
+        "runtime_provider",
+        lambda requested=None, target_model=None: {"provider": "openai-codex", "api_key": "runtime-token"},
+    )
+
+    result = provider_usage.provider_usage(request_get=request_get)
+
+    assert result.available is True
+    assert captured["authorization"] == "Bearer runtime-token"
+
+
 def test_returns_profiles_for_composer(client, monkeypatch, tmp_path):
     import hermes_cli.web_chat as web_chat
 

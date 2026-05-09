@@ -82,9 +82,10 @@ def codex_provider_usage(
     *,
     resolve_access_token: Callable[[], str | None] = resolve_codex_access_token,
     request_get: Callable[..., Any] = requests.get,
+    access_token: str | None = None,
 ) -> WebChatProviderUsageResponse:
-    access_token = resolve_access_token()
-    if not access_token:
+    resolved_access_token = access_token or resolve_access_token()
+    if not resolved_access_token:
         return WebChatProviderUsageResponse(
             provider="openai-codex",
             source="codex",
@@ -94,7 +95,7 @@ def codex_provider_usage(
         )
 
     try:
-        response = request_get(CODEX_USAGE_URL, headers=_codex_headers(access_token), timeout=10)
+        response = request_get(CODEX_USAGE_URL, headers=_codex_headers(resolved_access_token), timeout=10)
         response.raise_for_status()
         payload = response.json()
     except Exception as exc:
@@ -142,6 +143,7 @@ def provider_usage(
     model: str | None = None,
     *,
     codex_usage: Callable[[], WebChatProviderUsageResponse] = codex_provider_usage,
+    request_get: Callable[..., Any] = requests.get,
 ) -> WebChatProviderUsageResponse:
     requested = str(provider or "").strip() or None
     runtime = runtime_provider(requested=requested, target_model=model)
@@ -149,7 +151,11 @@ def provider_usage(
     normalized = resolved_provider.lower()
 
     if normalized == "openai-codex":
-        usage = codex_usage()
+        runtime_access_token = runtime.get("api_key") if isinstance(runtime.get("api_key"), str) else None
+        if codex_usage is codex_provider_usage:
+            usage = codex_provider_usage(access_token=runtime_access_token, request_get=request_get)
+        else:
+            usage = codex_usage()
         usage.provider = resolved_provider
         usage.model = model
         return usage

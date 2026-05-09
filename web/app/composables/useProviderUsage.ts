@@ -11,8 +11,8 @@ type ProviderUsageCacheEntry = {
 const providerUsageCache = new Map<string, ProviderUsageCacheEntry>()
 const providerUsageInFlight = new Map<string, Promise<WebChatProviderUsageResponse>>()
 
-function providerUsageKey(provider: string, model: string | null) {
-  return `${provider}\n${model || ''}`
+function providerUsageKey(provider: string | null, model: string | null) {
+  return `${provider || 'auto'}\n${model || ''}`
 }
 
 function isFresh(entry: ProviderUsageCacheEntry, now = Date.now()) {
@@ -45,12 +45,6 @@ export function useProviderUsage(
     const nextProvider = toValue(provider)?.trim() || null
     const nextModel = toValue(model)?.trim() || null
     const currentRequest = ++requestId
-
-    if (!nextProvider) {
-      usage.value = null
-      loading.value = false
-      return
-    }
 
     const key = providerUsageKey(nextProvider, nextModel)
     const cached = providerUsageCache.get(key)
