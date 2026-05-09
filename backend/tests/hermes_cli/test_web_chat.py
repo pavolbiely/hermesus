@@ -674,6 +674,26 @@ def test_lists_pinned_sidebar_sessions_first(client):
     assert sessions[1]["pinned"] is False
 
 
+def test_lists_older_pinned_session_when_archived_sessions_fill_first_batch(client):
+    from hermes_state import SessionDB
+
+    db = SessionDB()
+    db.create_session("older-pinned", source="web-chat", model_config={"pinned": True})
+    db.append_message("older-pinned", "user", "Pinned")
+
+    for index in range(100):
+        session_id = f"newer-archived-{index:03d}"
+        db.create_session(session_id, source="web-chat", model_config={"archived": True})
+        db.append_message(session_id, "user", "Archived")
+
+    response = client.get("/api/web-chat/sessions?includeArchived=true")
+
+    assert response.status_code == 200
+    sessions = response.json()["sessions"]
+    assert sessions[0]["id"] == "older-pinned"
+    assert sessions[0]["pinned"] is True
+
+
 def test_compressed_sidebar_session_uses_tip_workspace(client, tmp_path):
     from hermes_state import SessionDB
 

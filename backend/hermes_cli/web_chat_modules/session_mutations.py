@@ -146,7 +146,7 @@ def list_non_empty_sessions(
     db_offset = 0
     batch_size = max_session_limit
 
-    while len(sessions) < max_session_limit:
+    while True:
         batch = db.list_sessions_rich(limit=batch_size, offset=db_offset)
         if not batch:
             break
@@ -157,8 +157,6 @@ def list_non_empty_sessions(
             if not include_archived and _session_archived(session):
                 continue
             sessions.append(session)
-            if len(sessions) >= max_session_limit:
-                break
         db_offset += len(batch)
 
     sessions.sort(key=_session_last_active_sort_key)
