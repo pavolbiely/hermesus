@@ -20,6 +20,7 @@ const STREAM_AUTO_SCROLL_RESUME_DISTANCE = 80
 const STREAM_AUTO_SCROLL_RESUME_EPSILON = 4
 const STREAM_AUTO_SCROLL_FOLLOWING_MS = 220
 const INITIAL_SCROLL_STABILIZE_MS = 2500
+const SUBMITTED_SCROLL_STABILIZE_MS = 1200
 const MESSAGE_AUTO_SCROLL_DISTANCE = 160
 
 const { route, sessionId } = useChatRouteState()
@@ -82,6 +83,11 @@ let initialScrollResizeObserver: ResizeObserver | undefined
 let initialScrollStabilizeTimer: ReturnType<typeof setTimeout> | undefined
 let initialScrollFrame: number | undefined
 let initialScrollRoot: Element | null = null
+let submittedScrollMutationObserver: MutationObserver | undefined
+let submittedScrollResizeObserver: ResizeObserver | undefined
+let submittedScrollStabilizeTimer: ReturnType<typeof setTimeout> | undefined
+let submittedScrollFrame: number | undefined
+let submittedScrollRoot: Element | null = null
 let shouldScrollAfterNextMessage = false
 
 type SendMessageOptions = {
@@ -271,6 +277,7 @@ watch(
 
 watch(sessionId, () => {
   stopInitialScrollStabilizer()
+  stopSubmittedScrollStabilizer()
   initialScrollSettledSessionId.value = null
   shouldScrollAfterNextMessage = false
 })
@@ -785,7 +792,60 @@ function startInitialScrollStabilizer(sessionToScroll: string) {
   initialScrollStabilizeTimer = setTimeout(stopInitialScrollStabilizer, INITIAL_SCROLL_STABILIZE_MS)
 }
 
+function stopSubmittedScrollStabilizer() {
+  submittedScrollMutationObserver?.disconnect()
+  submittedScrollResizeObserver?.disconnect()
+  submittedScrollMutationObserver = undefined
+  submittedScrollResizeObserver = undefined
+
+  if (submittedScrollStabilizeTimer) clearTimeout(submittedScrollStabilizeTimer)
+  submittedScrollStabilizeTimer = undefined
+
+  if (submittedScrollFrame !== undefined) cancelAnimationFrame(submittedScrollFrame)
+  submittedScrollFrame = undefined
+
+  submittedScrollRoot?.removeEventListener('wheel', stopSubmittedScrollStabilizer)
+  submittedScrollRoot?.removeEventListener('touchstart', stopSubmittedScrollStabilizer)
+  submittedScrollRoot = null
+}
+
+function scheduleSubmittedScrollStabilizer() {
+  if (submittedScrollFrame !== undefined) return
+
+  submittedScrollFrame = requestAnimationFrame(() => {
+    submittedScrollFrame = undefined
+    void scrollChatToBottom()
+  })
+}
+
+function startSubmittedScrollStabilizer() {
+  stopSubmittedScrollStabilizer()
+
+  const root = nearestScrollableAncestor(chatContainer.value)
+  submittedScrollRoot = root
+  root?.addEventListener('wheel', stopSubmittedScrollStabilizer, { passive: true })
+  root?.addEventListener('touchstart', stopSubmittedScrollStabilizer, { passive: true })
+
+  if (chatContainer.value && typeof MutationObserver === 'function') {
+    submittedScrollMutationObserver = new MutationObserver(scheduleSubmittedScrollStabilizer)
+    submittedScrollMutationObserver.observe(chatContainer.value, {
+      childList: true,
+      characterData: true,
+      subtree: true
+    })
+  }
+
+  if (typeof ResizeObserver === 'function') {
+    submittedScrollResizeObserver = new ResizeObserver(scheduleSubmittedScrollStabilizer)
+    if (chatContainer.value) submittedScrollResizeObserver.observe(chatContainer.value)
+    if (chatFooterContainer.value) submittedScrollResizeObserver.observe(chatFooterContainer.value)
+  }
+
+  submittedScrollStabilizeTimer = setTimeout(stopSubmittedScrollStabilizer, SUBMITTED_SCROLL_STABILIZE_MS)
+}
+
 function scrollSubmittedMessageToBottom() {
+  startSubmittedScrollStabilizer()
   void scrollChatToBottom()
 }
 
@@ -1291,6 +1351,7 @@ onBeforeUnmount(() => {
   olderMessagesObserver?.disconnect()
   chatFooterResizeObserver?.disconnect()
   stopInitialScrollStabilizer()
+  stopSubmittedScrollStabilizer()
   streamAutoScrollObserver?.disconnect()
   streamAutoScrollRoot?.removeEventListener('scroll', updateStreamAutoScrollPaused)
   streamAutoScrollRoot?.removeEventListener('wheel', handleStreamAutoScrollWheel)
