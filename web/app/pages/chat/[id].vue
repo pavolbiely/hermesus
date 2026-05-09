@@ -20,6 +20,7 @@ const STREAM_AUTO_SCROLL_RESUME_DISTANCE = 80
 const STREAM_AUTO_SCROLL_RESUME_EPSILON = 4
 const STREAM_AUTO_SCROLL_FOLLOWING_MS = 220
 const INITIAL_SCROLL_STABILIZE_MS = 2500
+const MESSAGE_AUTO_SCROLL_DISTANCE = 160
 
 const { route, sessionId } = useChatRouteState()
 const router = useRouter()
@@ -81,6 +82,7 @@ let initialScrollResizeObserver: ResizeObserver | undefined
 let initialScrollStabilizeTimer: ReturnType<typeof setTimeout> | undefined
 let initialScrollFrame: number | undefined
 let initialScrollRoot: Element | null = null
+let shouldScrollAfterNextMessage = false
 
 type SendMessageOptions = {
   clearInput?: boolean
@@ -270,7 +272,27 @@ watch(
 watch(sessionId, () => {
   stopInitialScrollStabilizer()
   initialScrollSettledSessionId.value = null
+  shouldScrollAfterNextMessage = false
 })
+
+watch(
+  () => messages.value.length,
+  (nextCount, previousCount) => {
+    if (nextCount <= previousCount) return
+    shouldScrollAfterNextMessage = isChatNearBottom(MESSAGE_AUTO_SCROLL_DISTANCE)
+  },
+  { flush: 'sync' }
+)
+
+watch(
+  () => messages.value.length,
+  async (nextCount, previousCount) => {
+    if (nextCount <= previousCount || !shouldScrollAfterNextMessage) return
+    shouldScrollAfterNextMessage = false
+    await scrollChatToBottom()
+  },
+  { flush: 'post' }
+)
 
 watch(
   () => [displayedData.value?.session.id, messages.value.length] as const,
@@ -703,6 +725,12 @@ function scrollChatToBottom() {
     stableFrameCount: 2,
     maxFrameCount: 16
   })
+}
+
+function isChatNearBottom(distance = MESSAGE_AUTO_SCROLL_DISTANCE) {
+  const root = nearestScrollableAncestor(chatContainer.value)
+  if (!root) return true
+  return scrollDistanceFromBottom(root) <= distance
 }
 
 function stopInitialScrollStabilizer() {
@@ -1284,7 +1312,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <UDashboardPanel>
+  <UDashboardPanel :ui="{ body: 'p-0 sm:p-0' }">
     <template #header>
       <AppNavbar
         :title="title"
@@ -1297,7 +1325,7 @@ onBeforeUnmount(() => {
     </template>
 
     <template #body>
-      <UContainer class="mx-auto w-full max-w-[740px] py-6">
+      <UContainer class="mx-auto w-full max-w-[740px] px-4 pt-6 pb-0 sm:px-6 lg:px-8">
         <div ref="chatContainer">
           <div v-if="isLoadingSession" class="min-h-[calc(100dvh-14rem)] space-y-6 pt-2" aria-label="Loading chat">
           <div
