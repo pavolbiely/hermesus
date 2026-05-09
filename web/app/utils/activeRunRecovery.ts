@@ -18,6 +18,10 @@ export function isLiveActiveRun(activeRun?: ActiveRunSummary | null) {
   return Boolean(activeRun && !terminalRunStatuses.has(activeRun.status))
 }
 
+export function isLocallyTrackedLiveActiveRun(activeRun: ActiveRunSummary | null, sessionId: string, isRunning: (sessionId: string) => boolean) {
+  return Boolean(activeRun?.sessionId === sessionId && isLiveActiveRun(activeRun) && isRunning(sessionId))
+}
+
 export function recoverActiveRun(options: RecoverActiveRunOptions) {
   const { activeRun, sessionId, hasConnectedRun, connectRun } = options
   if (activeRun === undefined || activeRun === null) return

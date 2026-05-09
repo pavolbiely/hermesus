@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { playNotificationSound, prepareNotificationSound } from '../../utils/notificationSound'
-import { isLiveActiveRun, reconcileActiveRunSnapshot } from '../../utils/activeRunRecovery'
+import { isLocallyTrackedLiveActiveRun, reconcileActiveRunSnapshot } from '../../utils/activeRunRecovery'
 import { connectRouteRun } from '../../utils/routeRunConnection'
 import type { SessionDetailResponse, WebChatAttachment, WebChatMessage } from '~/types/web-chat'
 import { type QueuedMessage, shouldAutoSendQueuedMessage } from '~/utils/queuedMessages'
@@ -214,7 +214,11 @@ const activeRunForCurrentSession = computed(() => {
   const activeRun = displayedData.value?.activeRun
   return activeRun?.sessionId === sessionId.value ? activeRun : null
 })
-const hasLiveSnapshotRun = computed(() => isLiveActiveRun(activeRunForCurrentSession.value))
+const hasLiveSnapshotRun = computed(() => isLocallyTrackedLiveActiveRun(
+  activeRunForCurrentSession.value,
+  sessionId.value,
+  activeChatRuns.isRunning
+))
 const promptSubmitStatus = computed(() => {
   if (chatStatus.value !== 'ready') return chatStatus.value
   return hasLiveSnapshotRun.value ? 'streaming' : 'ready'

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isLiveActiveRun, recoverActiveRun, reconcileActiveRunSnapshot } from '../app/utils/activeRunRecovery.ts'
+import { isLiveActiveRun, isLocallyTrackedLiveActiveRun, recoverActiveRun, reconcileActiveRunSnapshot } from '../app/utils/activeRunRecovery.ts'
 
 test('treats running and stopping session snapshots as live active runs', () => {
   assert.equal(isLiveActiveRun({ runId: 'run-1', sessionId: 'session-1', status: 'running', prompts: [] }), true)
@@ -42,6 +42,15 @@ test('does not reconnect terminal or already connected active runs', () => {
   })
 
   assert.deepEqual(calls, [])
+})
+
+test('treats a live snapshot as prompt-active only while the run is locally tracked', () => {
+  const activeRun = { runId: 'run-1', sessionId: 'session-1', status: 'running', prompts: [] }
+
+  assert.equal(isLocallyTrackedLiveActiveRun(activeRun, 'session-1', sessionId => sessionId === 'session-1'), true)
+  assert.equal(isLocallyTrackedLiveActiveRun(activeRun, 'session-1', () => false), false)
+  assert.equal(isLocallyTrackedLiveActiveRun({ ...activeRun, status: 'completed' }, 'session-1', () => true), false)
+  assert.equal(isLocallyTrackedLiveActiveRun({ ...activeRun, sessionId: 'session-2' }, 'session-1', () => true), false)
 })
 
 test('ignores active run from another session', () => {
