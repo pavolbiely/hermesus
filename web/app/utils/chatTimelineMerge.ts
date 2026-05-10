@@ -42,23 +42,47 @@ function hasNewerPersistedAssistant(messages: WebChatMessage[], assistant: WebCh
   ))
 }
 
-function hasPersistedAssistantAfterLatestUser(messages: WebChatMessage[], assistant: WebChatMessage) {
+function sameUserTurn(left: WebChatMessage, right: WebChatMessage) {
+  const leftClientId = clientMessageId(left)
+  const rightClientId = clientMessageId(right)
+  if (leftClientId && rightClientId) return leftClientId === rightClientId
+
+  const leftText = textParts(left)
+  return Boolean(leftText && leftText === textParts(right))
+}
+
+function previousUserMessage(messages: WebChatMessage[], message: WebChatMessage) {
+  const messageIndex = messages.findIndex(candidate => candidate.id === message.id)
+  if (messageIndex <= 0) return null
+
+  for (let index = messageIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index]
+    if (candidate?.role === 'user') return candidate
+  }
+
+  return null
+}
+
+function hasPersistedAssistantForSameTurn(
+  persistedMessages: WebChatMessage[],
+  currentMessages: WebChatMessage[],
+  assistant: WebChatMessage
+) {
   const assistantText = textParts(assistant)
   if (!assistantText) return false
 
-  let latestUserIndex = -1
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === 'user') {
-      latestUserIndex = index
-      break
-    }
-  }
-  if (latestUserIndex < 0) return false
+  const currentUser = previousUserMessage(currentMessages, assistant)
+  if (!currentUser) return false
 
-  return messages.slice(latestUserIndex + 1).some(message => (
-    message.role === 'assistant'
-    && textParts(message) === assistantText
-  ))
+  const persistedUserIndex = persistedMessages.findIndex(message => message.role === 'user' && sameUserTurn(message, currentUser))
+  if (persistedUserIndex < 0) return false
+
+  for (const message of persistedMessages.slice(persistedUserIndex + 1)) {
+    if (message.role === 'user') return false
+    if (message.role === 'assistant' && textParts(message) === assistantText) return true
+  }
+
+  return false
 }
 
 type MergeOptimisticUserMessagesOptions = {
@@ -125,7 +149,7 @@ export function mergeChatTimeline(
       if (
         nextPreservedAssistantIds.has(message.id)
         && (
-          hasPersistedAssistantAfterLatestUser(persistedMessages, message)
+          hasPersistedAssistantForSameTurn(persistedMessages, currentMessages, message)
           || hasNewerPersistedAssistant(persistedMessages, message)
         )
       ) {

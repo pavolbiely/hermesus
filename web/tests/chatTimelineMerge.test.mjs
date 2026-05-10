@@ -228,6 +228,29 @@ test('drops a preserved completed assistant when the same turn is already persis
   assert.deepEqual([...result.preservedAssistantMessageIds], [])
 })
 
+test('drops an older preserved assistant after its turn persists and a newer user message is appended', () => {
+  const olderUser = message('server-user-1', 'user', 'first turn')
+  const persistedAssistant = message('server-assistant-1', 'assistant', 'done')
+  persistedAssistant.createdAt = '2026-04-27T12:00:01.000Z'
+  const newUser = message('server-user-2', 'user', 'second turn')
+  const localAssistant = message('local-assistant-1', 'assistant', 'done')
+  localAssistant.createdAt = '2026-04-27T12:00:12.000Z'
+
+  const result = mergeChatTimeline(
+    [olderUser, persistedAssistant, newUser],
+    [olderUser, localAssistant, newUser],
+    new Set(),
+    { preserveAssistantMessageIds: new Set(['local-assistant-1']) }
+  )
+
+  assert.deepEqual(result.messages.map(item => item.id), [
+    'server-user-1',
+    'server-assistant-1',
+    'server-user-2'
+  ])
+  assert.deepEqual([...result.preservedAssistantMessageIds], [])
+})
+
 test('keeps a repeated preserved assistant when the same text is only persisted for an older turn', () => {
   const olderUser = message('server-user-1', 'user', 'reply exactly OK')
   const olderAssistant = message('server-assistant-1', 'assistant', 'OK')
