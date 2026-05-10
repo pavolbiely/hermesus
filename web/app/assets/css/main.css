@@ -54,7 +54,7 @@ html.dark .shiki span {
   font-weight: 600;
 }
 
-.chat-message-markdown :where(p, ul, ol, pre, blockquote) {
+.chat-message-markdown :where(p, ul, ol, pre, blockquote, table) {
   max-width: 100%;
   margin-block: 0.75rem;
 }
@@ -62,6 +62,13 @@ html.dark .shiki span {
 .chat-message-markdown :where(pre) {
   overflow-x: auto;
   overflow-wrap: normal;
+}
+
+.chat-message-markdown :where(table) {
+  display: block;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  width: max-content;
 }
 
 .chat-message-markdown :where(code) {
