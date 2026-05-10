@@ -3,7 +3,7 @@ const apiProxyTarget = `${apiOrigin.replace(/\/$/, '')}/api`
 
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
-  devtools: { enabled: true },
+  devtools: { enabled: false },
   modules: ['@nuxt/ui', '@comark/nuxt'],
   css: ['~/assets/css/main.css'],
   ssr: false,
