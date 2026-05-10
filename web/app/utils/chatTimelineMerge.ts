@@ -85,6 +85,26 @@ function hasPersistedAssistantForSameTurn(
   return false
 }
 
+function insertAfterCurrentTurnUser(
+  messages: WebChatMessage[],
+  currentMessages: WebChatMessage[],
+  message: WebChatMessage
+) {
+  const currentUser = previousUserMessage(currentMessages, message)
+  if (!currentUser) {
+    messages.push(message)
+    return
+  }
+
+  const userIndex = messages.findIndex(candidate => candidate.role === 'user' && sameUserTurn(candidate, currentUser))
+  if (userIndex < 0) {
+    messages.push(message)
+    return
+  }
+
+  messages.splice(userIndex + 1, 0, message)
+}
+
 type MergeOptimisticUserMessagesOptions = {
   preserveStreamingAssistant?: boolean
   preserveAssistantMessageIds?: Set<string>
@@ -156,7 +176,7 @@ export function mergeChatTimeline(
         nextPreservedAssistantIds.delete(message.id)
         continue
       }
-      nextMessages.push(message)
+      insertAfterCurrentTurnUser(nextMessages, currentMessages, message)
     } else if (!persistedIds.has(message.id) && isLocalSystemEventMessage(message) && !hasEquivalentSystemEvent(nextMessages, message)) {
       nextMessages.push(message)
     }
