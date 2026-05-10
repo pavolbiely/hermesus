@@ -12,6 +12,7 @@ import { loadingChatSkeletonCount } from '~/utils/chatLoadingState'
 import { latestContextUsageTokens } from '~/utils/contextUsage'
 import { readAloudAutoReadResponsesEnabled } from '~/utils/readAloudPreferences'
 import { applySessionMessageUpdate } from '~/utils/sessionMessageUpdates'
+import { createLocalMessage } from '~/utils/chatLocalMessages'
 
 const INITIAL_SESSION_MESSAGE_LIMIT = 60
 const OLDER_SESSION_MESSAGE_LIMIT = 80
@@ -659,6 +660,8 @@ async function startRunForLocalMessage(
     const sentMessage = {
       ...userMessage,
       id: canonicalId,
+      runId: run.runId,
+      turnId: run.runId,
       localStatus: undefined,
       localError: undefined
     }

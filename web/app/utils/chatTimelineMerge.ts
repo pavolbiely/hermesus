@@ -1,54 +1,22 @@
 import type { WebChatMessage } from '~/types/web-chat'
 
-function textParts(message: WebChatMessage) {
-  return message.parts
-    .filter(part => part.type === 'text')
-    .map(part => part.text || '')
-    .join('\n\n')
-}
-
-function messageTime(message: WebChatMessage) {
-  const time = new Date(message.createdAt).getTime()
-  return Number.isFinite(time) ? time : 0
-}
-
 function clientMessageId(message: WebChatMessage) {
   return message.clientMessageId || null
 }
 
-function hasEquivalentPersistedMessage(messages: WebChatMessage[], optimistic: WebChatMessage) {
-  const optimisticClientId = clientMessageId(optimistic)
-  if (optimisticClientId && messages.some(message => clientMessageId(message) === optimisticClientId)) {
-    return true
-  }
-
-  const optimisticText = textParts(optimistic)
-  if (!optimisticText) return false
-
-  const optimisticTime = messageTime(optimistic)
-  return messages.some(message => (
-    message.role === optimistic.role
-    && textParts(message) === optimisticText
-    && messageTime(message) >= optimisticTime
-  ))
+function turnId(message: WebChatMessage) {
+  return message.turnId || message.runId || null
 }
 
-function hasNewerPersistedAssistant(messages: WebChatMessage[], assistant: WebChatMessage) {
-  const assistantTime = messageTime(assistant)
-  return messages.some(message => (
-    message.role === 'assistant'
-    && message.parts.length > 0
-    && messageTime(message) >= assistantTime
-  ))
+function hasEquivalentPersistedMessage(messages: WebChatMessage[], optimistic: WebChatMessage) {
+  const optimisticClientId = clientMessageId(optimistic)
+  return Boolean(optimisticClientId && messages.some(message => clientMessageId(message) === optimisticClientId))
 }
 
 function sameUserTurn(left: WebChatMessage, right: WebChatMessage) {
-  const leftClientId = clientMessageId(left)
-  const rightClientId = clientMessageId(right)
-  if (leftClientId && rightClientId) return leftClientId === rightClientId
-
-  const leftText = textParts(left)
-  return Boolean(leftText && leftText === textParts(right))
+  const leftTurnId = turnId(left)
+  const rightTurnId = turnId(right)
+  return Boolean(leftTurnId && rightTurnId && leftTurnId === rightTurnId)
 }
 
 function previousUserMessage(messages: WebChatMessage[], message: WebChatMessage) {
@@ -68,21 +36,10 @@ function hasPersistedAssistantForSameTurn(
   currentMessages: WebChatMessage[],
   assistant: WebChatMessage
 ) {
-  const assistantText = textParts(assistant)
-  if (!assistantText) return false
+  const assistantTurnId = turnId(assistant)
+  if (!assistantTurnId) return false
 
-  const currentUser = previousUserMessage(currentMessages, assistant)
-  if (!currentUser) return false
-
-  const persistedUserIndex = persistedMessages.findIndex(message => message.role === 'user' && sameUserTurn(message, currentUser))
-  if (persistedUserIndex < 0) return false
-
-  for (const message of persistedMessages.slice(persistedUserIndex + 1)) {
-    if (message.role === 'user') return false
-    if (message.role === 'assistant' && textParts(message) === assistantText) return true
-  }
-
-  return false
+  return persistedMessages.some(message => message.role === 'assistant' && turnId(message) === assistantTurnId)
 }
 
 function insertAfterCurrentTurnUser(
@@ -117,7 +74,7 @@ type MergeOptimisticUserMessagesResult = {
 }
 
 function isPreservableAssistantMessage(message: WebChatMessage) {
-  return message.role === 'assistant' && message.parts.length > 0
+  return message.role === 'assistant' && message.parts.length > 0 && Boolean(turnId(message))
 }
 
 function isLocalSystemEventMessage(message: WebChatMessage) {
@@ -170,7 +127,6 @@ export function mergeChatTimeline(
         nextPreservedAssistantIds.has(message.id)
         && (
           hasPersistedAssistantForSameTurn(persistedMessages, currentMessages, message)
-          || hasNewerPersistedAssistant(persistedMessages, message)
         )
       ) {
         nextPreservedAssistantIds.delete(message.id)

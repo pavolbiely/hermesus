@@ -45,6 +45,8 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
     assert "event: run.started" in body
     assert "event: message.delta" in body
     assert "event: message.completed" in body
+    assert f'"turnId":"{data["runId"]}"' in body
+    assert '"messageId"' in body
     assert '"tokenCount":42' in body
     assert '"contextTokens":28' in body
     assert '"generationDurationMs"' in body
@@ -54,7 +56,11 @@ def test_start_run_returns_ids_and_persists_messages(client, monkeypatch, tmp_pa
     assert [message["role"] for message in detail.json()["messages"]] == ["user", "assistant"]
     assert detail.json()["messages"][0]["id"] == data["userMessageId"]
     assert detail.json()["messages"][0]["clientMessageId"] == "client-message-1"
+    assert detail.json()["messages"][0]["runId"] == data["runId"]
+    assert detail.json()["messages"][0]["turnId"] == data["runId"]
     assert detail.json()["messages"][1]["parts"][0]["text"] == "Done"
+    assert detail.json()["messages"][1]["runId"] == data["runId"]
+    assert detail.json()["messages"][1]["turnId"] == data["runId"]
     assert detail.json()["messages"][0]["tokenCount"] == 30
     assert detail.json()["messages"][0]["inputTokens"] == 30
     assert detail.json()["messages"][1]["tokenCount"] == 42

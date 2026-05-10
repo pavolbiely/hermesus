@@ -2,7 +2,7 @@ import type { ComputedRef, Ref } from 'vue'
 import type { AgentStatusEvent, InteractivePrompt, WebChatMessage, WebChatPart, WebChatSystemEventSeverity, WebChatSystemEventType, WebChatTaskPlan, WebChatWorkspaceChanges } from '~/types/web-chat'
 import { applyRunMetrics, finalizeTaskPlansInMessages, inputTokenCount, latestTaskPlanFromMessages, type RunMetrics } from '~/utils/chatRunMessages'
 import { toolDisplayName, toolRawName } from '~/utils/toolCalls'
-import { createLocalMessage } from './useHermesRunStream'
+import { createLocalMessage } from '~/utils/chatLocalMessages'
 
 type SubmitStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 type RunActivityKind = 'starting' | 'thinking' | 'tool' | 'composing' | 'working'
@@ -89,13 +89,26 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     activityTimer = undefined
   }
 
-  function assistantMessage() {
-    let assistant = messages.value[messages.value.length - 1]
-    if (!assistant || assistant.role !== 'assistant') {
-      assistant = createLocalMessage('assistant', '')
-      messages.value.push(assistant)
+  function assistantMessage(runId?: string | null) {
+    const assistant = runId
+      ? [...messages.value].reverse().find(message => message.role === 'assistant' && (message.turnId === runId || message.runId === runId))
+      : messages.value[messages.value.length - 1]
+
+    if (assistant?.role === 'assistant') {
+      if (runId) {
+        assistant.runId = runId
+        assistant.turnId = runId
+      }
+      return assistant
     }
-    return assistant
+
+    const nextAssistant = createLocalMessage('assistant', '')
+    if (runId) {
+      nextAssistant.runId = runId
+      nextAssistant.turnId = runId
+    }
+    messages.value.push(nextAssistant)
+    return nextAssistant
   }
 
   function removeThinkingPart(message: WebChatMessage) {
@@ -103,12 +116,12 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     if (thinkingIndex >= 0) message.parts.splice(thinkingIndex, 1)
   }
 
-  function appendAssistantDelta(content: string) {
+  function appendAssistantDelta(content: string, runId?: string | null) {
     if (!content) return
 
     setActivity('Composing response…', 'composing')
     hasAssistantResponseStarted.value = true
-    const assistant = assistantMessage()
+    const assistant = assistantMessage(runId)
     removeThinkingPart(assistant)
     completeOpenReasoning(assistant)
 
@@ -122,11 +135,12 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
 
   }
 
-  function appendCompletedChanges(changes?: WebChatWorkspaceChanges | null) {
+  function appendCompletedChanges(changes?: WebChatWorkspaceChanges | null, runId?: string | null) {
     if (!changes?.files?.length) return
 
-    const assistant = assistantMessage()
+    const assistant = assistantMessage(runId)
     const existing = assistant.parts.find(part => part.type === 'changes')
+
     if (existing) {
       existing.changes = changes
     } else {
@@ -144,13 +158,16 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     })
   }
 
-  function replaceAssistantMessage(payload: { content?: string, changes?: WebChatWorkspaceChanges | null } & RunMetrics) {
+  function replaceAssistantMessage(payload: { content?: string, messageId?: string | null, turnId?: string | null, changes?: WebChatWorkspaceChanges | null } & RunMetrics, runId?: string | null) {
     if (!payload.content && !payload.changes?.files?.length) return null
 
     setActivity('Finalizing…', 'working')
     hasAssistantResponseStarted.value = true
     applyRunMetricsToLatestUser(payload)
-    const assistant = assistantMessage()
+    const assistant = assistantMessage(runId)
+    if (payload.messageId) assistant.id = payload.messageId
+    assistant.runId = runId || payload.turnId || assistant.runId
+    assistant.turnId = payload.turnId || runId || assistant.turnId
     removeThinkingPart(assistant)
     applyRunMetrics(assistant, payload)
     const completedAt = new Date().toISOString()
@@ -173,7 +190,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
         assistant.parts.push({ type: 'text', text: payload.content, status: null })
       }
     }
-    appendCompletedChanges(payload.changes)
+    appendCompletedChanges(payload.changes, runId)
     return assistant
   }
 
@@ -218,12 +235,12 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     })
   }
 
-  function appendReasoningDelta(content: string) {
+  function appendReasoningDelta(content: string, runId?: string | null) {
     if (!content) return
 
     setActivity('Thinking…', 'thinking')
     hasAssistantResponseStarted.value = true
-    const assistant = assistantMessage()
+    const assistant = assistantMessage(runId)
     removeThinkingPart(assistant)
 
     const lastPart = assistant.parts.at(-1)
@@ -234,7 +251,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     }
   }
 
-  function appendToolStarted(payload: { name?: string, preview?: string, input?: unknown, occurredAt?: string }) {
+  function appendToolStarted(payload: { name?: string, preview?: string, input?: unknown, occurredAt?: string }, runId?: string | null) {
     const toolPart: WebChatPart = {
       type: 'tool',
       name: payload.name,
@@ -245,11 +262,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     toolPart.name = toolRawName(toolPart)
     setActivity(`Running ${toolDisplayName(toolPart)}…`, 'tool')
     hasAssistantResponseStarted.value = true
-    let assistant = messages.value[messages.value.length - 1]
-    if (!assistant || assistant.role !== 'assistant') {
-      assistant = createLocalMessage('assistant', '')
-      messages.value.push(assistant)
-    }
+    const assistant = assistantMessage(runId)
 
     const thinkingIndex = assistant.parts.findIndex(part => part.status === 'thinking')
     if (thinkingIndex >= 0) assistant.parts.splice(thinkingIndex, 1)
@@ -258,7 +271,7 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     assistant.parts.push(toolPart)
   }
 
-  function appendStatus(payload: AgentStatusEvent) {
+  function appendStatus(payload: AgentStatusEvent, runId?: string | null) {
     setActivity(payload.kind === 'warn' ? 'Checking results…' : 'Working…', 'working')
     if (payload.kind === 'warn') {
       appendSystemEvent({
@@ -274,18 +287,18 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     }
 
     hasAssistantResponseStarted.value = true
-    const assistant = assistantMessage()
+    const assistant = assistantMessage(runId)
     removeThinkingPart(assistant)
     completeOpenReasoning(assistant)
     assistant.parts.push({ type: 'status', text: payload.message, status: payload.kind })
   }
 
-  function appendTaskPlan(taskPlan: WebChatTaskPlan) {
+  function appendTaskPlan(taskPlan: WebChatTaskPlan, runId?: string | null) {
     if (!taskPlan.items.length) return
 
     setActivity('Updating plan…', 'working')
     hasAssistantResponseStarted.value = true
-    const assistant = assistantMessage()
+    const assistant = assistantMessage(runId)
     removeThinkingPart(assistant)
     completeOpenReasoning(assistant)
 
@@ -302,9 +315,12 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     finalizeTaskPlansInMessages(messages.value, finalStatus)
   }
 
-  function markToolCompleted(payload: { name?: string, occurredAt?: string }) {
+  function markToolCompleted(payload: { name?: string, occurredAt?: string }, runId?: string | null) {
     setActivity('Thinking…', 'thinking')
-    const assistant = [...messages.value].reverse().find(message => message.role === 'assistant')
+    const assistant = [...messages.value].reverse().find(message => (
+      message.role === 'assistant'
+      && (!runId || message.turnId === runId || message.runId === runId)
+    ))
     const displayName = payload.name ? toolDisplayName({ name: payload.name }) : null
     const rawName = payload.name ? toolRawName({ name: payload.name }) : null
     const toolPart = assistant?.parts.findLast(part => part.type === 'tool' && part.status === 'running' && (!payload.name || part.name === payload.name || part.name === rawName || part.name === displayName))
@@ -314,9 +330,9 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     }
   }
 
-  function appendPrompt(prompt: InteractivePrompt) {
+  function appendPrompt(prompt: InteractivePrompt, runId?: string | null) {
     hasAssistantResponseStarted.value = true
-    const assistant = assistantMessage()
+    const assistant = assistantMessage(runId)
     removeThinkingPart(assistant)
     const existing = assistant.parts.find(part => part.prompt?.id === prompt.id)
     if (existing) {
@@ -378,31 +394,31 @@ export function useChatRunMessages(options: UseChatRunMessagesOptions) {
     unsubscribeRun?.()
     unsubscribeRun = options.activeChatRuns.subscribe(targetSessionId, {
       onDelta: (content) => {
-        if (targetSessionId === options.sessionId.value) appendAssistantDelta(content)
+        if (targetSessionId === options.sessionId.value) appendAssistantDelta(content, runId)
       },
       onReasoningDelta: (content) => {
-        if (targetSessionId === options.sessionId.value) appendReasoningDelta(content)
+        if (targetSessionId === options.sessionId.value) appendReasoningDelta(content, runId)
       },
       onCompleted: (payload) => {
         if (targetSessionId !== options.sessionId.value) return
-        const assistant = replaceAssistantMessage(payload)
+        const assistant = replaceAssistantMessage(payload, runId)
         finishTaskPlans('completed')
         if (assistant) options.onAssistantCompleted?.(assistant)
       },
       onToolStarted: (payload) => {
-        if (targetSessionId === options.sessionId.value) appendToolStarted(payload)
+        if (targetSessionId === options.sessionId.value) appendToolStarted(payload, runId)
       },
       onToolCompleted: (payload) => {
-        if (targetSessionId === options.sessionId.value) markToolCompleted(payload)
+        if (targetSessionId === options.sessionId.value) markToolCompleted(payload, runId)
       },
       onTaskPlanUpdated: (taskPlan) => {
-        if (targetSessionId === options.sessionId.value) appendTaskPlan(taskPlan)
+        if (targetSessionId === options.sessionId.value) appendTaskPlan(taskPlan, runId)
       },
       onStatus: (payload) => {
-        if (targetSessionId === options.sessionId.value) appendStatus(payload)
+        if (targetSessionId === options.sessionId.value) appendStatus(payload, runId)
       },
       onPromptRequested: (prompt) => {
-        if (targetSessionId === options.sessionId.value) appendPrompt(prompt)
+        if (targetSessionId === options.sessionId.value) appendPrompt(prompt, runId)
       },
       onPromptUpdated: (prompt) => {
         if (targetSessionId === options.sessionId.value) updatePrompt(prompt)

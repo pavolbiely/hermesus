@@ -161,6 +161,23 @@ def message_items(message: dict[str, Any]) -> Any:
     return parse_jsonish(message.get(MESSAGE_ITEMS_FIELD))
 
 
+def message_turn_identity(message: dict[str, Any]) -> tuple[str | None, str | None]:
+    items = message_items(message)
+    if not isinstance(items, list):
+        return None, None
+
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "web_chat_turn":
+            continue
+        run_id = item.get("runId")
+        turn_id = item.get("turnId")
+        return (
+            run_id if isinstance(run_id, str) and run_id else None,
+            turn_id if isinstance(turn_id, str) and turn_id else None,
+        )
+    return None, None
+
+
 def message_client_id(message: dict[str, Any]) -> str | None:
     items = message_items(message)
     if not isinstance(items, list):
@@ -342,12 +359,15 @@ def message_parts(message: dict[str, Any]) -> list[WebChatPart]:
 
 def serialize_message(message: dict[str, Any]) -> WebChatMessage:
     metrics = message_metrics(message)
+    run_id, turn_id = message_turn_identity(message)
     return WebChatMessage(
         id=str(message["id"]),
         role=message.get("role"),
         parts=message_parts(message),
         createdAt=iso_from_epoch(message.get("timestamp")),
         clientMessageId=message_client_id(message),
+        runId=run_id,
+        turnId=turn_id,
         tokenCount=message.get("token_count") or metrics.get("tokenCount"),
         inputTokens=metrics.get("inputTokens"),
         outputTokens=metrics.get("outputTokens"),

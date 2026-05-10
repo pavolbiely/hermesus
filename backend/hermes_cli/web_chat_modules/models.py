@@ -134,6 +134,8 @@ class WebChatMessage(BaseModel):
     parts: list[WebChatPart]
     createdAt: str
     clientMessageId: str | None = None
+    runId: str | None = None
+    turnId: str | None = None
     tokenCount: int | None = None
     inputTokens: int | None = None
     outputTokens: int | None = None

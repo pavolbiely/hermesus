@@ -194,9 +194,12 @@ class RunManager:
 
         execution_workspace_path = workspace_path
 
+        run_id = uuid4().hex
+        turn_id = run_id
+
         user_message_id = None
         if not request.editedMessageId:
-            message_items = []
+            message_items = [{"type": "web_chat_turn", "runId": run_id, "turnId": turn_id}]
             if request.clientMessageId:
                 message_items.append({"type": "web_chat_client_message", "clientMessageId": request.clientMessageId})
             message_items.extend(
@@ -208,14 +211,13 @@ class RunManager:
                 session_id,
                 "user",
                 request.input,
-                message_items=message_items or None,
+                message_items=message_items,
             )
 
         baseline_git_status = self._services.git_status_porcelain(execution_workspace_path) if execution_workspace_path else None
         baseline_change_fingerprint = self._services.workspace_change_fingerprint(execution_workspace_path) if execution_workspace_path else None
         baseline_workspace_snapshot = self._services.workspace_file_snapshot(execution_workspace_path) if execution_workspace_path else None
 
-        run_id = uuid4().hex
         context = RunContext(
             run_id=run_id,
             session_id=session_id,
@@ -533,7 +535,11 @@ class RunManager:
         return metrics
 
     def _message_items(self, active: ActiveRun, metrics: dict[str, Any]) -> list[dict[str, Any]] | None:
-        items: list[dict[str, Any]] = []
+        items: list[dict[str, Any]] = [{
+            "type": "web_chat_turn",
+            "runId": active.context.run_id,
+            "turnId": active.context.run_id,
+        }]
         prompts = list(active.prompts.values())
         items.extend({"type": "web_chat_prompt", "prompt": prompt.model_dump()} for prompt in prompts)
         if active.latest_task_plan:
@@ -581,6 +587,8 @@ class RunManager:
                         "content": final_text,
                         "changes": changes.model_dump() if changes else None,
                         "metrics": metrics,
+                        "messageId": str(assistant_message_id),
+                        "turnId": active.context.run_id,
                     },
                 )
             self._emit(active, {"type": "run.completed"})

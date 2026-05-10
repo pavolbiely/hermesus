@@ -12,6 +12,8 @@ type RunSteeredPayload = { text?: string, messageId?: string, occurredAt?: strin
 
 type CompletedRunPayload = {
   content?: string
+  messageId?: string | null
+  turnId?: string | null
   changes?: WebChatWorkspaceChanges | null
   tokenCount?: number | null
   inputTokens?: number | null
@@ -249,6 +251,8 @@ export function useActiveChatRuns() {
       const metrics = payload.metrics && typeof payload.metrics === 'object' ? payload.metrics as Record<string, unknown> : {}
       recordAndNotify(run, 'onCompleted', {
         content: typeof payload.content === 'string' ? payload.content : undefined,
+        messageId: typeof payload.messageId === 'string' ? payload.messageId : null,
+        turnId: typeof payload.turnId === 'string' ? payload.turnId : null,
         changes: payload.changes && typeof payload.changes === 'object' ? payload.changes as WebChatWorkspaceChanges : null,
         tokenCount: numericMetric(metrics, 'tokenCount'),
         inputTokens: numericMetric(metrics, 'inputTokens'),
