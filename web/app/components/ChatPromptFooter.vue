@@ -559,8 +559,10 @@ onBeforeUnmount(() => {
     <UChatPromptSubmit
       :status="submitStatus"
       :disabled="submitDisabled"
+      submitted-icon="i-lucide-square"
       submitted-color="error"
       submitted-variant="solid"
+      streaming-icon="i-lucide-square"
       streaming-color="error"
       streaming-variant="solid"
       @stop="emit('stop')"
