@@ -24,6 +24,7 @@ import {
 } from '~/utils/acpMessageMetadata'
 import { writeClipboardText } from '~/utils/clipboard'
 import { isAcpPlanUpdate, normalizeAcpPlanEntries } from '~/utils/acpPlanNormalization'
+import { scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender } from '~/utils/chatInitialScroll'
 import { toolCallTitle } from '~/utils/toolCalls'
 
 type PendingPermission = {
@@ -31,12 +32,18 @@ type PendingPermission = {
   request: RequestPermissionRequest
 }
 
+type CachedSessionView = {
+  transcript: AcpTranscriptSnapshot
+  hasOlderMessages: boolean
+  nextTranscriptBefore: number | null
+}
+
 type MessageAction = {
   label: string
   icon: string
+  kind?: 'default' | 'read-aloud'
   disabled?: boolean
   color?: 'neutral' | 'error'
-  class?: string
   variant?: 'ghost'
   onClick: (event: MouseEvent, message: AcpChatMessageWithActions) => void | Promise<void>
 }
@@ -53,6 +60,7 @@ const api = useAcpApi()
 const context = useChatComposerContext()
 const pendingAcpPrompts = usePendingAcpPrompt()
 const transcript = useAcpTranscript()
+const sessionViewCache = useState<Record<string, CachedSessionView>>('acp-session-view-cache', () => ({}))
 const readAloud = useAcpMessageReadAloud()
 const toast = useToast()
 
@@ -61,6 +69,7 @@ const input = ref('')
 const messagesScrollContainer = ref<HTMLElement | null>(null)
 const promptContainer = ref<HTMLElement | null>(null)
 const runDetailsElements = new Map<string, HTMLElement>()
+const runDetailsScrollCleanup = new Map<string, () => void>()
 const { style: messagesScrollShadowStyle } = useScrollShadow(messagesScrollContainer)
 const loading = ref(true)
 const activePromptTurnId = ref<string | null>(null)
@@ -78,6 +87,9 @@ const error = ref<string | null>(null)
 let closeEvents: (() => void) | undefined
 let eventSource: EventSource | undefined
 let sessionLoadSequence = 0
+let sessionLoadAbortController: AbortController | undefined
+let displayedSessionId: string | null = null
+let latestInitialScrollSequence = 0
 
 const transcriptPageSize = 80
 
@@ -184,27 +196,49 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  cacheCurrentSessionView(displayedSessionId)
+  abortActiveSessionLoad()
   closeEvents?.()
+  runDetailsScrollCleanup.forEach(cleanup => cleanup())
+  runDetailsScrollCleanup.clear()
 })
 
-watch(sessionId, async (newSessionId) => {
-  await initializeSession(newSessionId)
+watch(sessionId, (newSessionId) => {
+  void initializeSession(newSessionId)
 })
 
 async function initializeSession(targetSessionId = sessionId.value) {
   if (!targetSessionId) return
-  const loadSequence = ++sessionLoadSequence
 
-  loading.value = true
-  error.value = null
-  resetSessionView()
+  cacheCurrentSessionView(displayedSessionId)
+  abortActiveSessionLoad()
   closeEvents?.()
   closeEvents = undefined
   eventSource = undefined
 
+  const loadSequence = ++sessionLoadSequence
+  const abortController = new AbortController()
+  sessionLoadAbortController = abortController
+  displayedSessionId = targetSessionId
+
+  loading.value = true
+  error.value = null
+  resetSessionView()
+
+  const cached = sessionViewCache.value[targetSessionId]
+  if (cached) {
+    restoreCachedSessionView(cached)
+    loading.value = false
+    scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
+  }
+
   try {
-    const stored = await api.readTranscript(targetSessionId, { limit: transcriptPageSize })
-    if (loadSequence !== sessionLoadSequence || targetSessionId !== sessionId.value) return
+    const stored = await api.readTranscript(
+      targetSessionId,
+      { limit: transcriptPageSize },
+      { signal: abortController.signal }
+    )
+    if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
 
     const projectedTranscript = stored.transcript
     const initializedFromProjection = Boolean(projectedTranscript)
@@ -213,29 +247,39 @@ async function initializeSession(targetSessionId = sessionId.value) {
       hasOlderMessages.value = stored.hasMore
       nextTranscriptBefore.value = stored.nextBefore
       loading.value = false
+      cacheCurrentSessionView(targetSessionId)
+      scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
     }
 
     eventSource = api.subscribeSession(targetSessionId, handleBridgeEvent, () => {
-      error.value ||= 'ACP event stream disconnected.'
+      if (targetSessionId === sessionId.value) error.value ||= 'ACP event stream disconnected.'
     })
     closeEvents = () => eventSource?.close()
 
-    const loaded = await api.loadSession(targetSessionId)
-    if (loadSequence !== sessionLoadSequence || targetSessionId !== sessionId.value) return
+    const loaded = await api.loadSession(targetSessionId, { signal: abortController.signal })
+    if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
 
     modelState.value = loaded.models || modelState.value
     modeState.value = loaded.modes || modeState.value
     configOptions.value = loaded.configOptions || configOptions.value
     if (initializedFromProjection) {
-      const refreshed = await api.readTranscript(targetSessionId, { limit: transcriptPageSize })
-      if (loadSequence !== sessionLoadSequence || targetSessionId !== sessionId.value) return
+      const refreshed = await api.readTranscript(
+        targetSessionId,
+        { limit: transcriptPageSize },
+        { signal: abortController.signal }
+      )
+      if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
       if (refreshed.transcript) {
         applyTranscriptSnapshot(refreshed.transcript)
         hasOlderMessages.value = refreshed.hasMore
         nextTranscriptBefore.value = refreshed.nextBefore
+        cacheCurrentSessionView(targetSessionId)
+        scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
       }
     } else {
       loaded.events.forEach(handleBridgeEvent)
+      cacheCurrentSessionView(targetSessionId)
+      scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
     }
 
     const queuedPrompt = pendingAcpPrompts.value[targetSessionId]
@@ -252,10 +296,12 @@ async function initializeSession(targetSessionId = sessionId.value) {
       await sendPrompt(queuedPromptText)
     }
   } catch (err) {
-    if (loadSequence !== sessionLoadSequence || targetSessionId !== sessionId.value) return
+    if (isAbortError(err)) return
+    if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
     showError(err, 'Could not load ACP session')
   } finally {
-    if (loadSequence === sessionLoadSequence && targetSessionId === sessionId.value) {
+    if (sessionLoadAbortController === abortController) sessionLoadAbortController = undefined
+    if (isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) {
       loading.value = false
     }
   }
@@ -268,6 +314,65 @@ async function onSubmit() {
   input.value = ''
   context.clearAttachments()
   await sendPrompt(message, attachments)
+}
+
+function abortActiveSessionLoad() {
+  sessionLoadAbortController?.abort()
+  sessionLoadAbortController = undefined
+  latestInitialScrollSequence++
+}
+
+function isCurrentSessionLoad(loadSequence: number, targetSessionId: string, abortController: AbortController) {
+  return !abortController.signal.aborted
+    && loadSequence === sessionLoadSequence
+    && targetSessionId === sessionId.value
+}
+
+function isAbortError(err: unknown) {
+  return (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError')
+    || (err instanceof Error && err.name === 'AbortError')
+}
+
+function restoreCachedSessionView(view: CachedSessionView) {
+  applyTranscriptSnapshot(clonePlain(view.transcript))
+  hasOlderMessages.value = view.hasOlderMessages
+  nextTranscriptBefore.value = view.nextTranscriptBefore
+}
+
+function cacheCurrentSessionView(targetSessionId: string | null) {
+  if (!targetSessionId || displayedSessionId !== targetSessionId) return
+  if (!messages.value.length && !pendingPermissions.value.length && !planEntries.value.length) return
+
+  sessionViewCache.value = {
+    ...sessionViewCache.value,
+    [targetSessionId]: clonePlain({
+      transcript: {
+        sessionId: targetSessionId,
+        cursor: transcript.state.value.cursor,
+        updatedAt: new Date().toISOString(),
+        messages: transcript.messages.value,
+        pendingPermissions: pendingPermissions.value,
+        planEntries: planEntries.value,
+        prompt: activePromptTurnId.value
+          ? { status: 'running', turnId: activePromptTurnId.value }
+          : null,
+        models: modelState.value,
+        modes: modeState.value,
+        configOptions: configOptions.value,
+        availableCommands: availableCommands.value
+      },
+      hasOlderMessages: hasOlderMessages.value,
+      nextTranscriptBefore: nextTranscriptBefore.value
+    })
+  }
+}
+
+function clonePlain<T>(value: T): T {
+  try {
+    return structuredClone(value)
+  } catch {
+    return JSON.parse(JSON.stringify(value)) as T
+  }
 }
 
 async function sendPrompt(message: string, attachments: ChatPromptAttachment[] = []) {
@@ -284,6 +389,7 @@ async function sendPrompt(message: string, attachments: ChatPromptAttachment[] =
     text: message,
     occurredAt: new Date().toISOString()
   })
+  cacheCurrentSessionView(sessionId.value)
 
   try {
     await api.startPrompt(sessionId.value, {
@@ -306,6 +412,35 @@ async function stopPrompt() {
   } finally {
     activePromptTurnId.value = null
   }
+}
+
+function scrollInitialTranscriptToBottom(loadSequence: number, targetSessionId: string) {
+  if (!import.meta.client) return
+
+  const scrollSequence = ++latestInitialScrollSequence
+  const isCurrentLoad = () => (
+    scrollSequence === latestInitialScrollSequence
+    && loadSequence === sessionLoadSequence
+    && targetSessionId === sessionId.value
+  )
+
+  void (async () => {
+    await nextTick()
+    if (!isCurrentLoad()) return
+
+    scrollElementTreeToBottom(messagesScrollContainer.value)
+    await scrollElementTreeToBottomAfterRender(messagesScrollContainer.value, {
+      waitForFrame: waitForAnimationFrame,
+      stableFrameCount: 2,
+      maxFrameCount: 10
+    })
+  })()
+}
+
+function waitForAnimationFrame() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve())
+  })
 }
 
 function resetSessionView() {
@@ -348,6 +483,7 @@ async function loadOlderMessages() {
     if (response.transcript) transcript.prependMessages(response.transcript.messages)
     hasOlderMessages.value = response.hasMore
     nextTranscriptBefore.value = response.nextBefore
+    cacheCurrentSessionView(sessionId.value)
     await nextTick()
     if (container) {
       container.scrollTop = container.scrollHeight - previousScrollHeight + previousScrollTop
@@ -395,6 +531,7 @@ function handleBridgeEvent(event: Parameters<typeof transcript.applyBridgeEvent>
       activePromptTurnId.value = null
     }
   }
+  cacheCurrentSessionView(event.sessionId)
 }
 
 function showError(err: unknown, fallback: string) {
@@ -435,29 +572,53 @@ function isComponentWithHtmlRoot(value: Element | ComponentPublicInstance | null
 }
 
 function onRunDetailsOpen(open: boolean, messageId: string) {
+  runDetailsScrollCleanup.get(messageId)?.()
+  runDetailsScrollCleanup.delete(messageId)
   if (!open) return
   void scrollRunDetailsExpansionIntoView(messageId)
 }
 
 async function scrollRunDetailsExpansionIntoView(messageId: string) {
   await nextTick()
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
 
   const container = messagesScrollContainer.value
   const element = runDetailsElements.get(messageId)
   if (!container || !element) return
 
-  const containerRect = container.getBoundingClientRect()
-  const elementRect = element.getBoundingClientRect()
-  const bottomGap = 12
-  const overflow = elementRect.bottom - containerRect.bottom + bottomGap
-  if (overflow <= 0) return
-
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  container.scrollTo({
-    top: container.scrollTop + overflow,
-    behavior: prefersReducedMotion ? 'auto' : 'smooth'
+  const scrollIfNeeded = () => {
+    const containerRect = container.getBoundingClientRect()
+    const elementRect = element.getBoundingClientRect()
+    const bottomGap = 12
+    const overflow = elementRect.bottom - containerRect.bottom + bottomGap
+    if (overflow <= 0) return
+
+    container.scrollTo({
+      top: container.scrollTop + overflow,
+      behavior: prefersReducedMotion ? 'auto' : 'smooth'
+    })
+  }
+
+  let frame = requestAnimationFrame(scrollIfNeeded)
+  const observer = new ResizeObserver(() => {
+    cancelAnimationFrame(frame)
+    frame = requestAnimationFrame(scrollIfNeeded)
   })
+  observer.observe(element)
+
+  const timers = [120, 260, 420].map(delay => window.setTimeout(scrollIfNeeded, delay))
+  const cleanup = () => {
+    observer.disconnect()
+    cancelAnimationFrame(frame)
+    timers.forEach(timer => window.clearTimeout(timer))
+  }
+  runDetailsScrollCleanup.set(messageId, cleanup)
+  window.setTimeout(() => {
+    cleanup()
+    if (runDetailsScrollCleanup.get(messageId) === cleanup) {
+      runDetailsScrollCleanup.delete(messageId)
+    }
+  }, 500)
 }
 
 function withNativeMessageActions(message: AcpChatMessage): AcpChatMessageWithActions {
@@ -504,15 +665,27 @@ function assistantMessageActions(message: AcpChatMessage): MessageAction[] {
     {
       label: isReadAloudActive ? 'Stop read aloud' : 'Read aloud',
       icon: isGeneratingSpeech ? 'i-lucide-loader-circle' : isSpeaking ? 'i-lucide-square' : 'i-lucide-volume-2',
+      kind: 'read-aloud',
       disabled: !readAloud.isSupported.value,
       color: 'neutral',
       variant: 'ghost',
-      class: isGeneratingSpeech
-        ? 'text-primary hover:text-primary animate-spin'
-        : 'text-primary hover:text-primary',
       onClick: () => readAloud.read(message)
     }
   ]
+}
+
+function isReadingAloud(message: AcpChatMessage) {
+  return readAloud.speakingMessageId.value === message.id
+}
+
+function isGeneratingAloud(message: AcpChatMessage) {
+  return readAloud.generatingMessageId.value === message.id
+}
+
+function readAloudStatusDetail(message: AcpChatMessage) {
+  if (isGeneratingAloud(message)) return 'Generating speech audio'
+  if (isReadingAloud(message)) return 'Reading aloud'
+  return ''
 }
 
 function hasAssistantFooter(message: AcpChatMessage) {
@@ -886,7 +1059,8 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                   />
                   <div
                     v-if="hasAssistantFooter(message)"
-                    class="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-none text-muted opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100"
+                    class="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-none text-muted transition-opacity focus-within:opacity-100"
+                    :class="readAloudStatusDetail(message) ? 'opacity-100' : 'opacity-0 group-hover/message:opacity-100'"
                   >
                     <template
                       v-for="(item, itemIndex) in messageMetadataItems(message)"
@@ -908,18 +1082,41 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                         :key="actionIndex"
                         :text="action.label"
                       >
+                        <button
+                          v-if="action.kind === 'read-aloud'"
+                          type="button"
+                          class="inline-flex size-4 flex-none items-center justify-center text-muted hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary/50 disabled:pointer-events-none disabled:opacity-50"
+                          :class="isReadingAloud(message) || isGeneratingAloud(message) ? 'text-primary hover:text-primary' : ''"
+                          :disabled="action.disabled"
+                          :aria-label="action.label"
+                          @click.stop.prevent="action.onClick($event, message as AcpChatMessageWithActions)"
+                        >
+                          <UIcon
+                            :name="action.icon"
+                            class="size-3"
+                            :class="isGeneratingAloud(message) ? 'animate-spin' : ''"
+                          />
+                        </button>
                         <UButton
+                          v-else
                           size="xs"
                           :icon="action.icon"
                           :color="action.color || 'neutral'"
                           variant="ghost"
                           :disabled="action.disabled"
                           :aria-label="action.label"
-                          :class="['-my-0.5 size-4 p-0 text-muted hover:text-toned disabled:text-dimmed', action.class]"
+                          class="-my-0.5 size-4 p-0 text-muted hover:text-toned disabled:text-dimmed"
                           :ui="{ leadingIcon: 'size-3' }"
                           @click="action.onClick($event, message as AcpChatMessageWithActions)"
                         />
                       </UTooltip>
+                      <span v-if="readAloudStatusDetail(message)" aria-hidden="true">·</span>
+                      <em
+                        v-if="readAloudStatusDetail(message)"
+                        class="cursor-default whitespace-nowrap text-muted"
+                      >
+                        {{ readAloudStatusDetail(message) }}
+                      </em>
                     </span>
                   </div>
                   <UChatTool

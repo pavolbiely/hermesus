@@ -16,6 +16,7 @@ const router = useRouter()
 const toast = useToast()
 const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
+const readAloud = useAcpMessageReadAloud()
 
 const dataRefreshKey = 'acp-sidebar-sessions'
 const { data, refresh } = await useAsyncData(dataRefreshKey, () => acpApi.listSessions())
@@ -68,6 +69,8 @@ const activeSidebarSessionId = computed(() => {
   if (requestedSessionId.value) return requestedSessionId.value
   return typeof route.params.id === 'string' ? route.params.id : undefined
 })
+const readAloudSessionId = computed(() => readAloud.generatingSessionId.value || readAloud.speakingSessionId.value)
+const readAloudStatus = computed(() => readAloud.status.value)
 
 const renameModalOpen = computed({
   get: () => Boolean(renameSession.value),
@@ -491,6 +494,10 @@ async function deleteSession(session: ChatSessionSummary) {
 function prefetchSession(_session: ChatSessionSummary) {
 }
 
+function stopReadAloud(sessionId: string) {
+  readAloud.stopSession(sessionId)
+}
+
 function openSession(session: ChatSessionSummary) {
   requestedSessionId.value = session.id
   void router.push(`/acp/${session.id}`).catch(() => {
@@ -579,6 +586,8 @@ provide('requestedSessionId', readonly(requestedSessionId))
           :read-message-counts-loaded="readMessageCountsLoaded"
           :is-session-running="isSessionRunning"
           :has-local-unread="hasLocalUnread"
+          :read-aloud-session-id="readAloudSessionId"
+          :read-aloud-status="readAloudStatus"
           @edit-workspace="beginEditWorkspace"
           @start-workspace-chat="startWorkspaceChat"
           @reorder-workspaces="reorderWorkspaces"
@@ -589,6 +598,7 @@ provide('requestedSessionId', readonly(requestedSessionId))
           @toggle-session-pinned="toggleSessionPinned"
           @restore-session="restoreSession"
           @confirm-session-action="beginConfirmAction"
+          @stop-read-aloud="stopReadAloud"
         />
       </template>
 

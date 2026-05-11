@@ -60,9 +60,12 @@ export function useAcpApi() {
     initialize: () => request<AcpInitializeApiResponse>('/api/acp/initialize', { method: 'POST' }),
     listSessions: () => request<AcpListSessionsResponse>('/api/acp/sessions'),
     createSession: (payload: Record<string, unknown> = {}) => request<NewSessionResponse>('/api/acp/sessions', { method: 'POST', body: payload }),
-    loadSession: (sessionId: string) => request<AcpLoadSessionApiResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}`),
-    readTranscript: (sessionId: string, params: { limit?: number, before?: number } = {}) => request<AcpTranscriptApiResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/transcript`, {
-      query: params
+    loadSession: (sessionId: string, options: { signal?: AbortSignal } = {}) => request<AcpLoadSessionApiResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}`, {
+      signal: options.signal
+    }),
+    readTranscript: (sessionId: string, params: { limit?: number, before?: number } = {}, options: { signal?: AbortSignal } = {}) => request<AcpTranscriptApiResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/transcript`, {
+      query: params,
+      signal: options.signal
     }),
     rebuildTranscript: (sessionId: string) => request<AcpTranscriptRebuildResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/transcript/rebuild`, { method: 'POST' }),
     deleteTranscript: (sessionId: string) => request<AcpTranscriptDeleteResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/transcript`, { method: 'DELETE' }),

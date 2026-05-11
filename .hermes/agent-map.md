@@ -18,7 +18,7 @@ Use this before broad repository search.
 - `web/server/acp/bridge.ts`: ACP SDK subprocess bridge, active prompt correlation, and client handler.
 - `web/server/acp/events.ts`: session-scoped ACP SSE publish/subscribe backlog.
 - `web/server/acp/transcriptStore.ts`, `web/server/acp/transcriptProjection.ts`, `web/server/acp/sessionLoadReplay.ts`: persistent normalized transcript projection, projection rebuild, and session/load replay capture.
-- `web/server/acp/turnMetadata.ts`: Hermesum sidecar persistence for prompt completion usage/duration metadata replayed on session load.
+- `web/server/acp/turnMetadata.ts`, `web/server/acp/sessionReasoning.ts`: Hermesum sidecar/replay supplements for prompt completion usage/duration metadata and stored assistant reasoning summaries.
 - `web/server/app/acpSessionMetadata.ts`: Hermesum-owned ACP sidebar metadata store.
 - `web/server/app/workspaces.ts`: Hermesum-owned workspace settings store and validation.
 - `web/server/api/acp/`: ACP protocol-backed Nitro routes.

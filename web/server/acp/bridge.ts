@@ -22,10 +22,12 @@ import {
 } from '@agentclientprotocol/sdk'
 import { publishAcpEvent } from './events'
 import { requestAcpPermission } from './permissions'
+import { latestReasoningEventFromSessionFile } from './sessionReasoning'
 import { recordAcpTurnMetadata } from './turnMetadata'
 import type { AcpBridgeHealth } from './types'
 
 const activePromptBySession = new Map<string, { turnId: string, messageId: string }>()
+const activeThoughtTurns = new Set<string>()
 
 type BridgeRuntimeConfig = {
   hermesAcpCommand?: string
@@ -142,6 +144,14 @@ class AcpBridge {
       } catch (error) {
         console.warn('Failed to persist ACP turn metadata', error)
       }
+      try {
+        if (!activeThoughtTurns.has(turnId)) {
+          const reasoningEvent = await latestReasoningEventFromSessionFile(config, params.sessionId, turnId)
+          if (reasoningEvent) publishAcpEvent(reasoningEvent)
+        }
+      } catch (error) {
+        console.warn('Failed to restore ACP reasoning summary', error)
+      }
       publishAcpEvent({ type: 'prompt.completed', sessionId: params.sessionId, turnId, messageId, userMessageId, completedAt, response })
       return response
     } catch (error: unknown) {
@@ -151,6 +161,7 @@ class AcpBridge {
     } finally {
       const active = activePromptBySession.get(params.sessionId)
       if (active?.turnId === turnId) activePromptBySession.delete(params.sessionId)
+      activeThoughtTurns.delete(turnId)
     }
   }
 
@@ -223,6 +234,9 @@ function createClientHandler(): Client {
   return {
     async sessionUpdate(params: SessionNotification) {
       const active = activePromptBySession.get(params.sessionId)
+      if (active && params.update.sessionUpdate === 'agent_thought_chunk') {
+        activeThoughtTurns.add(active.turnId)
+      }
       publishAcpEvent({
         type: 'session.update',
         sessionId: params.sessionId,

@@ -54,9 +54,11 @@ export function useAcpMessageReadAloud() {
   const toast = useToast()
   const speakingMessageId = useState<string | null>('acp-speaking-message-id', () => null)
   const generatingMessageId = useState<string | null>('acp-generating-speech-message-id', () => null)
+  const speakingSessionId = useState<string | null>('acp-speaking-session-id', () => null)
+  const generatingSessionId = useState<string | null>('acp-generating-speech-session-id', () => null)
   const status = computed<ReadAloudStatus>(() => {
-    if (generatingMessageId.value) return 'generating'
-    return speakingMessageId.value ? 'speaking' : 'idle'
+    if (generatingMessageId.value || generatingSessionId.value) return 'generating'
+    return speakingMessageId.value || speakingSessionId.value ? 'speaking' : 'idle'
   })
   const isSupported = computed(() => {
     if (!import.meta.client) return false
@@ -66,11 +68,13 @@ export function useAcpMessageReadAloud() {
   function clearSpeakingState(messageId?: string) {
     if (messageId && speakingMessageId.value !== messageId) return
     speakingMessageId.value = null
+    speakingSessionId.value = null
   }
 
   function clearGeneratingState(messageId?: string) {
     if (messageId && generatingMessageId.value !== messageId) return
     generatingMessageId.value = null
+    generatingSessionId.value = null
   }
 
   function stop() {
@@ -112,6 +116,7 @@ export function useAcpMessageReadAloud() {
 
     activeUtterance = utterance
     speakingMessageId.value = message.id
+    speakingSessionId.value = message.sessionId
 
     utterance.onend = () => {
       if (activeUtterance !== utterance || readAttempt !== attempt) return
@@ -140,6 +145,7 @@ export function useAcpMessageReadAloud() {
     const controller = new AbortController()
     activeController = controller
     generatingMessageId.value = message.id
+    generatingSessionId.value = message.sessionId
 
     try {
       const response = await fetch('/api/app/read-aloud/speech', {
@@ -162,7 +168,6 @@ export function useAcpMessageReadAloud() {
       const audio = new Audio(audioUrl)
       activeAudioUrl = audioUrl
       activeAudio = audio
-      speakingMessageId.value = message.id
 
       audio.onended = () => {
         if (activeAudio !== audio || readAttempt !== attempt) return
@@ -179,6 +184,9 @@ export function useAcpMessageReadAloud() {
       }
 
       await audio.play()
+      if (activeAudio !== audio || readAttempt !== attempt) return
+      speakingMessageId.value = message.id
+      speakingSessionId.value = message.sessionId
     } catch (error) {
       if (controller.signal.aborted || readAttempt !== attempt) return
       toast.add({ color: 'error', title: `${engineLabel(engine)} read aloud failed.`, description: error instanceof Error ? error.message : undefined })
@@ -186,6 +194,11 @@ export function useAcpMessageReadAloud() {
       if (activeController === controller) activeController = null
       clearGeneratingState(message.id)
     }
+  }
+
+  function stopSession(sessionId: string) {
+    if (generatingSessionId.value !== sessionId && speakingSessionId.value !== sessionId) return
+    stop()
   }
 
   function read(message: AcpChatMessage) {
@@ -216,8 +229,11 @@ export function useAcpMessageReadAloud() {
     isSupported,
     speakingMessageId,
     generatingMessageId,
+    speakingSessionId,
+    generatingSessionId,
     status,
     read,
-    stop
+    stop,
+    stopSession
   }
 }

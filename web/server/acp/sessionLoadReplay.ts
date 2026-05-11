@@ -3,6 +3,7 @@ import { getAcpBridge } from './bridge'
 import { subscribeAcpSession, type AcpBridgeEvent } from './events'
 import { rebuildAcpProjection } from './transcriptProjection'
 import { getAcpTranscriptStore } from './transcriptStore'
+import { reasoningEventsFromSessionFile } from './sessionReasoning'
 import { listAcpTurnMetadata } from './turnMetadata'
 
 const replaySettleMs = 50
@@ -18,7 +19,7 @@ export async function loadAcpSessionWithReplay(config: BridgeRuntimeConfig, para
   try {
     const response = await getAcpBridge().loadSession(config, params)
     await new Promise(resolve => setTimeout(resolve, replaySettleMs))
-    events.push(...await completionEventsFromTurnMetadata(config, sessionId))
+    events.push(...await replaySupplementEvents(config, sessionId))
     return { response, events }
   } finally {
     unsubscribe()
@@ -36,8 +37,15 @@ export async function rebuildAcpSessionProjectionFromLoad(config: BridgeRuntimeC
   return { response, events, transcript }
 }
 
-async function completionEventsFromTurnMetadata(config: BridgeRuntimeConfig, sessionId: string): Promise<AcpBridgeEvent[]> {
+async function replaySupplementEvents(config: BridgeRuntimeConfig, sessionId: string): Promise<AcpBridgeEvent[]> {
   const turnMetadata = await listAcpTurnMetadata(config, sessionId)
+  return [
+    ...await reasoningEventsFromSessionFile(config, sessionId, turnMetadata),
+    ...completionEventsFromTurnMetadata(sessionId, turnMetadata)
+  ]
+}
+
+function completionEventsFromTurnMetadata(sessionId: string, turnMetadata: Awaited<ReturnType<typeof listAcpTurnMetadata>>): AcpBridgeEvent[] {
   return turnMetadata.map((metadata): AcpBridgeEvent => ({
     type: 'prompt.completed',
     sessionId,
