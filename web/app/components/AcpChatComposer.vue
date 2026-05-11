@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ChatPromptAttachment, SlashCommand } from '~/types/chat'
 import type { QueuedMessage } from '~/utils/queuedMessages'
+import { filesFromClipboard } from '~/utils/clipboard'
 
 type SelectItem = { label: string, value: string }
 type SubmitStatus = 'ready' | 'submitted' | 'streaming' | 'error'
@@ -64,6 +65,7 @@ const emit = defineEmits<{
 }>()
 
 const promptContainer = ref<HTMLElement | null>(null)
+const canAttachPastedFiles = computed(() => !props.loading && !props.attachmentsLoading && props.submitStatus !== 'submitted' && props.submitStatus !== 'streaming')
 const slashCommands = useStaticSlashCommands({ input, commands: computed(() => props.commands) })
 const {
   selectSlashCommand,
@@ -79,6 +81,22 @@ const {
 function focus() {
   promptContainer.value?.querySelector('textarea')?.focus()
 }
+
+function onPaste(event: ClipboardEvent) {
+  const files = filesFromClipboard(event)
+  if (!files.length) return
+
+  event.preventDefault()
+  if (canAttachPastedFiles.value) emit('attachFiles', files)
+}
+
+onMounted(() => {
+  promptContainer.value?.addEventListener('paste', onPaste)
+})
+
+onBeforeUnmount(() => {
+  promptContainer.value?.removeEventListener('paste', onPaste)
+})
 
 defineExpose({ focus })
 </script>

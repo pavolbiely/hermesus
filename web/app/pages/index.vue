@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { SessionConfigOption, SessionModelState } from '~/types/acp-api'
 import { NEW_CHAT_DRAFT_ID } from '~/utils/chatDrafts'
+import { filesFromClipboard } from '~/utils/clipboard'
 
 const { input, clearDraft } = useChatDraft(NEW_CHAT_DRAFT_ID)
 const loading = ref(false)
@@ -20,6 +21,7 @@ const draftSessionConsumed = ref(false)
 const modelState = ref<SessionModelState | null>(null)
 const configOptions = ref<SessionConfigOption[]>([])
 const updatingSessionConfig = ref(false)
+const promptContainer = ref<HTMLElement | null>(null)
 
 const workspaceItems = computed(() => context.workspaces.value.map(workspace => ({
   label: workspace.label,
@@ -52,12 +54,15 @@ const selectedReasoningId = computed(() => {
 })
 const selectedModelLabel = computed(() => selectedModelId.value ? modelItems.value.find(item => item.value === selectedModelId.value)?.label : 'Model')
 const selectedReasoningLabel = computed(() => selectedReasoningId.value ? reasoningItems.value.find(item => item.value === selectedReasoningId.value)?.label : 'Reasoning')
+const canAttachPastedFiles = computed(() => !loading.value && !context.attachmentsLoading.value)
 
 onMounted(() => {
+  promptContainer.value?.addEventListener('paste', onPaste)
   void initializeComposer()
 })
 
 onBeforeUnmount(() => {
+  promptContainer.value?.removeEventListener('paste', onPaste)
   if (draftSessionId.value && !draftSessionConsumed.value) {
     void acp.closeSession(draftSessionId.value).catch(() => {})
   }
@@ -191,6 +196,14 @@ async function attachFiles(files: File[]) {
   }
 }
 
+function onPaste(event: ClipboardEvent) {
+  const files = filesFromClipboard(event)
+  if (!files.length) return
+
+  event.preventDefault()
+  if (canAttachPastedFiles.value) void attachFiles(files)
+}
+
 function showError(err: unknown, fallback: string) {
   const message = getHermesErrorMessage(err, fallback)
   error.value = new Error(message)
@@ -236,7 +249,7 @@ async function onSubmit() {
             <p class="text-muted">Start a native web chat session backed by Hermes Agent.</p>
           </div>
 
-          <div class="relative rounded-xl">
+          <div ref="promptContainer" class="relative rounded-xl">
             <UChatPrompt
               v-model="input"
               :maxrows="CHAT_PROMPT_MAX_ROWS"
