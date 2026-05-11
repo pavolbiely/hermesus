@@ -2,7 +2,7 @@
 import type { ComponentPublicInstance, CSSProperties } from 'vue'
 import type { PlanEntry } from '@agentclientprotocol/sdk'
 import type { PermissionOption, RequestPermissionRequest } from '~/types/acp-api'
-import type { AcpChatMessage } from '~/types/acp-chat'
+import type { AcpChatMessage, AcpChatPart } from '~/types/acp-chat'
 import type { AcpChatMessageWithActions, MessageAction, MessageMetadataItem } from '~/composables/useAcpMessageActions'
 
 type PendingPermission = {
@@ -79,6 +79,17 @@ function permissionTitle(permission: PendingPermission) {
   const toolCall = permission.request.toolCall as Record<string, unknown>
   const value = toolCall.title ?? toolCall.name ?? toolCall.kind ?? toolCall.toolCallId
   return typeof value === 'string' && value ? value : 'Permission required'
+}
+
+function filePartKey(file: Extract<AcpChatPart, { type: 'file' }>) {
+  return file.id ?? `${file.filename}:${file.mediaType}:${file.size ?? ''}`
+}
+
+function formatFileSize(bytes?: number) {
+  if (bytes === undefined) return ''
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
 }
 </script>
 
@@ -171,7 +182,7 @@ function permissionTitle(permission: PendingPermission) {
         :should-auto-scroll="false"
         :should-scroll-to-bottom="true"
         :auto-scroll="true"
-        auto-scroll-icon="i-lucide-arrow-down"
+        auto-scroll-icon="i-lucide-chevron-down"
         :user="chatUserProps"
         :assistant="chatAssistantProps"
         :class="loading && initialTranscriptScrollPending && messages.length ? 'invisible' : ''"
@@ -207,6 +218,29 @@ function permissionTitle(permission: PendingPermission) {
             @assistant-focus-in="emit('assistantFocusIn', $event)"
             @assistant-focus-out="emit('assistantFocusOut', $event, message.id)"
           />
+        </template>
+        <template #files="{ parts }: { parts: Extract<AcpChatPart, { type: 'file' }>[] }">
+          <div class="flex max-w-full flex-wrap justify-end gap-2">
+            <template
+              v-for="file in parts"
+              :key="filePartKey(file)"
+            >
+              <img
+                v-if="file.mediaType.startsWith('image/') && file.url"
+                :src="file.url"
+                :alt="file.filename"
+                class="max-h-64 max-w-full rounded-lg border border-default object-contain"
+              >
+              <div
+                v-else
+                class="flex max-w-full items-center gap-2 rounded-lg border border-default bg-muted/40 px-2.5 py-2 text-xs text-toned"
+              >
+                <UIcon name="i-lucide-paperclip" class="size-3.5 shrink-0 text-muted" />
+                <span class="min-w-0 truncate">{{ file.filename }}</span>
+                <span v-if="file.size !== undefined" class="shrink-0 text-muted">{{ formatFileSize(file.size) }}</span>
+              </div>
+            </template>
+          </div>
         </template>
         <template #actions="{ message }: { message: AcpChatMessageWithActions }">
           <div

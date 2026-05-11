@@ -77,6 +77,14 @@ let workspaceDirectorySuggestionTimer: ReturnType<typeof setTimeout> | undefined
 const READ_MESSAGE_COUNTS_KEY = 'hermes-chat-read-message-counts'
 let timer: ReturnType<typeof setInterval> | undefined
 const requestedSessionId = ref<string | null>(null)
+
+function refreshSidebarSessions() {
+  void refresh().catch(() => {})
+}
+
+function refreshSidebarSessionsWhenVisible() {
+  if (document.visibilityState === 'visible') refreshSidebarSessions()
+}
 const activeSidebarSessionId = computed(() => {
   if (requestedSessionId.value) return requestedSessionId.value
   return typeof route.params.id === 'string' ? route.params.id : undefined
@@ -556,6 +564,9 @@ onMounted(() => {
   installNotificationSoundUnlock()
   loadReadMessageCounts()
   syncReadMessageCounts()
+  refreshSidebarSessions()
+  window.addEventListener('focus', refreshSidebarSessions)
+  document.addEventListener('visibilitychange', refreshSidebarSessionsWhenVisible)
   timer = setInterval(() => {
     now.value = new Date()
   }, 15_000)
@@ -564,6 +575,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
   if (workspaceDirectorySuggestionTimer) clearTimeout(workspaceDirectorySuggestionTimer)
+  window.removeEventListener('focus', refreshSidebarSessions)
+  document.removeEventListener('visibilitychange', refreshSidebarSessionsWhenVisible)
 })
 
 provide('refreshSessions', refresh)

@@ -1,15 +1,15 @@
 import { spawn } from 'node:child_process'
 import { createError, defineEventHandler, readBody, setHeader } from 'h3'
 import { detectReadAloudLanguage, edgeReadAloudVoice } from '../../../../shared/readAloud/language'
+import { fitReadAloudTextToEngine, type BackendReadAloudEngine } from '../../../../shared/readAloud/text'
 
 type SpeechRequest = {
   text?: string
-  engine?: 'edge-tts' | 'elevenlabs'
+  engine?: BackendReadAloudEngine
   speed?: number
   apiKey?: string | null
 }
 
-const maxTextLength = 12_000
 const elevenLabsDefaultVoiceId = 'pNInz6obpgDQGcFmaJgB'
 
 function normalizeSpeed(value: unknown) {
@@ -96,16 +96,22 @@ async function runElevenLabsTts(text: string, speed: number, apiKey?: string | n
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<SpeechRequest>(event)
-  const text = body.text?.trim()
-  if (!text) throw createError({ statusCode: 400, statusMessage: 'Text is required.' })
-  if (text.length > maxTextLength) throw createError({ statusCode: 413, statusMessage: 'Text is too long for read aloud.' })
+  const requestedText = body.text?.trim()
+  if (!requestedText) throw createError({ statusCode: 400, statusMessage: 'Text is required.' })
+
+  const engine: BackendReadAloudEngine = body.engine === 'elevenlabs' ? 'elevenlabs' : 'edge-tts'
+  const { text, truncated, maxLength } = fitReadAloudTextToEngine(requestedText, engine)
 
   const speed = normalizeSpeed(body.speed)
-  const audio = body.engine === 'elevenlabs'
+  const audio = engine === 'elevenlabs'
     ? await runElevenLabsTts(text, speed, body.apiKey)
     : await runEdgeTts(text, speed)
 
   setHeader(event, 'Content-Type', 'audio/mpeg')
   setHeader(event, 'Cache-Control', 'no-store')
+  if (truncated) {
+    setHeader(event, 'X-Hermesum-Read-Aloud-Truncated', 'true')
+    setHeader(event, 'X-Hermesum-Read-Aloud-Max-Length', String(maxLength))
+  }
   return audio
 })

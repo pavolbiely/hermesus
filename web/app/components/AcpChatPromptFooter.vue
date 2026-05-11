@@ -148,6 +148,11 @@ function formatFileSize(bytes: number) {
   return `${bytes} B`
 }
 
+function attachmentPreviewUrl(attachment: ChatPromptAttachment) {
+  if (!attachment.type.startsWith('image/') || !attachment.data) return null
+  return `data:${attachment.type};base64,${attachment.data}`
+}
+
 function toggleVoice() {
   if (voiceIsListening.value) {
     stopVoice()
@@ -226,11 +231,21 @@ onBeforeUnmount(() => {
         color="neutral"
         variant="soft"
         size="sm"
-        class="max-w-56 gap-1 rounded-lg pr-1"
+        class="group relative max-w-56 gap-1 rounded-lg pr-1"
       >
         <UIcon :name="attachment.type.startsWith('image/') ? 'i-lucide-image' : 'i-lucide-paperclip'" class="size-3 shrink-0" />
         <span class="min-w-0 truncate">{{ attachment.name }}</span>
         <span class="shrink-0 text-muted">{{ formatFileSize(attachment.size) }}</span>
+        <div
+          v-if="attachmentPreviewUrl(attachment)"
+          class="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden rounded-xl border border-default bg-default p-1 shadow-lg group-hover:block group-focus-within:block"
+        >
+          <img
+            :src="attachmentPreviewUrl(attachment) || undefined"
+            :alt="attachment.name"
+            class="max-h-56 max-w-72 rounded-lg object-contain"
+          >
+        </div>
         <UButton
           aria-label="Remove attachment"
           icon="i-lucide-x"

@@ -55,6 +55,29 @@ test('editing a prior user message truncates the visible branch before inserting
   ])
 })
 
+test('optimistic user messages retain attachment parts', () => {
+  let state = createEmptyAcpTranscriptState()
+
+  state = applyAcpChatEvent(state, {
+    type: 'user.message',
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    messageId: 'user-1',
+    text: 'See photo',
+    attachments: [{
+      type: 'attachment',
+      id: 'att-1',
+      name: 'photo.png',
+      mediaType: 'image/png',
+      size: 12,
+      data: 'aGVsbG8='
+    }]
+  })
+
+  assert.deepEqual(state.messages[0].parts.map(part => part.type), ['text', 'attachment'])
+  assert.equal(state.messages[0].parts[1].name, 'photo.png')
+})
+
 test('server truncate bridge event removes edited branch and accepts following prompt events', () => {
   let state = createEmptyAcpTranscriptState()
 

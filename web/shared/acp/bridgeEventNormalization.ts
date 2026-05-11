@@ -1,5 +1,4 @@
-import type { AcpBridgeEvent } from './types'
-import type { AcpChatEvent } from './types'
+import type { AcpAttachmentPart, AcpBridgeEvent, AcpChatEvent } from './types'
 
 function eventId(event: AcpBridgeEvent, suffix: string) {
   if (event.sequence !== undefined) return `${event.sessionId}:${event.sequence}:${suffix}`
@@ -15,6 +14,17 @@ function textFromContent(content: unknown) {
   if (!content || typeof content !== 'object') return ''
   const record = content as Record<string, unknown>
   return typeof record.text === 'string' ? record.text : ''
+}
+
+function validAttachments(value: unknown): AcpAttachmentPart[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((part): part is AcpAttachmentPart => {
+    if (!part || typeof part !== 'object') return false
+    const record = part as Record<string, unknown>
+    return record.type === 'attachment'
+      && typeof record.name === 'string'
+      && typeof record.mediaType === 'string'
+  })
 }
 
 function toolCallId(update: Record<string, unknown>) {
@@ -98,6 +108,17 @@ function currentLegacyTurn(sessionId: string, sequence: number | undefined, fall
   return turnId
 }
 
+function adoptLegacyTurn(sessionId: string, turnId: string) {
+  legacyTurnState.set(sessionId, turnId)
+  return turnId
+}
+
+function userMessageTurnId(event: Extract<AcpBridgeEvent, { type: 'session.update' }>, messageId: string | undefined) {
+  if (event.turnId) return adoptLegacyTurn(event.sessionId, event.turnId)
+  if (messageId) return messageId
+  return startLegacyTurn(event.sessionId, event.sequence)
+}
+
 function turnIdFromUpdate(sessionId: string, update: Record<string, unknown>, fallback: string, sequence?: number) {
   const value = update.messageId ?? update.id
   return typeof value === 'string' && value ? value : currentLegacyTurn(sessionId, sequence, fallback)
@@ -112,9 +133,10 @@ function normalizeSessionUpdate(event: Extract<AcpBridgeEvent, { type: 'session.
     const text = textFromContent(update.content)
     if (!text) return []
     const messageId = typeof update.messageId === 'string' ? update.messageId : undefined
-    const turnId = event.turnId ?? messageId ?? (sessionUpdate === 'user_message_chunk'
-      ? startLegacyTurn(event.sessionId, event.sequence)
-      : currentLegacyTurn(event.sessionId, event.sequence, 'legacy-agent'))
+    const turnId = sessionUpdate === 'user_message_chunk'
+      ? userMessageTurnId(event, messageId)
+      : (event.turnId ?? messageId ?? currentLegacyTurn(event.sessionId, event.sequence, 'legacy-agent'))
+    const attachments = sessionUpdate === 'user_message_chunk' ? validAttachments(event.userAttachments) : undefined
     return [{
       type: sessionUpdate === 'user_message_chunk' ? 'user.message.delta' : 'message.delta',
       eventId: event.sequence !== undefined ? eventId(event, `${sessionUpdate}:${messageId ?? text}`) : undefined,
@@ -123,7 +145,8 @@ function normalizeSessionUpdate(event: Extract<AcpBridgeEvent, { type: 'session.
       messageId,
       sequence: event.sequence,
       occurredAt,
-      text
+      text,
+      ...(attachments?.length ? { attachments } : {})
     }]
   }
 
@@ -232,7 +255,8 @@ export function normalizeAcpBridgeEvent(event: AcpBridgeEvent): AcpChatEvent[] {
       turnId: event.turnId,
       messageId: event.messageId,
       sequence: event.sequence,
-      text: event.message ?? ''
+      text: event.message ?? '',
+      attachments: event.attachments
     }]
   }
 

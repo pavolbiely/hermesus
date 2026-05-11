@@ -3,11 +3,10 @@ import type {
   AcpListSessionsResponse,
 } from '~/types/acp-api'
 import type { AcpChatMessage } from '~/types/acp-chat'
-import type { AcpChatMessageWithActions } from '~/composables/useAcpMessageActions'
 import { useScrollShadow } from '@nuxt/ui/composables'
 import { acpMessageText } from '~/utils/acpMessageMetadata'
 import { runDetailGroups } from '~/utils/acpRunDetails'
-import { groupProcessMessages } from '~/utils/acpChatMessageDisplay'
+import { attachmentsAsFileParts, groupProcessMessages } from '~/utils/acpChatMessageDisplay'
 import {
   hasRunDetails,
   runActivityLabel,
@@ -259,7 +258,7 @@ const {
   sendPrompt,
   startEditingUserMessage
 })
-const displayMessages = computed<AcpChatMessageWithActions[]>(() => groupedMessages.value.map(withNativeMessageActions))
+const displayMessages = computed(() => groupedMessages.value.map(message => attachmentsAsFileParts(withNativeMessageActions(message))))
 const canAutoSendQueuedMessage = computed(() => shouldAutoSendQueuedMessage({
   hasSession: Boolean(sessionId.value && !loading.value),
   queuedCount: queuedForSession.value.length + (queuedMessageToSendAfterStop.value ? 1 : 0),

@@ -18,8 +18,12 @@ export type AcpToolCallLocation = {
 export type AcpChatPart =
   | { type: 'text', text: string }
   | { type: 'reasoning', text: string }
+  | { type: 'attachment', id?: string, name: string, mediaType: string, size?: number, data?: string }
+  | { type: 'file', id?: string, filename: string, mediaType: string, size?: number, url: string }
   | { type: 'tool', toolCallId: string, name: string, kind?: string, status?: AcpToolCallStatus, locations?: AcpToolCallLocation[], input?: unknown, output?: unknown, error?: string | null, state: 'started' | 'completed' }
   | { type: 'event', title: string, severity?: 'info' | 'warning' | 'error' }
+
+export type AcpAttachmentPart = Extract<AcpChatPart, { type: 'attachment' }>
 
 export type AcpUsage = {
   totalTokens: number
@@ -58,8 +62,8 @@ export type AcpChatEventBase = {
 export type AcpChatEvent =
   | (AcpChatEventBase & { type: 'transcript.loaded', cursor?: number, messages: AcpChatMessage[] })
   | (AcpChatEventBase & { type: 'transcript.truncated', messageId: string })
-  | (AcpChatEventBase & { type: 'user.message', turnId: string, messageId?: string, text: string })
-  | (AcpChatEventBase & { type: 'user.message.delta', turnId: string, messageId?: string, text: string })
+  | (AcpChatEventBase & { type: 'user.message', turnId: string, messageId?: string, text: string, attachments?: AcpAttachmentPart[] })
+  | (AcpChatEventBase & { type: 'user.message.delta', turnId: string, messageId?: string, text: string, attachments?: AcpAttachmentPart[] })
   | (AcpChatEventBase & { type: 'message.delta', turnId: string, messageId?: string, text: string })
   | (AcpChatEventBase & { type: 'reasoning.delta', turnId: string, text: string })
   | (AcpChatEventBase & { type: 'tool.started', turnId: string, toolCallId: string, name: string, kind?: string, status?: AcpToolCallStatus, locations?: AcpToolCallLocation[], input?: unknown, output?: unknown })
@@ -77,11 +81,11 @@ export type AcpTranscriptState = {
 }
 
 export type AcpBridgeEvent =
-  | { type: 'session.update', sessionId: string, sequence?: number, notification: SessionNotification, turnId?: string, messageId?: string }
+  | { type: 'session.update', sessionId: string, sequence?: number, notification: SessionNotification, turnId?: string, messageId?: string, userAttachments?: AcpAttachmentPart[] }
   | { type: 'transcript.truncated', sessionId: string, sequence?: number, messageId: string }
   | { type: 'permission.requested', sessionId: string, sequence?: number, appRequestId: string, request: RequestPermissionRequest }
   | { type: 'permission.resolved', sessionId: string, sequence?: number, appRequestId: string, response: RequestPermissionResponse }
-  | { type: 'prompt.started', sessionId: string, sequence?: number, turnId: string, messageId: string, message?: string }
+  | { type: 'prompt.started', sessionId: string, sequence?: number, turnId: string, messageId: string, message?: string, attachments?: AcpAttachmentPart[] }
   | { type: 'prompt.completed', sessionId: string, sequence?: number, turnId: string, messageId: string, userMessageId?: string, completedAt?: string, response: PromptResponse }
   | { type: 'prompt.failed', sessionId: string, sequence?: number, turnId: string, messageId: string, error: string }
   | { type: 'prompt.cancelled', sessionId: string, sequence?: number, turnId?: string, messageId?: string }

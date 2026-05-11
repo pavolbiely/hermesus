@@ -1,12 +1,15 @@
 import type { Usage } from '@agentclientprotocol/sdk'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import type { AcpAttachmentPart } from '../../shared/acp/types'
 
 export type AcpTurnMetadata = {
   turnId: string
   userMessageId: string
   completedAt: string
   usage?: Usage | null
+  promptText?: string
+  attachments?: AcpAttachmentPart[]
 }
 
 type MetadataFile = {
@@ -31,8 +34,28 @@ function cleanTurnMetadata(value: Partial<AcpTurnMetadata> | undefined): AcpTurn
     turnId: value.turnId,
     userMessageId: value.userMessageId,
     completedAt: value.completedAt,
-    usage: value.usage ?? null
+    usage: value.usage ?? null,
+    promptText: typeof value.promptText === 'string' ? value.promptText : undefined,
+    attachments: cleanAttachments(value.attachments)
   }
+}
+
+function cleanAttachments(value: unknown): AcpAttachmentPart[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const attachments = value.flatMap((item): AcpAttachmentPart[] => {
+    if (!item || typeof item !== 'object') return []
+    const record = item as Record<string, unknown>
+    if (record.type !== 'attachment' || typeof record.name !== 'string' || typeof record.mediaType !== 'string') return []
+    return [{
+      type: 'attachment',
+      id: typeof record.id === 'string' ? record.id : undefined,
+      name: record.name,
+      mediaType: record.mediaType,
+      size: typeof record.size === 'number' ? record.size : undefined,
+      data: typeof record.data === 'string' ? record.data : undefined
+    }]
+  })
+  return attachments.length ? attachments : undefined
 }
 
 async function readMetadataFile(config: MetadataRuntimeConfig): Promise<Record<string, AcpTurnMetadata[]>> {

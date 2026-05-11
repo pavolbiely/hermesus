@@ -41,7 +41,8 @@ export function applyAcpChatEvent(state: AcpTranscriptState, event: AcpChatEvent
         messageId: event.messageId,
         fallbackId: `user-${event.turnId}`,
         occurredAt: event.occurredAt,
-        text: event.text
+        text: event.text,
+        attachments: event.attachments
       })
       break
     case 'user.message.delta':
@@ -53,6 +54,7 @@ export function applyAcpChatEvent(state: AcpTranscriptState, event: AcpChatEvent
         fallbackId: `user-${event.turnId}`,
         occurredAt: event.occurredAt,
         text: event.text,
+        attachments: event.attachments,
         append: true
       })
       break
@@ -163,6 +165,7 @@ function upsertTurnMessage(
     fallbackId: string
     occurredAt?: string
     text: string
+    attachments?: Extract<AcpChatMessage['parts'][number], { type: 'attachment' }>[]
     append?: boolean
   }
 ) {
@@ -174,7 +177,7 @@ function upsertTurnMessage(
       sessionId: options.sessionId,
       turnId: options.turnId,
       createdAt: options.occurredAt ?? new Date().toISOString(),
-      parts: options.text ? [{ type: 'text', text: options.text }] : []
+      parts: [...(options.text ? [{ type: 'text' as const, text: options.text }] : []), ...dedupeAttachmentParts(options.attachments)]
     })
     return
   }
@@ -188,6 +191,25 @@ function upsertTurnMessage(
   } else {
     textPart.text = options.text
   }
+
+  for (const attachment of dedupeAttachmentParts(options.attachments, existing.parts)) {
+    existing.parts.push(attachment)
+  }
+}
+
+function dedupeAttachmentParts(
+  attachments: Extract<AcpChatMessage['parts'][number], { type: 'attachment' }>[] = [],
+  existingParts: AcpChatMessage['parts'] = []
+) {
+  const existingKeys = new Set(existingParts
+    .filter(part => part.type === 'attachment')
+    .map(part => part.id ?? `${part.name}:${part.mediaType}:${part.size ?? ''}`))
+  return attachments.filter((attachment) => {
+    const key = attachment.id ?? `${attachment.name}:${attachment.mediaType}:${attachment.size ?? ''}`
+    if (existingKeys.has(key)) return false
+    existingKeys.add(key)
+    return true
+  })
 }
 
 function upsertAssistantPart(messages: AcpChatMessage[], event: { sessionId: string, turnId: string, occurredAt?: string }, part: AcpChatMessage['parts'][number]) {

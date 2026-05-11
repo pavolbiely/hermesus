@@ -11,7 +11,7 @@ import type {
 import type { AcpChatEvent, AcpChatMessage } from '~/types/acp-chat'
 import type { ChatPromptAttachment } from '~/types/chat'
 import type { QueuedMessage } from '~/utils/queuedMessages'
-import { attachmentsToPromptBlocks } from '~/composables/useAcpPromptAttachments'
+import { attachmentsToChatParts, attachmentsToPromptBlocks } from '~/composables/useAcpPromptAttachments'
 import type { useQueuedMessages } from '~/composables/useQueuedMessages'
 
 type ChatSubmitStatus = 'ready' | 'submitted' | 'streaming'
@@ -211,6 +211,7 @@ export function useAcpPromptController(options: AcpPromptControllerOptions) {
       turnId,
       messageId,
       text: message,
+      attachments: attachmentsToChatParts(attachments),
       occurredAt
     })
     touchSidebarSession(options.sessionId.value, occurredAt)

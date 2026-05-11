@@ -28,6 +28,42 @@ test('normalizes ACP prompt and assistant chunks into one ordered turn', () => {
   ])
 })
 
+test('preserves prompt attachments on started events', () => {
+  let state = createEmptyAcpTranscriptState()
+  const events = normalizeAcpBridgeEvent({
+    type: 'prompt.started',
+    sessionId: 's1',
+    turnId: 't1',
+    messageId: 'u1',
+    message: 'See attached',
+    attachments: [{ type: 'attachment', name: 'screenshot.png', mediaType: 'image/png', data: 'abc' }]
+  })
+
+  for (const event of events) state = applyAcpChatEvent(state, event)
+
+  assert.equal(state.messages[0].parts.some(part => part.type === 'attachment' && part.name === 'screenshot.png' && part.data === 'abc'), true)
+})
+
+test('preserves replay attachment supplements on user chunks and keeps assistant in the same turn', () => {
+  let state = createEmptyAcpTranscriptState()
+  const events = [
+    { type: 'session.update', sessionId: 's1', sequence: 1, turnId: 't1', messageId: 'u1', userAttachments: [{ type: 'attachment', name: 'paste.png', mediaType: 'image/png', data: 'abc' }], notification: { sessionId: 's1', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'image prompt' } } } },
+    { type: 'session.update', sessionId: 's1', sequence: 2, notification: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'answer' } } } }
+  ]
+
+  for (const event of events) {
+    for (const chatEvent of normalizeAcpBridgeEvent(event)) {
+      state = applyAcpChatEvent(state, chatEvent)
+    }
+  }
+
+  assert.deepEqual(state.messages.map(message => [message.role, message.turnId, text(message)]), [
+    ['user', 't1', 'image prompt'],
+    ['assistant', 't1', 'answer']
+  ])
+  assert.equal(state.messages[0].parts.some(part => part.type === 'attachment' && part.name === 'paste.png' && part.data === 'abc'), true)
+})
+
 test('normalizes ACP tool call lifecycle without text matching', () => {
   let state = createEmptyAcpTranscriptState()
   const started = normalizeAcpBridgeEvent({

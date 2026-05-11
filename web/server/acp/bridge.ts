@@ -23,6 +23,7 @@ import {
 import { publishAcpEvent } from './events'
 import { requestAcpPermission } from './permissions'
 import { latestReasoningEventFromSessionFile } from './sessionReasoning'
+import type { AcpAttachmentPart } from '../../shared/acp/types'
 import { recordAcpTurnMetadata } from './turnMetadata'
 import type { AcpBridgeHealth } from './types'
 
@@ -131,8 +132,16 @@ class AcpBridge {
     const messageId = params.messageId || crypto.randomUUID()
     const promptParams: PromptRequest = { ...params, messageId }
 
+    const promptAttachments = attachmentPartsFromPrompt(promptParams.prompt)
     activePromptBySession.set(params.sessionId, { turnId, messageId })
-    publishAcpEvent({ type: 'prompt.started', sessionId: params.sessionId, turnId, messageId, message: firstTextContent(params.prompt) })
+    publishAcpEvent({
+      type: 'prompt.started',
+      sessionId: params.sessionId,
+      turnId,
+      messageId,
+      message: firstTextContent(params.prompt),
+      attachments: promptAttachments
+    })
 
     try {
       const response = await connection.prompt(promptParams)
@@ -143,7 +152,9 @@ class AcpBridge {
           turnId,
           userMessageId,
           completedAt,
-          usage: response.usage ?? null
+          usage: response.usage ?? null,
+          promptText: firstTextContent(promptParams.prompt),
+          attachments: promptAttachments
         })
       } catch (error) {
         console.warn('Failed to persist ACP turn metadata', error)
@@ -271,6 +282,36 @@ function createClientHandler(): Client {
 function firstTextContent(prompt: PromptRequest['prompt']) {
   const block = prompt.find(item => item.type === 'text')
   return block && 'text' in block && typeof block.text === 'string' ? block.text : undefined
+}
+
+function attachmentPartsFromPrompt(prompt: PromptRequest['prompt']): AcpAttachmentPart[] {
+  return prompt.flatMap((block): AcpAttachmentPart[] => {
+    if (block.type === 'image') {
+      const record = block as Record<string, unknown>
+      const mediaType = typeof record.mimeType === 'string' ? record.mimeType : 'image/*'
+      const data = typeof record.data === 'string' ? record.data : undefined
+      const name = attachmentNameFromUri(record.uri, 'image')
+      return [{ type: 'attachment', name, mediaType, data }]
+    }
+
+    if (block.type !== 'resource') return []
+    const resource = 'resource' in block && block.resource && typeof block.resource === 'object'
+      ? block.resource as Record<string, unknown>
+      : null
+    if (!resource) return []
+
+    const mediaType = typeof resource.mimeType === 'string' ? resource.mimeType : 'application/octet-stream'
+    const data = typeof resource.blob === 'string' ? resource.blob : undefined
+    const name = attachmentNameFromUri(resource.uri, 'attachment')
+    return [{ type: 'attachment', name, mediaType, data }]
+  })
+}
+
+function attachmentNameFromUri(uri: unknown, fallback: string) {
+  if (typeof uri !== 'string' || !uri) return fallback
+  const withoutScheme = uri.startsWith('file://') ? uri.slice('file://'.length) : uri
+  const decoded = decodeURIComponent(withoutScheme)
+  return decoded.split('/').filter(Boolean).pop() || fallback
 }
 
 function bridgeConfig(config: BridgeRuntimeConfig) {

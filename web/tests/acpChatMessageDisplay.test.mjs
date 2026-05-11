@@ -85,3 +85,16 @@ test('keeps repeated identical text messages distinct', async () => {
 
   assert.deepEqual(grouped.map(item => item.id), ['u1', 'a1', 'u2'])
 })
+
+test('maps attachment parts to UChatMessage file parts for display', async () => {
+  const { attachmentsAsFileParts } = await modulePromise
+  const display = attachmentsAsFileParts(message('u1', 'user', [
+    { type: 'text', text: 'see image' },
+    { type: 'attachment', id: 'att1', name: 'paste.png', mediaType: 'image/png', size: 12, data: 'abc' }
+  ]))
+
+  assert.deepEqual(display.parts, [
+    { type: 'text', text: 'see image' },
+    { type: 'file', id: 'att1', filename: 'paste.png', mediaType: 'image/png', size: 12, url: 'data:image/png;base64,abc' }
+  ])
+})

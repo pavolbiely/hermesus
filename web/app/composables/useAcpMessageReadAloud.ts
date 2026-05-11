@@ -161,8 +161,17 @@ export function useAcpMessageReadAloud() {
       })
 
       if (!response.ok) throw new Error(await response.text())
+      const wasTruncated = response.headers.get('X-Hermesum-Read-Aloud-Truncated') === 'true'
+      const maxLength = response.headers.get('X-Hermesum-Read-Aloud-Max-Length')
       const blob = await response.blob()
       if (readAttempt !== attempt) return
+      if (wasTruncated) {
+        toast.add({
+          color: 'warning',
+          title: `${engineLabel(engine)} text was shortened for read aloud.`,
+          description: maxLength ? `Reading the first ${maxLength} characters, which is the configured limit for this engine.` : undefined
+        })
+      }
 
       const audioUrl = URL.createObjectURL(blob)
       const audio = new Audio(audioUrl)

@@ -53,6 +53,7 @@ function runDetailsIcon(message: AcpChatMessage) {
 function runDetailsLeadingIconClass(message: AcpChatMessage) {
   return toolParts(message).some(part => part.error) ? 'text-error' : 'text-dimmed'
 }
+
 </script>
 
 <template>
@@ -92,9 +93,11 @@ function runDetailsLeadingIconClass(message: AcpChatMessage) {
         />
       </div>
     </div>
-    <span v-else class="whitespace-pre-wrap break-words">
-      {{ partText(message) }}
-    </span>
+    <div v-else class="space-y-2">
+      <span v-if="partText(message)" class="block whitespace-pre-wrap break-words">
+        {{ partText(message) }}
+      </span>
+    </div>
   </template>
 
   <div

@@ -1,24 +1,9 @@
-import { readFile, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
 import type { SessionNotification } from '@agentclientprotocol/sdk'
 import type { AcpBridgeEvent } from '../../shared/acp/types'
+import { readHermesSession, type HermesSessionMessage, type HermesSessionRuntimeConfig } from './sessionFile'
 import type { AcpTurnMetadata } from './turnMetadata'
 
-type SessionFile = {
-  session_id?: string
-  messages?: SessionMessage[]
-}
-
-type SessionMessage = {
-  role?: string
-  reasoning?: unknown
-  codex_reasoning_items?: unknown
-}
-
-type ReasoningRuntimeConfig = {
-  hermesHome?: string
-  hermesAcpCwd?: string
-}
+type ReasoningRuntimeConfig = HermesSessionRuntimeConfig
 
 export async function reasoningEventsFromSessionFile(
   config: ReasoningRuntimeConfig,
@@ -67,43 +52,7 @@ function reasoningEvent(sessionId: string, turnId: string, text: string, idSuffi
   }
 }
 
-async function readHermesSession(config: ReasoningRuntimeConfig, sessionId: string): Promise<SessionFile | null> {
-  const sessionsDir = hermesSessionsDir(config)
-  if (!sessionsDir) return null
-
-  const directPath = join(sessionsDir, `session_${sessionId}.json`)
-  const direct = await readSessionFile(directPath)
-  if (direct) return direct
-
-  try {
-    const entries = await readdir(sessionsDir, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) continue
-      const session = await readSessionFile(join(sessionsDir, entry.name))
-      if (session?.session_id === sessionId) return session
-    }
-  } catch {
-    return null
-  }
-
-  return null
-}
-
-async function readSessionFile(path: string): Promise<SessionFile | null> {
-  try {
-    const parsed = JSON.parse(await readFile(path, 'utf8')) as SessionFile
-    return parsed && typeof parsed === 'object' ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-function hermesSessionsDir(config: ReasoningRuntimeConfig) {
-  const hermesHome = config.hermesHome || process.env.HERMES_HOME
-  return hermesHome ? join(hermesHome, 'sessions') : null
-}
-
-function extractReasoningByTurn(messages: SessionMessage[], turnCount: number) {
+function extractReasoningByTurn(messages: HermesSessionMessage[], turnCount: number) {
   const turns: string[] = []
   let current: string[] | null = null
 
@@ -123,7 +72,7 @@ function extractReasoningByTurn(messages: SessionMessage[], turnCount: number) {
   return turns.slice(-turnCount)
 }
 
-function extractLatestTurnReasoning(messages: SessionMessage[]) {
+function extractLatestTurnReasoning(messages: HermesSessionMessage[]) {
   const latest: string[] = []
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -139,7 +88,7 @@ function extractLatestTurnReasoning(messages: SessionMessage[]) {
   return joinReasoning(latest)
 }
 
-function reasoningText(message: SessionMessage) {
+function reasoningText(message: HermesSessionMessage) {
   if (typeof message.reasoning === 'string' && message.reasoning.trim()) return message.reasoning
   return codexReasoningSummary(message.codex_reasoning_items)
 }

@@ -1,4 +1,5 @@
 import type { ContentBlock } from '~/types/acp-api'
+import type { AcpChatPart } from '~/types/acp-chat'
 import type { ChatPromptAttachment } from '~/types/chat'
 
 export type PendingAcpPrompt = {
@@ -32,6 +33,17 @@ export function fileToPromptAttachment(file: File): Promise<ChatPromptAttachment
 
 export async function filesToPromptAttachments(files: File[]) {
   return await Promise.all(files.map(fileToPromptAttachment))
+}
+
+export function attachmentsToChatParts(attachments: ChatPromptAttachment[]): Extract<AcpChatPart, { type: 'attachment' }>[] {
+  return attachments.map(attachment => ({
+    type: 'attachment',
+    id: attachment.id,
+    name: attachment.name,
+    mediaType: attachment.type,
+    size: attachment.size,
+    data: attachment.data
+  }))
 }
 
 export function attachmentsToPromptBlocks(message: string, attachments: ChatPromptAttachment[]): ContentBlock[] {
