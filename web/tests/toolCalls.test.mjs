@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { toolDisplayInfo, toolInputSummary } from '../app/utils/toolCalls.ts'
+import { toolActivityTitle, toolDisplayInfo, toolInputSummary } from '../app/utils/toolCalls.ts'
 
 test('summarizes ACP tool locations when raw input is absent', () => {
   const part = {
@@ -10,7 +10,7 @@ test('summarizes ACP tool locations when raw input is absent', () => {
     output: [{ type: 'text', text: 'ok' }]
   }
 
-  assert.equal(toolInputSummary(part), '~/Sites/hermesum/web/app/utils/toolCalls.ts:12')
+  assert.equal(toolInputSummary(part), 'toolCalls.ts:12 · …/app/utils')
 })
 
 test('prefers explicit command input over generic output counts', () => {
@@ -59,5 +59,14 @@ test('normalizes ACP patch titles with unknown targets', () => {
   }
 
   assert.equal(toolDisplayInfo(part).label, 'Edit file')
-  assert.equal(toolDisplayInfo(part).summary, '~/Sites/hermesum/web/app/pages/acp/[id].vue')
+  assert.equal(toolDisplayInfo(part).summary, '[id].vue · …/pages/acp')
+})
+
+test('uses only the file name in active running tool labels', () => {
+  const part = {
+    name: 'read: /Users/pavolbiely/Sites/beesboard/.hermes/plans/2026-05-11-catalog-action-flow-refactor.md',
+    kind: 'read'
+  }
+
+  assert.equal(toolActivityTitle(part), 'Read: 2026-05-11-catalog-action-flow-refactor.md')
 })

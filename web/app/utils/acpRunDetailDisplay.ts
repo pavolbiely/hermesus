@@ -1,6 +1,6 @@
 import type { AcpChatMessage } from '../types/acp-chat'
 import { hasThoughtActivity, reasoningText, toolParts, type AcpToolPart } from './acpRunDetails'
-import { toolCallTitle } from './toolCalls'
+import { toolActivityTitle } from './toolCalls'
 import { hasTextParts, partText } from './acpChatMessageDisplay'
 
 export function runDetailSummary(message: AcpChatMessage) {
@@ -53,7 +53,7 @@ export function runningToolParts(message: AcpChatMessage) {
 
 export function runActivityLabel(message: AcpChatMessage, activeTurnId: string | null) {
   const runningTool = runningToolParts(message)[0]
-  if (runningTool) return `Running ${toolCallTitle(runningTool)}`
+  if (runningTool) return `Running ${toolActivityTitle(runningTool)}`
   if (message.turnId && message.turnId === activeTurnId && reasoningText(message).trim()) return 'Thinking'
   if (message.role === 'assistant' && hasTextParts(message)) return 'Responding…'
   return ''

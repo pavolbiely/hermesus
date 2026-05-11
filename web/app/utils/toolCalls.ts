@@ -92,6 +92,7 @@ const SENSITIVE_KEY_RE = /(token|password|passwd|secret|apikey|api_key|authoriza
 const PATH_KEY_RE = /(path|file|dir|workdir|cwd|url)$/i
 const TEXT_KEY_RE = /(prompt|text|content|description|message|query|command|pattern)$/i
 const MAX_SUMMARY_LENGTH = 84
+const PATH_PARENT_SEGMENTS = 2
 
 export function toolRawName(part: Pick<ToolLikePart, 'name' | 'input' | 'kind'>) {
   const name = typeof part.name === 'string' ? part.name.trim() : ''
@@ -135,6 +136,13 @@ export function toolOutputSummary(part: Pick<ToolLikePart, 'output' | 'status'>)
 
 export function toolCallTitle(part: ToolLikePart) {
   return toolDisplayInfo(part).title
+}
+
+export function toolActivityTitle(part: ToolLikePart) {
+  const info = toolDisplayInfo(part)
+  const summary = toolInputSummary(part)
+  const activitySummary = summary ? compactPathLikeSummary(summary, { filenameOnly: true }) : undefined
+  return activitySummary ? `${info.label}: ${activitySummary}` : info.label
 }
 
 export function toolStatusLabel(part: Pick<ToolLikePart, 'status'> & { state?: string, error?: string | null }) {
@@ -231,8 +239,29 @@ function compactText(value: string, maxLength = MAX_SUMMARY_LENGTH) {
   return `${text.slice(0, maxLength - 1)}…`
 }
 
-function compactPath(value: string) {
-  const text = compactText(value, 120)
+type CompactPathOptions = {
+  filenameOnly?: boolean
+}
+
+function splitLineSuffix(value: string) {
+  const match = value.match(/^(.*?)(:\d+(?::\d+)?)$/)
+  if (!match) return { path: value, suffix: '' }
+  return { path: match[1] || value, suffix: match[2] || '' }
+}
+
+function compactParentPath(parent: string) {
+  const normalized = parent.replace(/^\/Users\/[^/]+\//, '~/')
+  const parts = normalized.split('/').filter(Boolean)
+  if (!parts.length) return ''
+
+  const prefix = normalized.startsWith('~/') ? '~/' : normalized.startsWith('/') ? '/' : ''
+  const tail = parts.slice(-PATH_PARENT_SEGMENTS).join('/')
+  if (parts.length <= PATH_PARENT_SEGMENTS) return `${prefix}${tail}`
+  return `…/${tail}`
+}
+
+function compactPath(value: string, options: CompactPathOptions = {}) {
+  const text = compactText(value, 140)
   if (/^https?:\/\//i.test(text)) {
     try {
       const url = new URL(text)
@@ -242,7 +271,30 @@ function compactPath(value: string) {
     }
   }
 
-  return text.replace(/^\/Users\/[^/]+\//, '~/')
+  const { path, suffix } = splitLineSuffix(text)
+  const lastSlash = path.lastIndexOf('/')
+  if (lastSlash < 0) return compactText(`${path}${suffix}`)
+
+  const filename = path.slice(lastSlash + 1) || path
+  if (options.filenameOnly) return compactText(`${filename}${suffix}`)
+
+  const parent = compactParentPath(path.slice(0, lastSlash))
+  if (!parent) return compactText(`${filename}${suffix}`)
+  return compactText(`${filename}${suffix} · ${parent}`)
+}
+
+function compactPathLikeSummary(value: string, options: CompactPathOptions = {}) {
+  const compactedSeparator = ' · '
+  if (value.includes(compactedSeparator)) {
+    return options.filenameOnly ? value.split(compactedSeparator, 1)[0] || value : value
+  }
+
+  const [action, detail] = value.split(/:\s+(.+)/, 2)
+  if (detail && (detail.includes('/') || /^https?:\/\//i.test(detail))) {
+    return `${action}: ${compactPath(detail, options)}`
+  }
+  if (value.includes('/') || /^https?:\/\//i.test(value)) return compactPath(value, options)
+  return compactText(value)
 }
 
 function primitiveSummary(key: string, value: unknown): string | undefined {
@@ -331,7 +383,7 @@ function candidateSummary(candidates: Array<{ key: string, value: string }>): st
 function titleDetailSummary(toolName: string) {
   const [, detail] = toolName.split(/:\s+(.+)/, 2)
   if (!detail || detail.trim() === '?') return undefined
-  return compactText(detail)
+  return detail.includes('/') || /^https?:\/\//i.test(detail) ? compactPath(detail) : compactText(detail)
 }
 
 function locationSummary(locations: ToolLikePart['locations']): string | undefined {
@@ -340,8 +392,7 @@ function locationSummary(locations: ToolLikePart['locations']): string | undefin
   const readable = locations
     .map((location) => {
       if (!location?.path) return undefined
-      const path = compactPath(location.path)
-      return typeof location.line === 'number' ? `${path}:${location.line}` : path
+      return compactPath(typeof location.line === 'number' ? `${location.path}:${location.line}` : location.path)
     })
     .filter((path): path is string => Boolean(path))
 
