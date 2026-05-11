@@ -1,4 +1,4 @@
-import type { AcpBridgeEvent, AcpTranscriptSnapshot } from '~/types/acp-api'
+import type { AcpBridgeEvent } from '~/types/acp-api'
 import type { AcpChatEvent, AcpChatMessage, AcpTranscriptState } from '~/types/acp-chat'
 import { applyAcpChatEvent, createEmptyAcpTranscriptState } from '~/utils/acpEventNormalization'
 import { normalizeAcpBridgeEvent } from '~/utils/acpBridgeEventNormalization'
@@ -16,12 +16,12 @@ export function useAcpTranscript() {
     state.value = applyAcpChatEvent(state.value, event)
   }
 
-  function loadSnapshot(snapshot: AcpTranscriptSnapshot) {
+  function restoreMessages(messages: AcpChatMessage[], cursor = state.value.cursor) {
     applyEvent({
       type: 'transcript.loaded',
-      sessionId: snapshot.sessionId,
-      cursor: snapshot.cursor,
-      messages: snapshot.messages
+      sessionId: messages[messages.length - 1]?.sessionId || '',
+      cursor,
+      messages
     })
   }
 
@@ -57,7 +57,7 @@ export function useAcpTranscript() {
     state,
     messages,
     reset,
-    loadSnapshot,
+    restoreMessages,
     prependMessages,
     truncateFromMessage,
     appendLocalMessage,

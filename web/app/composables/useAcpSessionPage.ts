@@ -2,7 +2,6 @@ import { nextTick, ref, type Ref } from 'vue'
 import type { PlanEntry } from '@agentclientprotocol/sdk'
 import type {
   AcpBridgeEvent,
-  AcpTranscriptSnapshot,
   AvailableCommand,
   PermissionOption,
   RequestPermissionRequest,
@@ -24,15 +23,11 @@ type PendingPermission = {
 type ChatSubmitStatus = 'ready' | 'submitted' | 'streaming'
 
 type AcpSessionPageApi = {
-  readTranscript: (sessionId: string, params?: { limit?: number, before?: number }, options?: { signal?: AbortSignal }) => Promise<{
-    transcript: AcpTranscriptSnapshot | null
-    hasMore: boolean
-    nextBefore: number | null
-  }>
   loadSession: (sessionId: string, options?: { signal?: AbortSignal }) => Promise<{
     models?: SessionModelState | null
     modes?: SessionModeState | null
     configOptions?: SessionConfigOption[] | null
+    availableCommands?: AvailableCommand[] | null
     events: AcpBridgeEvent[]
   }>
   subscribeSession: (
@@ -50,14 +45,12 @@ type AcpSessionPageOptions = {
   pendingPrompts: Ref<Record<string, PendingAcpPrompt>>
   queryPrompt: Ref<string>
   replaceRouteQuery: () => Promise<unknown>
-  readTranscript: AcpSessionPageApi['readTranscript']
   loadSession: AcpSessionPageApi['loadSession']
   subscribeSession: AcpSessionPageApi['subscribeSession']
   respondToPermissionRequest: AcpSessionPageApi['respondToPermission']
   transcript: {
     state: Ref<{ cursor?: number, messages: AcpChatMessage[] }>
     reset: () => void
-    loadSnapshot: (snapshot: AcpTranscriptSnapshot) => void
     prependMessages: (messages: AcpChatMessage[]) => void
     applyBridgeEvent: (event: AcpBridgeEvent) => void
   }
@@ -76,7 +69,6 @@ type AcpSessionPageOptions = {
   waitForFrame: () => Promise<void>
 }
 
-const transcriptPageSize = 80
 
 export function useAcpSessionPage(options: AcpSessionPageOptions) {
   const loading = ref(true)
@@ -112,35 +104,13 @@ export function useAcpSessionPage(options: AcpSessionPageOptions) {
     resetSessionView()
 
     try {
-      const stored = await options.readTranscript(
-        targetSessionId,
-        { limit: transcriptPageSize },
-        { signal: abortController.signal }
-      )
-      if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
-
-      const projectedTranscript = stored.transcript
-      const initializedFromProjection = Boolean(projectedTranscript)
-      if (projectedTranscript) {
-        applyTranscriptSnapshot(projectedTranscript)
-        hasOlderMessages.value = stored.hasMore
-        nextTranscriptBefore.value = stored.nextBefore
-        loading.value = false
-        scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
-      }
-
-      if (initializedFromProjection) {
-        subscribeToSessionEvents(targetSessionId)
-        await processQueuedPrompt(targetSessionId)
-        return
-      }
-
       const loaded = await options.loadSession(targetSessionId, { signal: abortController.signal })
       if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
 
       options.modelState.value = loaded.models || options.modelState.value
       options.modeState.value = loaded.modes || options.modeState.value
       options.configOptions.value = loaded.configOptions || options.configOptions.value
+      options.availableCommands.value = loaded.availableCommands || options.availableCommands.value
       loaded.events.forEach(handleBridgeEvent)
       scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
 
@@ -249,42 +219,8 @@ export function useAcpSessionPage(options: AcpSessionPageOptions) {
     options.submitStatusState.value = 'ready'
   }
 
-  function applyTranscriptSnapshot(snapshot: AcpTranscriptSnapshot) {
-    options.transcript.loadSnapshot(snapshot)
-    pendingPermissions.value = snapshot.pendingPermissions
-    planEntries.value = snapshot.planEntries
-    options.modelState.value = snapshot.models
-    options.modeState.value = snapshot.modes
-    options.configOptions.value = snapshot.configOptions
-    options.availableCommands.value = snapshot.availableCommands
-    options.activePromptTurnId.value = snapshot.prompt?.status === 'running' ? snapshot.prompt.turnId || null : null
-    options.submitStatusState.value = options.activePromptTurnId.value ? 'streaming' : 'ready'
-  }
-
   async function loadOlderMessages() {
-    if (loadingOlderMessages.value || !hasOlderMessages.value || nextTranscriptBefore.value === null) return
-    const container = options.messagesScrollContainer.value
-    const previousScrollHeight = container?.scrollHeight ?? 0
-    const previousScrollTop = container?.scrollTop ?? 0
-
-    loadingOlderMessages.value = true
-    try {
-      const response = await options.readTranscript(options.sessionId.value, {
-        limit: transcriptPageSize,
-        before: nextTranscriptBefore.value
-      })
-      if (response.transcript) options.transcript.prependMessages(response.transcript.messages)
-      hasOlderMessages.value = response.hasMore
-      nextTranscriptBefore.value = response.nextBefore
-      await nextTick()
-      if (container) {
-        container.scrollTop = container.scrollHeight - previousScrollHeight + previousScrollTop
-      }
-    } catch (err) {
-      options.showError(err, 'Failed to load older messages')
-    } finally {
-      loadingOlderMessages.value = false
-    }
+    return Promise.resolve()
   }
 
   function handleBridgeEvent(event: AcpBridgeEvent) {

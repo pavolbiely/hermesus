@@ -117,7 +117,8 @@ function runDetailsLeadingIconClass(message: AcpChatMessage) {
 
   <div
     v-else
-    class="inline-block max-w-full"
+    class="max-w-full"
+    :class="hasRunDetails(message) ? 'block w-full' : 'inline-block'"
     @pointerenter="emit('assistantHover', message.id, true)"
     @pointerleave="event => emit('assistantPointerLeave', event, message.id)"
     @focusin="emit('assistantFocusIn', message.id)"
@@ -132,7 +133,7 @@ function runDetailsLeadingIconClass(message: AcpChatMessage) {
       chevron="trailing"
       :default-open="isActiveRunDetailMessage(message)"
       :ref="element => setRunDetailsElement(message.id, element)"
-      :class="runDetailsSpacingClass(message, 'before')"
+      :class="['w-full', runDetailsSpacingClass(message, 'before')]"
       :ui="{
         root: 'bg-muted/20',
         trigger: 'px-3 py-2',
@@ -241,7 +242,7 @@ function runDetailsLeadingIconClass(message: AcpChatMessage) {
       chevron="trailing"
       :default-open="isActiveRunDetailMessage(message)"
       :ref="element => setRunDetailsElement(message.id, element)"
-      :class="runDetailsSpacingClass(message, 'after')"
+      :class="['w-full', runDetailsSpacingClass(message, 'after')]"
       :ui="{
         root: 'bg-muted/20',
         trigger: 'px-3 py-2',

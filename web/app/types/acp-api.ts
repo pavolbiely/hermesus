@@ -18,7 +18,7 @@ import type {
   SetSessionModeResponse,
   SetSessionModelResponse
 } from '@agentclientprotocol/sdk'
-import type { AcpBridgeEvent, AcpChatMessage } from '../../shared/acp/types'
+import type { AcpBridgeEvent } from '../../shared/acp/types'
 
 export type AcpBridgeHealth = {
   command: string
@@ -86,60 +86,6 @@ export type AcpPermissionDecisionResponse = {
 
 export type AcpLoadSessionApiResponse = LoadSessionResponse & {
   events: AcpBridgeEvent[]
-}
-
-export type AcpPersistedPermission = {
-  appRequestId: string
-  request: RequestPermissionRequest
-}
-
-export type AcpPersistedPromptState = {
-  status: 'running' | 'completed' | 'failed' | 'cancelled'
-  turnId?: string
-  messageId?: string
-  userMessageId?: string
-  error?: string
-  startedAt?: string
-  completedAt?: string
-}
-
-export type AcpTranscriptSnapshot = {
-  sessionId: string
-  cursor?: number
-  updatedAt: string
-  messages: AcpChatMessage[]
-  pendingPermissions: AcpPersistedPermission[]
-  planEntries: PlanEntry[]
-  prompt: AcpPersistedPromptState | null
-  models: SessionModelState | null
-  modes: SessionModeState | null
-  configOptions: SessionConfigOption[]
-  availableCommands: AvailableCommand[]
-}
-
-export type AcpTranscriptApiResponse = {
-  sessionId: string
-  found: boolean
-  transcript: AcpTranscriptSnapshot | null
-  hasMore: boolean
-  nextBefore: number | null
-}
-
-export type AcpTranscriptDeleteResponse = {
-  sessionId: string
-  deleted: boolean
-}
-
-export type AcpTranscriptClearResponse = {
-  deleted: number
-  cleared: boolean
-}
-
-export type AcpTranscriptRebuildResponse = {
-  sessionId: string
-  rebuilt: boolean
-  events: AcpBridgeEvent[]
-  transcript: AcpTranscriptSnapshot | null
 }
 
 export type {

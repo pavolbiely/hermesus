@@ -15,11 +15,10 @@ This repository is the source of truth for the Hermesum prototype. Hermes Agent 
 
 Hermesum focuses on making Hermes Agent easier to operate from a browser:
 
-- chat-first sessions with clear streaming, stop/cancel, queued follow-ups, and deterministic transcript ordering
+- chat-first sessions with clear streaming, stop/cancel, queued follow-ups, and deterministic message ordering
 - visible reasoning, tool calls, plans, permissions, duration, and usage metadata where ACP exposes them
 - workspace-aware session organization without making the browser talk directly to agent stdio
 - practical controls for model, mode, reasoning/config options, profiles, and project context
-- fast session opening through a local normalized transcript projection instead of blocking every page load on ACP replay
 
 ## Architecture
 
@@ -38,7 +37,7 @@ Browser / Nuxt UI
 Core boundaries:
 
 - `web/app/**` is the Nuxt 4 frontend: pages, layout, components, composables, types, UI utilities, and assets.
-- `web/server/acp/**` owns ACP protocol/runtime integration: subprocess lifecycle, session replay capture, event backlog, transcript projection, permissions, reasoning/usage supplements, and prompt correlation.
+- `web/server/acp/**` owns ACP protocol/runtime integration: subprocess lifecycle, session replay capture, event backlog, permissions, reasoning/usage supplements, and prompt correlation.
 - `web/server/api/acp/**` exposes ACP-backed HTTP/SSE routes to the browser.
 - `web/server/app/**` and `web/server/api/app/**` own Hermesum product concerns that are not ACP protocol state, such as workspaces, profile listing, and read-aloud speech generation.
 - `web/shared/acp/**` contains browser/server-safe ACP event and transcript normalization helpers.
@@ -55,33 +54,12 @@ Browser code must not connect to ACP stdio directly. All browser runtime access 
 - Prompt submission, cancellation, visible active prompt state, and queued follow-up messages.
 - Session-scoped SSE event stream with bounded replay backlog.
 - Server-side `session/load` replay capture so early replay events are not lost before the browser subscribes.
-- Transcript reconciliation keyed by ACP/session identities instead of text or timestamp matching.
+- Message reconciliation keyed by ACP/session identities instead of text or timestamp matching.
 - Safe permission UI/server resolution through validated request and option ids.
 
-### Transcript projection
+### Session replay
 
-Hermesum keeps a rebuildable normalized transcript projection under `.runtime/acp-transcripts/` for fast chat display.
-
-The chat route reads the projection first, then uses ACP activation/replay in the background. This keeps old sessions responsive and avoids depending on “last assistant message” or delayed snapshot patching as the primary source of truth.
-
-Projection routes affect only Hermesum’s local cache, not the underlying Hermes Agent session files:
-
-```bash
-# Read latest projected messages
-curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20'
-
-# Read older messages before a returned nextBefore cursor
-curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20&before=<nextBefore>'
-
-# Delete one local projection
-curl -X DELETE 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript'
-
-# Delete all local projections
-curl -X DELETE 'http://127.0.0.1:4046/api/acp/transcripts'
-
-# Rebuild one projection from ACP session/load replay
-curl -X POST 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript/rebuild'
-```
+Chats are built from ACP `session/load` replay plus live SSE events. Hermesum no longer keeps a local normalized transcript projection/cache; the source of truth is the Hermes ACP session data and the in-memory event stream for the open page.
 
 ### Workspace, profile, and app-owned features
 
@@ -171,10 +149,10 @@ web/                                        # Nuxt/Nitro app
   app/layouts/default.vue                   # app shell, sidebar, profile/workspace controls
   app/pages/index.vue                       # new-chat entry point
   app/pages/acp/[id].vue                    # ACP-native chat route
-  app/types/                                # ACP API, ACP transcript, and UI chat types
+  app/types/                                # ACP API and UI chat types
   app/utils/                                # ACP normalization re-exports, sidebar mapping, drafts, sounds, etc.
   shared/acp/                               # browser/server-safe ACP types and normalization helpers
-  server/acp/                               # ACP bridge, event backlog, transcript projection, permissions, runtime helpers
+  server/acp/                               # ACP bridge, event backlog, permissions, runtime helpers
   server/api/acp/                           # ACP protocol-backed Nitro routes
   server/api/app/                           # Hermesum-owned product routes
   server/app/                               # workspace/profile/session metadata helpers
@@ -244,14 +222,14 @@ PORT=4046 HOST=127.0.0.1 node .output/server/index.mjs
 curl http://127.0.0.1:4046/api/acp/health
 curl -X POST http://127.0.0.1:4046/api/acp/initialize
 curl http://127.0.0.1:4046/api/acp/sessions
-curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20'
+curl http://127.0.0.1:4046/api/acp/sessions/<sessionId>
 ```
 
 Browser smoke should confirm:
 
 - the app renders beyond the startup loader
 - the sidebar lists ACP/CLI sessions grouped by workspace
-- opening a session shows projected transcript content quickly
+- opening a session shows replayed ACP messages
 - sending a prompt streams visibly and can be cancelled safely
 - tool, reasoning, plan, and permission states render safely
 - model/mode/config controls render when exposed by ACP

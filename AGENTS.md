@@ -14,11 +14,11 @@ Treat this repository as the source of truth for Hermesum work. Do not edit `$HO
 - `web/app/layouts/default.vue`: app shell, sidebar, workspace/profile controls, settings, and navigation.
 - `web/app/components/`: chat, prompt, sidebar, workspace, read-aloud, and utility UI components.
 - `web/app/composables/`: typed ACP/app API clients and local browser UI state.
-- `web/app/types/`: frontend/API contract types for ACP, transcripts, and UI chat state.
+- `web/app/types/`: frontend/API contract types for ACP and UI chat state.
 - `web/app/utils/`: ACP normalization re-exports, sidebar mapping, queued messages, drafts, sounds, highlighting, and UI helpers.
 - `web/shared/acp/`: browser/server-safe ACP event and transcript normalization helpers.
-- `web/server/acp/`: ACP bridge, event backlog, transcript projection, replay capture, permission handling, prompt metadata, and runtime helpers.
-- `web/server/api/acp/`: ACP protocol-backed Nitro routes for health, initialize, sessions, prompts, cancellation, metadata, permissions, config, transcripts, and event streaming.
+- `web/server/acp/`: ACP bridge, event backlog, replay capture, permission handling, prompt metadata, and runtime helpers.
+- `web/server/api/acp/`: ACP protocol-backed Nitro routes for health, initialize, sessions, prompts, cancellation, metadata, permissions, config, and event streaming.
 - `web/server/app/` and `web/server/api/app/`: Hermesum-owned product features that ACP does not own, including workspaces, profile listing, session metadata, and read-aloud speech.
 - `web/tests/`: `node:test` coverage for shared helpers, transcript/event normalization, sidebar mapping, workspaces, queued messages, read-aloud, and related utilities.
 - `web/nuxt.config.ts`: runtime config for ACP command/args/cwd; defaults to `hermes --profile hermesum acp`.
@@ -29,7 +29,7 @@ Treat this repository as the source of truth for Hermesum work. Do not edit `$HO
 ## Core Engineering Rules
 
 - Prefer small, clear, maintainable changes over clever or broad rewrites.
-- Understand existing flow before changing code, especially ACP bridge state, SSE streaming, session replay, permission handling, transcript projection, and prompt correlation.
+- Understand existing flow before changing code, especially ACP bridge state, SSE streaming, session replay, permission handling, and prompt correlation.
 - Keep code reusable where reuse is real, but avoid generic abstractions for one-off prototype code.
 - Favor focused modules, typed boundaries, explicit validation, and predictable error handling.
 - Prefer project-native and framework-native APIs before adding dependencies.
@@ -39,7 +39,7 @@ Treat this repository as the source of truth for Hermesum work. Do not edit `$HO
 
 ## Architecture Boundaries
 
-- `web/server/acp/` owns protocol/runtime behavior: ACP process lifecycle, session list/create/load/fork/close, prompt/cancel, permission requests, model/mode/config metadata, SSE backlog, replay capture, transcript projection, and prompt metadata supplements.
+- `web/server/acp/` owns protocol/runtime behavior: ACP process lifecycle, session list/create/load/fork/close, prompt/cancel, permission requests, model/mode/config metadata, SSE backlog, replay capture, and prompt metadata supplements.
 - `web/server/api/acp/` exposes ACP-backed HTTP/SSE routes. Do not recreate old `/api/web-chat/*` compatibility contracts.
 - `web/server/api/app/` and `web/server/app/` own Hermesum product features that ACP does not own: workspaces, profile list, app-owned ACP session metadata, read-aloud speech, and future app-specific features.
 - `web/app` consumes only same-origin `/api/acp/*` or `/api/app/*` contracts through typed composables.
@@ -56,7 +56,7 @@ Treat this repository as the source of truth for Hermesum work. Do not edit `$HO
 - Do not use text equality, timestamps, “last assistant message”, or delayed snapshot patching as primary reconciliation mechanisms.
 - Capture `session/load` replay events server-side when they can occur before browser SSE subscription.
 - Keep SSE events replayable through a bounded per-session backlog so prompt events emitted before browser subscription are not dropped.
-- Transcript display is projection-first: read Hermesum’s normalized projection for fast page load, then activate/rebuild from ACP replay when needed.
+- Transcript display is replay-first: load ACP session replay, then continue from the bounded SSE backlog/live stream.
 - Permission handling must be safe: visible request, validated option id, resolve once, and cancel/deny rather than silently allow when unsupported.
 - Treat `hermes acp` stderr diagnostics as logs, not health failures. Health failures are spawn errors, exits, initialization failures, aborted connections, or routes that hang because initialization never completed.
 
@@ -150,10 +150,10 @@ Then check at least:
 curl http://127.0.0.1:4046/api/acp/health
 curl -X POST http://127.0.0.1:4046/api/acp/initialize
 curl http://127.0.0.1:4046/api/acp/sessions
-curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20'
+curl http://127.0.0.1:4046/api/acp/sessions/<sessionId>
 ```
 
-Browser smoke should confirm the app renders beyond the startup loader, sidebar sessions load, a chat opens quickly from projected transcript, a prompt streams, cancellation works, tool/reasoning/permission states remain safe, model/mode/config controls render when ACP exposes them, workspace selection affects new session cwd, and no `/api/web-chat/*` requests are made.
+Browser smoke should confirm the app renders beyond the startup loader, sidebar sessions load, a chat opens from ACP replay, a prompt streams, cancellation works, tool/reasoning/permission states remain safe, model/mode/config controls render when ACP exposes them, workspace selection affects new session cwd, and no `/api/web-chat/*` requests are made.
 
 Known note: `pnpm typecheck` can exit `0` while printing the Vue/Volar `vue-router/volar/sfc-route-blocks` package export warning. Treat it as a warning when exit code is `0`, not as a touched-code failure.
 
@@ -190,7 +190,7 @@ Before finalizing changes, check:
 - Are Nitro route payloads, frontend types, and API composables aligned?
 - Are SSE event names and payloads compatible with frontend consumers?
 - Are prompt cancellation, cleanup, permission resolution, and client disconnects handled?
-- Are transcript projection, replay capture, and active prompt correlation still keyed by ids rather than text/timestamps?
+- Are replay capture and active prompt correlation still keyed by ids rather than text/timestamps?
 - Are Nuxt UI components used through their intended APIs before custom markup was added?
 - Are generated/runtime artifacts excluded from source changes?
 - Were docs updated only where the change affects future navigation, architecture, workflow, behavior, or verification?

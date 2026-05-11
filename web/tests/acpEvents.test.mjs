@@ -70,6 +70,32 @@ test('publishAcpEvent keeps delivering when a subscriber throws', async () => {
   assert.deepEqual(replayAcpSession(sessionId), received)
 })
 
+test('captureAcpSessionReplay isolates load replay from live subscribers and backlog', async () => {
+  const { captureAcpSessionReplay, publishAcpEvent, replayAcpSession, subscribeAcpSession } = await eventsModule
+  const sessionId = `events-session-${randomUUID()}`
+  const captured = []
+  const received = []
+
+  const stopCapture = captureAcpSessionReplay(sessionId, event => captured.push(event))
+  const unsubscribe = subscribeAcpSession(sessionId, event => received.push(event))
+
+  publishAcpEvent({
+    type: 'prompt.started',
+    sessionId,
+    turnId: 'turn-1',
+    messageId: 'message-1',
+    message: 'hello'
+  })
+
+  stopCapture()
+  unsubscribe()
+
+  assert.equal(captured.length, 1)
+  assert.equal(captured[0].sequence, 1)
+  assert.deepEqual(received, [])
+  assert.deepEqual(replayAcpSession(sessionId), [])
+})
+
 test('ensureAcpSessionSequenceAtLeast prevents post-restart sequence rewind', async () => {
   const { ensureAcpSessionSequenceAtLeast, publishAcpEvent, replayAcpSession } = await eventsModule
   const sessionId = `events-session-${randomUUID()}`

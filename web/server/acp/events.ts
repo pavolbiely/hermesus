@@ -1,11 +1,12 @@
 import type { AcpBridgeEvent } from '../../shared/acp/types'
-import { recordAcpProjectionEvent } from './transcriptProjection'
 
 export type { AcpBridgeEvent }
 
 export type AcpEventSubscriber = (event: AcpBridgeEvent) => void
 
 const sessionSubscribers = new Map<string, Set<AcpEventSubscriber>>()
+const replayCaptureSubscribers = new Map<string, Set<AcpEventSubscriber>>()
+const replayCaptureDepth = new Map<string, number>()
 const sessionBacklog = new Map<string, AcpBridgeEvent[]>()
 const sessionSequence = new Map<string, number>()
 const maxBacklogEvents = 200
@@ -36,8 +37,19 @@ function rememberAcpEvent(sessionId: string, event: AcpBridgeEvent) {
 
 export function publishAcpEvent(event: AcpBridgeEvent) {
   const sequencedEvent = withSequence(event)
+  if ((replayCaptureDepth.get(sequencedEvent.sessionId) ?? 0) > 0) {
+    const captureSubscribers = replayCaptureSubscribers.get(sequencedEvent.sessionId)
+    captureSubscribers?.forEach((subscriber) => {
+      try {
+        subscriber(sequencedEvent)
+      } catch (error) {
+        console.warn('ACP replay capture subscriber failed', error)
+      }
+    })
+    return
+  }
+
   rememberAcpEvent(sequencedEvent.sessionId, sequencedEvent)
-  void recordAcpProjectionEvent(sequencedEvent)
   const subscribers = sessionSubscribers.get(sequencedEvent.sessionId)
   if (!subscribers) return
   subscribers.forEach((subscriber) => {
@@ -65,5 +77,25 @@ export function subscribeAcpSession(sessionId: string, subscriber: AcpEventSubsc
   return () => {
     subscribers.delete(subscriber)
     if (subscribers.size === 0) sessionSubscribers.delete(sessionId)
+  }
+}
+
+export function captureAcpSessionReplay(sessionId: string, subscriber: AcpEventSubscriber) {
+  let subscribers = replayCaptureSubscribers.get(sessionId)
+  if (!subscribers) {
+    subscribers = new Set()
+    replayCaptureSubscribers.set(sessionId, subscribers)
+  }
+
+  subscribers.add(subscriber)
+  replayCaptureDepth.set(sessionId, (replayCaptureDepth.get(sessionId) ?? 0) + 1)
+
+  return () => {
+    subscribers.delete(subscriber)
+    if (subscribers.size === 0) replayCaptureSubscribers.delete(sessionId)
+
+    const nextDepth = (replayCaptureDepth.get(sessionId) ?? 1) - 1
+    if (nextDepth > 0) replayCaptureDepth.set(sessionId, nextDepth)
+    else replayCaptureDepth.delete(sessionId)
   }
 }

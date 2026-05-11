@@ -158,7 +158,6 @@ const {
   pendingPrompts: pendingAcpPrompts,
   queryPrompt: computed(() => typeof route.query.prompt === 'string' ? route.query.prompt : ''),
   replaceRouteQuery: () => router.replace({ path: route.path, query: {} }),
-  readTranscript: api.readTranscript,
   loadSession: api.loadSession,
   subscribeSession: api.subscribeSession,
   respondToPermissionRequest: api.respondToPermission,

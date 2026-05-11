@@ -58,10 +58,6 @@ const openAIApiKeyVisible = ref(false)
 const webSpeechVoiceURI = ref<string | null>(null)
 const browserVoices = ref<SpeechSynthesisVoice[]>([])
 const spellcheck = useChatInputSpellcheck()
-const api = useAcpApi()
-const toast = useToast()
-const sessionViewCache = useState<Record<string, unknown>>('acp-session-view-cache', () => ({}))
-const clearingTranscriptCache = ref(false)
 
 const speechEngineItems = [
   {
@@ -267,29 +263,6 @@ async function toggleNotifications() {
 
 function updateOpen(open: boolean) {
   emit('update:open', open)
-}
-
-async function clearTranscriptCache() {
-  if (clearingTranscriptCache.value) return
-
-  clearingTranscriptCache.value = true
-  try {
-    const response = await api.clearTranscripts()
-    sessionViewCache.value = {}
-    toast.add({
-      title: 'Transcript cache cleared',
-      description: `${response.deleted} cached transcript${response.deleted === 1 ? '' : 's'} deleted. Reload a chat to rebuild it from Hermes sessions.`,
-      color: 'success'
-    })
-  } catch (error) {
-    toast.add({
-      title: 'Could not clear transcript cache',
-      description: error instanceof Error ? error.message : 'Unexpected error while clearing cached transcripts.',
-      color: 'error'
-    })
-  } finally {
-    clearingTranscriptCache.value = false
-  }
 }
 
 watch(() => props.open, (open) => {
@@ -623,33 +596,6 @@ onBeforeUnmount(() => {
             description="This browser does not expose desktop notifications to the web app."
           />
 
-        </section>
-
-        <USeparator />
-
-        <section class="space-y-3">
-          <div class="flex items-start justify-between gap-4">
-            <div class="min-w-0 space-y-1">
-              <h3 class="text-sm font-medium text-highlighted">
-                Cache
-              </h3>
-              <p class="text-sm text-muted">
-                Clear cached ACP transcript projections. Hermes session files are kept; chats rebuild from the source session data on next load.
-              </p>
-            </div>
-
-            <UButton
-              color="neutral"
-              variant="subtle"
-              size="sm"
-              icon="i-lucide-trash-2"
-              class="shrink-0"
-              :loading="clearingTranscriptCache"
-              @click="clearTranscriptCache"
-            >
-              Clear transcript cache
-            </UButton>
-          </div>
         </section>
       </div>
     </template>

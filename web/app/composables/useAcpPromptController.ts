@@ -1,8 +1,9 @@
 import { nextTick, ref, type Ref } from 'vue'
 import type {
   AcpListSessionsResponse,
-  AcpTranscriptSnapshot,
   AvailableCommand,
+  PlanEntry,
+  RequestPermissionRequest,
   SessionConfigOption,
   SessionModeState,
   SessionModelState
@@ -24,8 +25,8 @@ type AcpPromptControllerOptions = {
   input: Ref<string>
   loading: Ref<boolean>
   error: Ref<string | null>
-  pendingPermissions: Ref<AcpTranscriptSnapshot['pendingPermissions']>
-  planEntries: Ref<AcpTranscriptSnapshot['planEntries']>
+  pendingPermissions: Ref<Array<{ appRequestId: string, request: RequestPermissionRequest }>>
+  planEntries: Ref<PlanEntry[]>
   modelState: Ref<SessionModelState | null>
   modeState: Ref<SessionModeState | null>
   configOptions: Ref<SessionConfigOption[]>
@@ -53,7 +54,7 @@ type AcpPromptControllerOptions = {
     applyEvent: (event: AcpChatEvent) => void
     appendLocalMessage: (message: AcpChatMessage) => void
     truncateFromMessage: (messageId: string) => void
-    loadSnapshot: (snapshot: AcpTranscriptSnapshot) => void
+    restoreMessages: (messages: AcpChatMessage[], cursor?: number) => void
   }
   queuedMessages: ReturnType<typeof useQueuedMessages>
   queuedForSession: Ref<QueuedMessage[]>
@@ -228,19 +229,7 @@ export function useAcpPromptController(options: AcpPromptControllerOptions) {
       return true
     } catch (err) {
       if (previousMessages) {
-        options.transcript.loadSnapshot({
-          sessionId: options.sessionId.value,
-          cursor: previousCursor,
-          updatedAt: new Date().toISOString(),
-          messages: previousMessages,
-          pendingPermissions: options.pendingPermissions.value,
-          planEntries: options.planEntries.value,
-          prompt: null,
-          models: options.modelState.value,
-          modes: options.modeState.value,
-          configOptions: options.configOptions.value,
-          availableCommands: options.availableCommands.value
-        })
+        options.transcript.restoreMessages(previousMessages, previousCursor)
       }
       if (options.activePromptTurnId.value === turnId) options.activePromptTurnId.value = null
       options.activePrompts.markFinished(options.sessionId.value, turnId)

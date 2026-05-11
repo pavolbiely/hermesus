@@ -12,7 +12,7 @@ Use this before broad repository search.
 - `web/app/components/ChatSlashCommandMenu.vue`: local slash-command autocomplete UI.
 - `web/app/composables/useAcpApi.ts`: typed frontend client for `/api/acp/*` routes.
 - `web/app/composables/useAcpTranscript.ts`: browser transcript state from ACP replay/live events.
-- `web/app/composables/useAcpSessionPage.ts`: ACP session activation, transcript projection load, SSE subscription, permissions, and older-message pagination.
+- `web/app/composables/useAcpSessionPage.ts`: ACP session activation, replay event application, SSE subscription, and permissions.
 - `web/app/composables/useAcpPromptController.ts`: prompt send/cancel, optimistic user messages, queued messages, and steer fallback.
 - `web/app/composables/useAcpActiveRunStatus.ts`, `useAcpSessionConfigControls.ts`, `useAcpMessageActions.ts`, `useAcpMessageEditing.ts`, `useAcpRunDetailsScroll.ts`: focused ACP chat route state helpers.
 - `web/app/composables/useAppWorkspacesApi.ts`: typed frontend client for Hermesum-owned workspace/profile routes.
@@ -22,7 +22,7 @@ Use this before broad repository search.
 - `web/nuxt.config.ts`: Nuxt runtime config for ACP command/args/cwd; defaults to `hermes --profile hermesum acp`.
 - `web/server/acp/bridge.ts`: ACP SDK subprocess bridge, active prompt correlation, and client handler.
 - `web/server/acp/events.ts`: session-scoped ACP SSE publish/subscribe backlog.
-- `web/server/acp/transcriptStore.ts`, `web/server/acp/transcriptProjection.ts`, `web/server/acp/sessionLoadReplay.ts`: persistent normalized transcript projection, projection rebuild, and session/load replay capture.
+- `web/server/acp/sessionLoadReplay.ts`: ACP session/load replay capture and replay supplements.
 - `web/server/acp/turnMetadata.ts`, `web/server/acp/sessionReasoning.ts`: Hermesum sidecar/replay supplements for prompt completion usage/duration metadata and stored assistant reasoning summaries.
 - `web/server/app/acpSessionMetadata.ts`: Hermesum-owned ACP sidebar metadata store.
 - `web/server/app/workspaces.ts`, `web/server/app/profiles.ts`: Hermesum-owned workspace settings and Hermes profile list helpers.
@@ -36,7 +36,7 @@ Use this before broad repository search.
 
 - ACP chat route orchestration: `web/app/pages/acp/[id].vue` plus focused `useAcp*` composables and `AcpChat*` components.
 - Layout/sidebar: `web/app/layouts/default.vue`, `SidebarSessionGroups.vue`.
-- ACP bridge/transcript state: `web/server/acp/bridge.ts`, `web/server/acp/transcriptProjection.ts`, `useAcpTranscript.ts`, `web/shared/acp/bridgeEventNormalization.ts`, `web/shared/acp/eventNormalization.ts`.
+- ACP bridge/message state: `web/server/acp/bridge.ts`, `useAcpTranscript.ts`, `web/shared/acp/bridgeEventNormalization.ts`, `web/shared/acp/eventNormalization.ts`.
 - App-owned session metadata/workspaces: `web/server/app/acpSessionMetadata.ts`, `web/server/app/workspaces.ts`.
 - Run/local orchestration: `run-local.sh`.
 
@@ -52,16 +52,12 @@ API/browser smoke should use a fresh production preview when ACP runtime behavio
 
 - `PORT=4046 HOST=127.0.0.1 node web/.output/server/index.mjs` after `pnpm --dir web build`
 - `curl http://127.0.0.1:4046/api/acp/health`
-- `curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20'` for projection-first transcript reads
+- `curl http://127.0.0.1:4046/api/acp/sessions/<sessionId>` for ACP session replay
 - browser smoke: app renders, sidebar loads, chat opens, prompt streams, no `/api/web-chat/*` requests.
 
-## Transcript projection debug routes
+## Removed transcript projection routes
 
-- `GET /api/acp/sessions/:sessionId/transcript?limit=80`: read latest normalized messages and persisted metadata without blocking on ACP `session/load`.
-- `GET /api/acp/sessions/:sessionId/transcript?before=<cursor>&limit=80`: read older projected messages for chat pagination.
-- `DELETE /api/acp/sessions/:sessionId/transcript`: delete only one Hermesum local projection file.
-- `DELETE /api/acp/transcripts`: delete all Hermesum local projection files; exposed in Settings as `Clear transcript cache`.
-- `POST /api/acp/sessions/:sessionId/transcript/rebuild`: rebuild that projection from ACP `session/load` replay. This can be slow by design.
+Hermesum no longer exposes local transcript projection/cache routes. Chat history is built from ACP `session/load` replay plus live SSE events.
 
 ## Doc maintenance
 

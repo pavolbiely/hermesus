@@ -1,8 +1,6 @@
 import type { LoadSessionRequest } from '@agentclientprotocol/sdk'
 import { getAcpBridge } from './bridge'
-import { subscribeAcpSession, type AcpBridgeEvent } from './events'
-import { rebuildAcpProjection } from './transcriptProjection'
-import { getAcpTranscriptStore } from './transcriptStore'
+import { captureAcpSessionReplay, type AcpBridgeEvent } from './events'
 import { reasoningEventsFromSessionFile } from './sessionReasoning'
 import { listAcpTurnMetadata } from './turnMetadata'
 
@@ -15,7 +13,7 @@ type BridgeRuntimeConfig = {
 export async function loadAcpSessionWithReplay(config: BridgeRuntimeConfig, params: LoadSessionRequest) {
   const sessionId = params.sessionId
   const events: AcpBridgeEvent[] = []
-  const unsubscribe = subscribeAcpSession(sessionId, event => events.push(event))
+  const unsubscribe = captureAcpSessionReplay(sessionId, event => events.push(event))
   try {
     const response = await getAcpBridge().loadSession(config, params)
     await new Promise(resolve => setTimeout(resolve, replaySettleMs))
@@ -24,17 +22,6 @@ export async function loadAcpSessionWithReplay(config: BridgeRuntimeConfig, para
   } finally {
     unsubscribe()
   }
-}
-
-export async function rebuildAcpSessionProjectionFromLoad(config: BridgeRuntimeConfig, params: LoadSessionRequest) {
-  const { response, events } = await loadAcpSessionWithReplay(config, params)
-  await rebuildAcpProjection(params.sessionId, events, {
-    models: response.models,
-    modes: response.modes,
-    configOptions: response.configOptions
-  })
-  const transcript = await getAcpTranscriptStore().get(params.sessionId)
-  return { response, events, transcript }
 }
 
 async function replaySupplementEvents(config: BridgeRuntimeConfig, sessionId: string): Promise<AcpBridgeEvent[]> {

@@ -89,9 +89,18 @@ function permissionTitle(permission: PendingPermission) {
     @scroll.passive="emit('scroll', $event)"
   >
     <div
+      v-if="loading && (initialTranscriptScrollPending || !messages.length)"
+      class="sticky top-0 z-10 mx-auto w-full max-w-3xl bg-default/95 py-1"
+      aria-label="Loading ACP session"
+    >
+      <div class="flex items-center gap-2 text-sm text-muted">
+        <UChatShimmer text="Loading chat…" />
+      </div>
+    </div>
+
+    <div
       :ref="element => setContentContainer(element as HTMLElement | null)"
       class="mx-auto w-full max-w-3xl space-y-4"
-      :class="initialTranscriptScrollPending && messages.length ? 'invisible' : ''"
     >
       <UAlert
         v-if="error"
@@ -100,11 +109,6 @@ function permissionTitle(permission: PendingPermission) {
         title="ACP chat error"
         :description="error"
       />
-
-      <div v-if="loading && !messages.length" class="space-y-4" aria-label="Loading ACP session">
-        <USkeleton class="h-16 w-4/5 rounded-2xl" />
-        <USkeleton class="ml-auto h-10 w-2/5 rounded-2xl" />
-      </div>
 
       <div v-if="hasOlderMessages" class="flex justify-center">
         <UButton
@@ -169,6 +173,7 @@ function permissionTitle(permission: PendingPermission) {
         auto-scroll-icon="i-lucide-arrow-down"
         :user="chatUserProps"
         :assistant="chatAssistantProps"
+        :class="loading && initialTranscriptScrollPending && messages.length ? 'invisible' : ''"
       >
         <template #content="{ message }: { message: AcpChatMessageWithActions }">
           <AcpChatMessageContent

@@ -2,8 +2,7 @@ import type { ContentBlock, PromptRequest } from '@agentclientprotocol/sdk'
 import { createError, defineEventHandler, getRouterParam, readBody } from 'h3'
 import { useRuntimeConfig } from '#imports'
 import { getAcpBridge } from '../../../../acp/bridge'
-import { ensureAcpSessionSequenceAtLeast, publishAcpEvent } from '../../../../acp/events'
-import { getAcpTranscriptStore } from '../../../../acp/transcriptStore'
+import { publishAcpEvent } from '../../../../acp/events'
 
 type PromptBody = {
   message?: string
@@ -30,8 +29,6 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody<PromptBody>(event).catch((): PromptBody => ({}))
   const prompt = toPromptBlocks(body)
-  const snapshot = await getAcpTranscriptStore().get(sessionId)
-  ensureAcpSessionSequenceAtLeast(sessionId, snapshot?.cursor)
 
   if (typeof body.replaceFromMessageId === 'string' && body.replaceFromMessageId.trim()) {
     publishAcpEvent({
