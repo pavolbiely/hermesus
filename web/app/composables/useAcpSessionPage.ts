@@ -23,32 +23,37 @@ type PendingPermission = {
 
 type ChatSubmitStatus = 'ready' | 'submitted' | 'streaming'
 
+type AcpSessionPageApi = {
+  readTranscript: (sessionId: string, params?: { limit?: number, before?: number }, options?: { signal?: AbortSignal }) => Promise<{
+    transcript: AcpTranscriptSnapshot | null
+    hasMore: boolean
+    nextBefore: number | null
+  }>
+  loadSession: (sessionId: string, options?: { signal?: AbortSignal }) => Promise<{
+    models?: SessionModelState | null
+    modes?: SessionModeState | null
+    configOptions?: SessionConfigOption[] | null
+    events: AcpBridgeEvent[]
+  }>
+  subscribeSession: (
+    sessionId: string,
+    onEvent: (event: AcpBridgeEvent) => void,
+    onError?: (event: Event) => void,
+    options?: { afterSequence?: number, replay?: boolean }
+  ) => EventSource
+  respondToPermission: (appRequestId: string, payload: { optionId?: string, cancelled?: boolean }) => Promise<unknown>
+}
+
 type AcpSessionPageOptions = {
   sessionId: Ref<string>
   messagesScrollContainer: Ref<HTMLElement | null>
   pendingPrompts: Ref<Record<string, PendingAcpPrompt>>
   queryPrompt: Ref<string>
   replaceRouteQuery: () => Promise<unknown>
-  api: {
-    readTranscript: (sessionId: string, params?: { limit?: number, before?: number }, options?: { signal?: AbortSignal }) => Promise<{
-      transcript: AcpTranscriptSnapshot | null
-      hasMore: boolean
-      nextBefore: number | null
-    }>
-    loadSession: (sessionId: string, options?: { signal?: AbortSignal }) => Promise<{
-      models?: SessionModelState | null
-      modes?: SessionModeState | null
-      configOptions?: SessionConfigOption[] | null
-      events: AcpBridgeEvent[]
-    }>
-    subscribeSession: (
-      sessionId: string,
-      onEvent: (event: AcpBridgeEvent) => void,
-      onError?: (event: Event) => void,
-      options?: { afterSequence?: number, replay?: boolean }
-    ) => EventSource
-    respondToPermission: (appRequestId: string, payload: { optionId?: string, cancelled?: boolean }) => Promise<unknown>
-  }
+  readTranscript: AcpSessionPageApi['readTranscript']
+  loadSession: AcpSessionPageApi['loadSession']
+  subscribeSession: AcpSessionPageApi['subscribeSession']
+  respondToPermissionRequest: AcpSessionPageApi['respondToPermission']
   transcript: {
     state: Ref<{ cursor?: number, messages: AcpChatMessage[] }>
     reset: () => void
@@ -107,7 +112,7 @@ export function useAcpSessionPage(options: AcpSessionPageOptions) {
     resetSessionView()
 
     try {
-      const stored = await options.api.readTranscript(
+      const stored = await options.readTranscript(
         targetSessionId,
         { limit: transcriptPageSize },
         { signal: abortController.signal }
@@ -130,7 +135,7 @@ export function useAcpSessionPage(options: AcpSessionPageOptions) {
         return
       }
 
-      const loaded = await options.api.loadSession(targetSessionId, { signal: abortController.signal })
+      const loaded = await options.loadSession(targetSessionId, { signal: abortController.signal })
       if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
 
       options.modelState.value = loaded.models || options.modelState.value
@@ -157,7 +162,7 @@ export function useAcpSessionPage(options: AcpSessionPageOptions) {
     const replayOptions = options.transcript.state.value.cursor === undefined
       ? { replay: false }
       : { afterSequence: options.transcript.state.value.cursor }
-    eventSource = options.api.subscribeSession(targetSessionId, handleBridgeEvent, () => {
+    eventSource = options.subscribeSession(targetSessionId, handleBridgeEvent, () => {
       if (targetSessionId === options.sessionId.value) error.value ||= 'ACP event stream disconnected.'
     }, replayOptions)
     closeEvents = () => eventSource?.close()
@@ -264,7 +269,7 @@ export function useAcpSessionPage(options: AcpSessionPageOptions) {
 
     loadingOlderMessages.value = true
     try {
-      const response = await options.api.readTranscript(options.sessionId.value, {
+      const response = await options.readTranscript(options.sessionId.value, {
         limit: transcriptPageSize,
         before: nextTranscriptBefore.value
       })
@@ -324,7 +329,7 @@ export function useAcpSessionPage(options: AcpSessionPageOptions) {
 
   async function respondToPermission(appRequestId: string, option?: PermissionOption) {
     try {
-      await options.api.respondToPermission(appRequestId, option ? { optionId: option.optionId } : { cancelled: true })
+      await options.respondToPermissionRequest(appRequestId, option ? { optionId: option.optionId } : { cancelled: true })
     } catch (err) {
       options.showError(err, 'Failed to respond to permission request')
     }
