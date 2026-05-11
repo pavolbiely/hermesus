@@ -68,6 +68,22 @@ test('applies app-owned ACP sidebar metadata', () => {
   assert.equal(sessions[0].archived, true)
 })
 
+test('prefers transcript activity time over stale ACP session time', () => {
+  const sessions = acpSidebarSessions({
+    sessions: [
+      {
+        sessionId: 'session-activity',
+        cwd: '/repo',
+        title: 'Active chat',
+        updatedAt: '2026-05-11T01:00:00.000Z',
+        appUpdatedAt: '2026-05-11T03:00:00.000Z'
+      }
+    ]
+  })
+
+  assert.equal(sessions[0].updatedAt, '2026-05-11T03:00:00.000Z')
+})
+
 test('marks sessions with active ACP prompts as running', () => {
   const sessions = acpSidebarSessions({
     sessions: [

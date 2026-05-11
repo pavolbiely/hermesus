@@ -11,7 +11,7 @@ export function acpSidebarSessions(response: AcpListSessionsResponse | null | un
       const metadata = session.appMetadata
       const rootTitle = session.appLineage?.rootTitle?.trim()
       const title = metadata?.title?.trim() || rootTitle || session.title?.trim() || null
-      const updatedAt = session.updatedAt || new Date().toISOString()
+      const updatedAt = latestIsoTimestamp(session.appUpdatedAt, session.updatedAt) || new Date().toISOString()
 
       return {
         id,
@@ -43,4 +43,14 @@ export function acpSidebarSessions(response: AcpListSessionsResponse | null | un
   }
 
   return Array.from(visibleSessionsByLineage.values())
+}
+
+function latestIsoTimestamp(...values: Array<string | null | undefined>) {
+  return values.reduce<string | null>((latest, value) => {
+    if (!value) return latest
+    const time = Date.parse(value)
+    if (!Number.isFinite(time)) return latest
+    if (!latest || time > Date.parse(latest)) return value
+    return latest
+  }, null)
 }

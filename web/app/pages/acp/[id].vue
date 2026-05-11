@@ -12,6 +12,7 @@ import type {
 } from '~/types/acp-api'
 import type { AcpChatMessage } from '~/types/acp-chat'
 import type { ChatPromptAttachment, SlashCommand } from '~/types/chat'
+import type { QueuedMessage } from '~/utils/queuedMessages'
 import type { ComponentPublicInstance } from 'vue'
 import { useScrollShadow } from '@nuxt/ui/composables'
 import {
@@ -35,6 +36,7 @@ import {
 } from '~/utils/acpRunDetails'
 import { scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender } from '~/utils/chatInitialScroll'
 import { acpSidebarSessions } from '~/utils/acpSidebarSessions'
+import { shouldAutoSendQueuedMessage } from '~/utils/queuedMessages'
 import { toolCallTitle } from '~/utils/toolCalls'
 
 type PendingPermission = {
@@ -64,6 +66,7 @@ const context = useChatComposerContext()
 const pendingAcpPrompts = usePendingAcpPrompt()
 const activeAcpPrompts = useAcpActivePrompts()
 const transcript = useAcpTranscript()
+const queuedMessages = useQueuedMessages()
 const readAloud = useAcpMessageReadAloud()
 const toast = useToast()
 
@@ -85,6 +88,9 @@ const editingMessageId = ref<string | null>(null)
 const editingText = ref('')
 const editingMessageContainer = ref<HTMLElement | null>(null)
 const savingEditedMessageId = ref<string | null>(null)
+const steeringQueuedMessageId = ref<string | null>(null)
+const queuedMessageToSendAfterStop = ref<QueuedMessage | null>(null)
+const autoSendingQueuedMessage = ref(false)
 const planEntries = ref<PlanEntry[]>([])
 const modelState = ref<SessionModelState | null>(null)
 const modeState = ref<SessionModeState | null>(null)
@@ -112,6 +118,7 @@ type ChatSubmitStatus = 'ready' | 'submitted' | 'streaming'
 const submitStatusState = ref<ChatSubmitStatus>('ready')
 const submitting = computed(() => Boolean(activePromptTurnId.value))
 const submitStatus = computed(() => submitting.value ? submitStatusState.value : 'ready')
+const queuedForSession = computed(() => queuedMessages.forSession(sessionId.value))
 const messages = computed(() => transcript.messages.value)
 const currentAcpSession = computed(() => sidebarSessionsData.data.value?.sessions.find(session => session.sessionId === sessionId.value) || null)
 const currentSidebarSession = computed(() => acpSidebarSessions(sidebarSessionsData.data.value).find(session => session.id === sessionId.value) || null)
@@ -138,6 +145,8 @@ const chatHeaderTitle = computed(() => {
   return loading.value ? 'Loading chat…' : 'Untitled chat'
 })
 const displayMessages = computed<AcpChatMessageWithActions[]>(() => groupProcessMessages(messages.value).map(withNativeMessageActions))
+const hoveredAssistantMessageId = ref<string | null>(null)
+const focusedAssistantMessageId = ref<string | null>(null)
 const chatUserProps = {
   side: 'right' as const,
   variant: 'soft' as const,
@@ -221,6 +230,13 @@ const selectedReasoningId = computed(() => {
 const selectedModeLabel = computed(() => selectedReasoningId.value ? reasoningItems.value.find(item => item.value === selectedReasoningId.value)?.label : 'Reasoning')
 const visibleConfigOptions = computed(() => configOptions.value.filter(option => option.type === 'select' || option.type === 'boolean'))
 const hasSessionControls = computed(() => Boolean(modelItems.value.length || modeItems.value.length || visibleConfigOptions.value.length))
+const canAutoSendQueuedMessage = computed(() => shouldAutoSendQueuedMessage({
+  hasSession: Boolean(sessionId.value && !loading.value),
+  queuedCount: queuedForSession.value.length + (queuedMessageToSendAfterStop.value ? 1 : 0),
+  isRunning: submitting.value,
+  hasActiveRun: Boolean(activePromptTurnId.value),
+  isSubmitting: submitStatus.value === 'submitted' || autoSendingQueuedMessage.value
+}))
 const slashCommandItems = computed<SlashCommand[]>(() => availableCommands.value.map(command => ({
   id: command.name,
   name: `/${command.name}`,
@@ -274,6 +290,10 @@ watch(activePromptTurnId, (turnId, previousTurnId) => {
   activePromptStartedAt.value = activeTurnCreatedAtMs(turnId) ?? Date.now()
   startActivePromptClock()
 })
+
+watch(canAutoSendQueuedMessage, (shouldSend) => {
+  if (shouldSend) void sendNextQueuedMessage()
+}, { immediate: true })
 
 async function initializeSession(targetSessionId = sessionId.value) {
   if (!targetSessionId) return
@@ -368,11 +388,97 @@ async function processQueuedPrompt(targetSessionId: string) {
 
 async function onSubmit() {
   const message = input.value.trim()
-  if ((!message && !context.attachments.value.length) || submitting.value) return
+  if (!message && !context.attachments.value.length) return
+
+  if (submitting.value) {
+    enqueueMessage(message)
+    return
+  }
+
   const attachments = context.attachments.value
   input.value = ''
   context.clearAttachments()
   await sendPrompt(message, attachments)
+}
+
+function warnAttachmentsCannotBeQueued() {
+  toast.add({
+    color: 'warning',
+    title: 'Attachments cannot be queued yet',
+    description: 'Wait for the current response to finish, then send the message with attachments.'
+  })
+}
+
+function enqueueMessage(message: string) {
+  if (!message.trim()) return
+  if (context.attachments.value.length) {
+    warnAttachmentsCannotBeQueued()
+    return
+  }
+
+  const queued = queuedMessages.enqueue(sessionId.value, message)
+  if (queued) input.value = ''
+}
+
+function editQueuedMessage(id: string) {
+  const queued = queuedForSession.value.find(message => message.id === id)
+  if (!queued) return
+  input.value = queued.text
+  queuedMessages.remove(id)
+  void nextTick(() => promptContainer.value?.querySelector('textarea')?.focus())
+}
+
+function deleteQueuedMessage(id: string) {
+  queuedMessages.remove(id)
+}
+
+async function steerQueuedMessage(id: string) {
+  const queued = queuedForSession.value.find(message => message.id === id)
+  if (!queued) return
+
+  if (!submitting.value) {
+    queuedMessages.remove(id)
+    const sent = await sendPrompt(queued.text)
+    if (!sent) queuedMessages.prepend(queued)
+    return
+  }
+
+  steeringQueuedMessageId.value = id
+  try {
+    await api.cancel(sessionId.value)
+    queuedMessageToSendAfterStop.value = queued
+    queuedMessages.remove(id)
+    activeAcpPrompts.markFinished(sessionId.value, activePromptTurnId.value)
+    activePromptTurnId.value = null
+    toast.add({
+      color: 'neutral',
+      title: 'Steering after interrupt',
+      description: 'Hermes will continue with this message after the current run stops.'
+    })
+  } catch (err) {
+    showError(err, 'Failed to steer run')
+  } finally {
+    steeringQueuedMessageId.value = null
+  }
+}
+
+async function sendNextQueuedMessage() {
+  if (autoSendingQueuedMessage.value || loading.value || submitting.value) return
+
+  const priority = queuedMessageToSendAfterStop.value?.sessionId === sessionId.value
+    ? queuedMessageToSendAfterStop.value
+    : null
+  const queued = priority || queuedMessages.shiftForSession(sessionId.value)
+  if (!queued) return
+  if (priority) queuedMessageToSendAfterStop.value = null
+
+  autoSendingQueuedMessage.value = true
+  try {
+    const sent = await sendPrompt(queued.text)
+    if (!sent) queuedMessages.prepend(queued)
+  } finally {
+    autoSendingQueuedMessage.value = false
+  }
 }
 
 function abortActiveSessionLoad() {
@@ -393,10 +499,27 @@ function isAbortError(err: unknown) {
     || (err instanceof Error && err.name === 'AbortError')
 }
 
+function touchSidebarSession(targetSessionId: string, updatedAt = new Date().toISOString()) {
+  const sidebarSessions = sidebarSessionsData.data.value?.sessions
+  if (!sidebarSessions?.length) return
+
+  let changed = false
+  const sessions = sidebarSessions.map((session) => {
+    if (session.sessionId !== targetSessionId) return session
+    changed = true
+    return { ...session, appUpdatedAt: updatedAt }
+  })
+
+  if (changed && sidebarSessionsData.data.value) {
+    sidebarSessionsData.data.value = { ...sidebarSessionsData.data.value, sessions }
+  }
+}
+
 async function sendPrompt(message: string, attachments: ChatPromptAttachment[] = []) {
   error.value = null
   const turnId = crypto.randomUUID()
   const messageId = crypto.randomUUID()
+  const occurredAt = new Date().toISOString()
   transcript.applyEvent({
     type: 'user.message',
     eventId: `optimistic-user:${turnId}`,
@@ -404,8 +527,9 @@ async function sendPrompt(message: string, attachments: ChatPromptAttachment[] =
     turnId,
     messageId,
     text: message,
-    occurredAt: new Date().toISOString()
+    occurredAt
   })
+  touchSidebarSession(sessionId.value, occurredAt)
   activePromptTurnId.value = turnId
   submitStatusState.value = 'submitted'
   scrollSubmittedMessageToBottom(turnId)
@@ -417,10 +541,12 @@ async function sendPrompt(message: string, attachments: ChatPromptAttachment[] =
       turnId,
       messageId
     })
+    return true
   } catch (err) {
     if (activePromptTurnId.value === turnId) activePromptTurnId.value = null
     activeAcpPrompts.markFinished(sessionId.value, turnId)
     showError(err, 'Failed to send prompt')
+    return false
   }
 }
 
@@ -603,6 +729,7 @@ async function loadOlderMessages() {
 
 function handleBridgeEvent(event: Parameters<typeof transcript.applyBridgeEvent>[0]) {
   if (event.sessionId !== sessionId.value) return
+  touchSidebarSession(event.sessionId)
   transcript.applyBridgeEvent(event)
   if (event.type === 'permission.requested') {
     pendingPermissions.value = [
@@ -797,6 +924,46 @@ function readAloudStatusDetail(message: AcpChatMessage) {
   if (isGeneratingAloud(message)) return 'Generating speech audio'
   if (isReadingAloud(message)) return 'Reading aloud'
   return ''
+}
+
+function setAssistantMessageHover(messageId: string, hovered: boolean) {
+  if (hovered) {
+    hoveredAssistantMessageId.value = messageId
+    return
+  }
+  if (hoveredAssistantMessageId.value === messageId) hoveredAssistantMessageId.value = null
+}
+
+function onAssistantMessagePointerLeave(event: PointerEvent, messageId: string) {
+  setAssistantMessageHover(messageId, false)
+
+  const container = event.currentTarget
+  if (!(container instanceof HTMLElement)) return
+
+  const activeElement = document.activeElement
+  if (activeElement instanceof HTMLElement && container.contains(activeElement)) {
+    activeElement.blur()
+  }
+}
+
+function onAssistantMessageFocusOut(event: FocusEvent, messageId: string) {
+  const container = event.currentTarget
+  const nextFocusTarget = event.relatedTarget
+  if (
+    container instanceof HTMLElement
+    && nextFocusTarget instanceof Node
+    && container.contains(nextFocusTarget)
+  ) return
+
+  if (focusedAssistantMessageId.value === messageId) focusedAssistantMessageId.value = null
+}
+
+function isAssistantFooterVisible(message: AcpChatMessage) {
+  return Boolean(
+    readAloudStatusDetail(message)
+    || hoveredAssistantMessageId.value === message.id
+    || focusedAssistantMessageId.value === message.id
+  )
 }
 
 function hasAssistantFooter(message: AcpChatMessage) {
@@ -1273,7 +1440,14 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                     {{ partText(message) }}
                   </template>
                 </template>
-                <div v-else>
+                <div
+                  v-else
+                  class="inline-block max-w-full"
+                  @pointerenter="setAssistantMessageHover(message.id, true)"
+                  @pointerleave="event => onAssistantMessagePointerLeave(event, message.id)"
+                  @focusin="focusedAssistantMessageId = message.id"
+                  @focusout="event => onAssistantMessageFocusOut(event, message.id)"
+                >
                   <UChatTool
                     v-if="shouldRenderRunDetailsBeforeMessage(message)"
                     text="Run details"
@@ -1321,8 +1495,8 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                   />
                   <div
                     v-if="hasAssistantFooter(message)"
-                    class="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-none text-muted transition-opacity focus-within:opacity-100"
-                    :class="readAloudStatusDetail(message) ? 'opacity-100' : 'opacity-0 group-hover/message:opacity-100'"
+                    class="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-none text-muted transition-opacity"
+                    :class="isAssistantFooterVisible(message) ? 'opacity-100' : 'opacity-0'"
                   >
                     <template
                       v-for="(item, itemIndex) in messageMetadataItems(message)"
@@ -1487,6 +1661,19 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                 @select="selectSlashCommand"
                 @highlight="slashCommands.highlightedIndex.value = $event"
               />
+              <div
+                v-if="queuedForSession.length"
+                class="absolute inset-x-0 bottom-full z-10 pb-2"
+              >
+                <ChatQueuedMessages
+                  :messages="queuedForSession"
+                  :steering-id="steeringQueuedMessageId"
+                  :disabled="loading"
+                  @edit="editQueuedMessage"
+                  @delete="deleteQueuedMessage"
+                  @steer="steerQueuedMessage"
+                />
+              </div>
               <UChatPrompt
                 v-model="input"
                 :maxrows="6"

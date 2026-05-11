@@ -73,6 +73,7 @@ export type AcpListSessionsResponse = Omit<ListSessionsResponse, 'sessions'> & {
     appMetadata?: AcpSessionAppMetadata
     appLineage?: { rootSessionId: string, rootTitle: string | null }
     appActivePrompt?: { turnId: string, messageId: string } | null
+    appUpdatedAt?: string | null
   }>
 }
 
