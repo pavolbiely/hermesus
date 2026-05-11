@@ -28,6 +28,11 @@ type PreviewElementCandidate = {
   href?: string | null
 }
 
+type PreviewCodeBlockCandidate = {
+  container: HTMLElement
+  path: string
+}
+
 type PreviewTextMatch = {
   raw: string
   path: string
@@ -58,10 +63,12 @@ async function enhancePreviewPathNodes() {
   if (!element || props.streaming) return
 
   const elementCandidates = collectElementPreviewCandidates(element)
+  const codeBlockCandidates = collectCodeBlockPreviewCandidates(element)
   const textCandidates = collectTextPreviewCandidates(element)
   const paths = new Set<string>()
 
   for (const candidate of elementCandidates) paths.add(candidate.path)
+  for (const candidate of codeBlockCandidates) paths.add(candidate.path)
   for (const candidate of textCandidates) {
     for (const match of candidate.matches) paths.add(match.path)
   }
@@ -72,6 +79,10 @@ async function enhancePreviewPathNodes() {
     if (!existingPreviewPaths.has(candidate.path)) continue
     if (candidate.href !== undefined) candidate.element.removeAttribute('href')
     markPreviewTrigger(candidate.element, candidate.path)
+  }
+
+  for (const candidate of codeBlockCandidates) {
+    if (existingPreviewPaths.has(candidate.path)) markCodeBlockPreviewTrigger(candidate.container, candidate.path)
   }
 
   for (const candidate of textCandidates) {
@@ -99,6 +110,38 @@ function collectElementPreviewCandidates(element: HTMLElement) {
   }
 
   return candidates
+}
+
+function collectCodeBlockPreviewCandidates(element: HTMLElement) {
+  const candidates: PreviewCodeBlockCandidate[] = []
+
+  for (const code of element.querySelectorAll<HTMLElement>('pre > code')) {
+    const pre = code.closest('pre')
+    const container = pre?.parentElement
+    if (!pre || !container || container.dataset.previewCodePath) continue
+
+    const path = normalizePreviewPathCandidate(code.textContent || '')
+    if (isResolvablePreviewCandidate(path)) candidates.push({ container, path })
+  }
+
+  return candidates
+}
+
+function markCodeBlockPreviewTrigger(container: HTMLElement, path: string) {
+  container.dataset.previewCodePath = path
+  container.classList.add('chat-preview-code-block')
+
+  const existing = container.querySelector<HTMLButtonElement>(':scope > [data-preview-code-action]')
+  const button = existing ?? document.createElement('button')
+  button.type = 'button'
+  button.title = `Preview ${path}`
+  button.setAttribute('aria-label', `Preview ${path}`)
+  button.dataset.previewPath = path
+  button.dataset.previewCodeAction = 'true'
+  button.classList.add('chat-preview-code-action')
+  button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>'
+
+  if (!existing) container.append(button)
 }
 
 function collectTextPreviewCandidates(element: HTMLElement) {
@@ -244,7 +287,11 @@ function onPreviewKeydown(event: KeyboardEvent) {
 
 function scheduleMarkdownHighlight() {
   if (typeof window === 'undefined') return
-  if (highlightFrame !== null) window.cancelAnimationFrame(highlightFrame)
+  if (highlightFrame !== null) {
+    window.cancelAnimationFrame(highlightFrame)
+    highlightFrame = null
+  }
+  if (props.streaming) return
   highlightFrame = window.requestAnimationFrame(() => {
     highlightFrame = null
     void highlightMarkdownCodeBlocks()
@@ -253,7 +300,7 @@ function scheduleMarkdownHighlight() {
 
 async function highlightMarkdownCodeBlocks() {
   const element = root.value
-  if (!element) return
+  if (!element || props.streaming) return
 
   const codeBlocks = [...element.querySelectorAll<HTMLElement>('pre > code[class*="language-"]')]
     .filter(code => !code.closest('pre')?.dataset.shikiHighlighted)

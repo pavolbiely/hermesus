@@ -80,6 +80,10 @@ const chatBottomFollow = useChatBottomFollow({
 })
 const currentAcpSession = computed(() => sidebarSessionsData.data.value?.sessions.find(session => session.sessionId === sessionId.value) || null)
 const currentSidebarSession = computed(() => acpSidebarSessions(sidebarSessionsData.data.value).find(session => session.id === sessionId.value) || null)
+watch([currentSidebarSession, context.workspaces], ([session]) => {
+  if (!sidebarSessionsData.data.value) return
+  context.selectWorkspace(session?.workspace || null)
+}, { immediate: true })
 const inferredChatTitle = computed(() => {
   const firstUserMessage = messages.value.find(message => message.role === 'user')
   const text = firstUserMessage ? acpMessageText(firstUserMessage).trim().replace(/\s+/g, ' ') : ''

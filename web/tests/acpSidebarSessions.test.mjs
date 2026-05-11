@@ -109,6 +109,20 @@ test('ignores relative ACP cwd placeholders when deriving sidebar workspace', ()
   assert.equal(sessions[0].workspace, null)
 })
 
+test('treats app-owned null workspace as authoritative over ACP cwd fallback', () => {
+  const sessions = acpSidebarSessions({
+    sessions: [{
+      sessionId: 'session-app-null-workspace',
+      cwd: '/repo/hermesum',
+      title: 'No workspace',
+      updatedAt: '2026-05-11T01:00:00.000Z',
+      appMetadata: { workspace: null }
+    }]
+  })
+
+  assert.equal(sessions[0].workspace, null)
+})
+
 test('collapses compression lineage sessions under the live tip with the root title', () => {
   const sessions = acpSidebarSessions({
     sessions: [

@@ -82,6 +82,7 @@ watch(
     clearDraft()
     error.value = undefined
     newChatRequest.markConsumed(request.id)
+    void resetDraftSession().catch(err => showError(err, 'Could not initialize new chat'))
   },
   { immediate: true }
 )

@@ -28,7 +28,9 @@ function cleanMetadata(value: AcpSessionAppMetadata | undefined): AcpSessionAppM
     ...(typeof value?.title === 'string' && value.title.trim() ? { title: value.title.trim() } : {}),
     ...(typeof value?.pinned === 'boolean' ? { pinned: value.pinned } : {}),
     ...(typeof value?.archived === 'boolean' ? { archived: value.archived } : {}),
-    ...(typeof value?.workspace === 'string' && value.workspace.trim() ? { workspace: value.workspace.trim() } : {})
+    ...(value && 'workspace' in value
+      ? { workspace: typeof value.workspace === 'string' && value.workspace.trim() ? value.workspace.trim() : null }
+      : {})
   }
 }
 

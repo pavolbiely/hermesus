@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { resolveSelectedWorkspace } from '../app/utils/workspaceSelection.ts'
+import { resolveSelectedWorkspace, workspaceSelectItems } from '../app/utils/workspaceSelection.ts'
 
 const workspaces = [
   { id: 'alpha', label: 'Alpha', path: '/repo/alpha', active: false },
@@ -41,4 +41,19 @@ test('session workspace takes precedence when present', () => {
     persistedWorkspace: '/repo/alpha',
     currentWorkspace: null
   }), '/repo/beta')
+})
+
+test('workspace select items include selected external workspace', () => {
+  assert.deepEqual(workspaceSelectItems(workspaces, '/repo/external'), [
+    { label: 'Alpha', value: '/repo/alpha' },
+    { label: 'Beta', value: '/repo/beta' },
+    { label: '/repo/external', value: '/repo/external' }
+  ])
+})
+
+test('workspace select items do not duplicate managed selected workspace', () => {
+  assert.deepEqual(workspaceSelectItems(workspaces, '/repo/beta'), [
+    { label: 'Alpha', value: '/repo/alpha' },
+    { label: 'Beta', value: '/repo/beta' }
+  ])
 })

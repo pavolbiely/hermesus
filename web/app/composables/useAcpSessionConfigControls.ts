@@ -6,6 +6,7 @@ import type {
   SessionModelState
 } from '~/types/acp-api'
 import type { AppWorkspace, SlashCommand } from '~/types/chat'
+import { workspaceSelectItems } from '~/utils/workspaceSelection'
 
 type ConfigControlItem = {
   label: string
@@ -76,10 +77,10 @@ export function useAcpSessionConfigControls(options: UseAcpSessionConfigControls
     return [...(option ? configOptionItems(option) : modeItems.value)].reverse()
   })
 
-  const workspaceItems = computed(() => options.workspaces.value.map(workspace => ({
-    label: workspace.label,
-    value: workspace.path
-  })))
+  const workspaceItems = computed<ConfigControlItem[]>(() => workspaceSelectItems(
+    options.workspaces.value,
+    options.selectedWorkspace.value
+  ))
 
   const workspaceLabel = computed(() => {
     const selected = options.selectedWorkspace.value

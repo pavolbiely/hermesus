@@ -21,7 +21,7 @@ export function acpSidebarSessions(response: AcpListSessionsResponse | null | un
         model: null,
         provider: null,
         reasoningEffort: null,
-        workspace: metadata?.workspace || sessionWorkspace(session.cwd),
+        workspace: metadata && 'workspace' in metadata ? metadata.workspace ?? null : sessionWorkspace(session.cwd),
         pinned: Boolean(metadata?.pinned),
         archived: Boolean(metadata?.archived),
         running: Boolean(session.appActivePrompt),
