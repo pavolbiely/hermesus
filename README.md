@@ -24,7 +24,7 @@ The product direction is simple:
 
 - a chat-first workspace for serious agent sessions
 - fast streaming with clear prompt status, stop/cancel controls, and deterministic transcript ordering
-- visible reasoning, tool activity, permissions, durations, and usage signals where ACP provides them
+- visible reasoning, tool activity, plans, permissions, durations, and usage signals where ACP provides them
 - workspace context and app-owned metadata for session organization
 - practical controls for models, modes, commands, and project switching
 
@@ -60,6 +60,7 @@ The product direction is simple:
 - new-chat handoff from `/` into ACP session creation
 - ACP session sidebar with app-owned metadata actions
 - model/mode/config controls from ACP session metadata
+- live ACP plan card from `session/update` plan events
 - local slash-command autocomplete UI
 - workspace selector backed by `/api/app/workspaces`
 - read receipts, drafts, queued messages, sound settings, and layout polish

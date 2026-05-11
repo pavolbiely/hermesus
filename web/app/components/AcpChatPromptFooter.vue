@@ -301,13 +301,15 @@ onBeforeUnmount(() => {
           <UButton
             aria-label="Reasoning effort"
             icon="i-lucide-brain"
+            trailing-icon="i-lucide-chevron-down"
             :color="selectedModeUnavailable ? 'error' : 'neutral'"
             :variant="selectedModeUnavailable ? 'soft' : 'ghost'"
             size="sm"
-            class="shrink-0"
+            class="max-w-36 shrink-0"
             :disabled="updatingSessionConfig || !modes.length"
-            :title="reasoningButtonLabel"
-          />
+          >
+            <span class="min-w-0 truncate">{{ reasoningButtonLabel }}</span>
+          </UButton>
         </UDropdownMenu>
 
         <UTooltip :text="voiceTooltip">

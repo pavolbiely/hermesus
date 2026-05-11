@@ -27,6 +27,57 @@ function toolCallName(update: Record<string, unknown>, fallback: string) {
   return typeof value === 'string' && value ? value : fallback
 }
 
+function stringField(update: Record<string, unknown>, key: string) {
+  const value = update[key]
+  return typeof value === 'string' && value ? value : undefined
+}
+
+function toolCallOutput(update: Record<string, unknown>) {
+  return update.content ?? update.rawOutput
+}
+
+function toolCallContentText(value: unknown) {
+  if (!Array.isArray(value)) return undefined
+
+  const text = value
+    .map((item) => {
+      if (!item || typeof item !== 'object') return ''
+      const content = (item as Record<string, unknown>).content
+      if (!content || typeof content !== 'object') return ''
+      const text = (content as Record<string, unknown>).text
+      return typeof text === 'string' ? text : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+
+  return text || undefined
+}
+
+function toolCallInput(update: Record<string, unknown>) {
+  return update.rawInput ?? toolCallContentText(update.content)
+}
+
+function toolCallLocations(update: Record<string, unknown>) {
+  if (!Array.isArray(update.locations)) return undefined
+
+  const locations = update.locations.flatMap((location) => {
+    if (!location || typeof location !== 'object') return []
+    const record = location as Record<string, unknown>
+    if (typeof record.path !== 'string' || !record.path) return []
+    return [{
+      path: record.path,
+      line: typeof record.line === 'number' ? record.line : null
+    }]
+  })
+
+  return locations.length ? locations : undefined
+}
+
+function isTerminalToolStatus(status: string | undefined) {
+  return status === 'completed' || status === 'failed'
+}
+
 function turnIdFromUpdate(sessionId: string, update: Record<string, unknown>, fallback: string) {
   const value = update.messageId ?? update.toolCallId ?? update.id
   return typeof value === 'string' && value ? value : `${sessionId}:${fallback}`
@@ -77,7 +128,11 @@ function normalizeSessionUpdate(event: Extract<AcpBridgeEvent, { type: 'session.
       turnId: event.turnId ?? turnIdFromUpdate(event.sessionId, update, 'tool'),
       toolCallId: id,
       name: toolCallName(update, id),
-      input: update.rawInput,
+      kind: stringField(update, 'kind'),
+      status: stringField(update, 'status') ?? 'pending',
+      locations: toolCallLocations(update),
+      input: toolCallInput(update),
+      output: toolCallOutput(update),
       occurredAt
     }]
   }
@@ -85,14 +140,20 @@ function normalizeSessionUpdate(event: Extract<AcpBridgeEvent, { type: 'session.
   if (sessionUpdate === 'tool_call_update') {
     const id = toolCallId(update)
     if (!id) return []
+    const status = stringField(update, 'status')
+    const type = isTerminalToolStatus(status) || update.error ? 'tool.completed' : 'tool.updated'
     return [{
-      type: 'tool.completed',
-      eventId: eventId(event, `${sessionUpdate}:${id}`),
+      type,
+      eventId: eventId(event, `${sessionUpdate}:${id}:${status ?? update.error ?? update.content ?? update.rawOutput ?? 'update'}`),
       sessionId: event.sessionId,
       turnId: event.turnId ?? turnIdFromUpdate(event.sessionId, update, 'tool'),
       toolCallId: id,
       name: toolCallName(update, id),
-      output: update.content ?? update.rawOutput,
+      kind: stringField(update, 'kind'),
+      status,
+      locations: toolCallLocations(update),
+      input: update.rawInput,
+      output: toolCallOutput(update),
       error: typeof update.error === 'string' ? update.error : null,
       occurredAt
     }]

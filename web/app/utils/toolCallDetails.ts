@@ -27,6 +27,7 @@ export type ToolDetailOverview = {
 type ToolDetailPart = {
   name?: string | null
   status?: string | null
+  locations?: Array<{ path: string, line?: number | null }> | null
   input?: unknown
   output?: unknown
 }
@@ -133,7 +134,7 @@ export function valueSummary(value: unknown) {
 }
 
 export function toolDetailOverview(part: ToolDetailPart): ToolDetailOverview {
-  const input = unwrapToolArguments(part.input)
+  const input = unwrapToolArguments(part.input) ?? locationsAsInput(part.locations)
   const output = normalizeDetailValue(part.output)
   const fields: ToolDetailField[] = []
 
@@ -145,6 +146,18 @@ export function toolDetailOverview(part: ToolDetailPart): ToolDetailOverview {
     inputFields: collectFields(input, IMPORTANT_INPUT_KEYS, 4),
     resultFields: collectOutputFields(output),
     blocks: collectOutputBlocks(output)
+  }
+}
+
+function locationsAsInput(locations: ToolDetailPart['locations']) {
+  if (!Array.isArray(locations) || !locations.length) return undefined
+  const first = locations[0]
+  if (!first) return undefined
+
+  return {
+    path: first.path,
+    ...(typeof first.line === 'number' ? { line: first.line } : {}),
+    ...(locations.length > 1 ? { files: locations.length } : {})
   }
 }
 

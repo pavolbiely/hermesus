@@ -62,13 +62,20 @@ export function applyAcpChatEvent(state: AcpTranscriptState, event: AcpChatEvent
       upsertAssistantPart(next.messages, event, { type: 'reasoning', text: event.text })
       break
     case 'tool.started':
-      upsertAssistantPart(next.messages, event, {
+      upsertToolPart(next.messages, event, {
         type: 'tool',
         toolCallId: event.toolCallId,
         name: event.name,
+        kind: event.kind,
+        status: event.status,
+        locations: event.locations,
         input: event.input,
-        state: 'started'
+        output: event.output,
+        state: toolState(event.status)
       })
+      break
+    case 'tool.updated':
+      updateToolPart(next.messages, event)
       break
     case 'tool.completed':
       completeToolPart(next.messages, event)
@@ -80,7 +87,9 @@ export function applyAcpChatEvent(state: AcpTranscriptState, event: AcpChatEvent
       upsertAssistantPart(next.messages, event, { type: 'event', title: event.message, severity: 'error' })
       break
     case 'permission.requested':
+      break
     case 'run.completed':
+      completeOpenToolParts(next.messages, event.turnId)
       break
   }
 
@@ -163,13 +172,53 @@ function upsertAssistantPart(messages: AcpChatMessage[], event: { sessionId: str
   message.parts.push(part)
 }
 
-function completeToolPart(messages: AcpChatMessage[], event: { sessionId: string, turnId: string, toolCallId: string, name?: string, output?: unknown, error?: string | null, occurredAt?: string }) {
+function upsertToolPart(messages: AcpChatMessage[], event: { sessionId: string, turnId: string, occurredAt?: string }, part: Extract<AcpChatMessage['parts'][number], { type: 'tool' }>) {
+  const message = ensureAssistantMessage(messages, event)
+  const existing = message.parts.find(item => item.type === 'tool' && item.toolCallId === part.toolCallId)
+  if (existing?.type === 'tool') {
+    if (shouldAdoptToolName(existing.name, part.name, part.toolCallId, part.kind)) existing.name = part.name!
+    else existing.name ||= part.toolCallId
+    existing.kind = part.kind ?? existing.kind
+    existing.status = part.status ?? existing.status
+    existing.locations = part.locations ?? existing.locations
+    existing.input = part.input ?? existing.input
+    existing.output = part.output ?? existing.output
+    existing.error = part.error ?? existing.error
+    existing.state = part.state
+    return
+  }
+
+  message.parts.push(part)
+}
+
+function updateToolPart(messages: AcpChatMessage[], event: { sessionId: string, turnId: string, toolCallId: string, name?: string, kind?: string, status?: string, locations?: Extract<AcpChatMessage['parts'][number], { type: 'tool' }>['locations'], input?: unknown, output?: unknown, error?: string | null, occurredAt?: string }) {
+  const state = toolState(event.status, event.error)
+  upsertToolPart(messages, event, {
+    type: 'tool',
+    toolCallId: event.toolCallId,
+    name: event.name ?? event.toolCallId,
+    kind: event.kind,
+    status: event.status,
+    locations: event.locations,
+    input: event.input,
+    output: event.output,
+    error: event.error,
+    state
+  })
+}
+
+function completeToolPart(messages: AcpChatMessage[], event: { sessionId: string, turnId: string, toolCallId: string, name?: string, kind?: string, status?: string, locations?: Extract<AcpChatMessage['parts'][number], { type: 'tool' }>['locations'], input?: unknown, output?: unknown, error?: string | null, occurredAt?: string }) {
   const message = ensureAssistantMessage(messages, event)
   const existing = message.parts.find(part => part.type === 'tool' && part.toolCallId === event.toolCallId)
   if (existing?.type === 'tool') {
-    existing.name = event.name ?? existing.name
-    existing.output = event.output
-    existing.error = event.error
+    if (shouldAdoptToolName(existing.name, event.name, event.toolCallId, event.kind)) existing.name = event.name!
+    else existing.name ||= event.toolCallId
+    existing.kind = event.kind ?? existing.kind
+    existing.status = event.status ?? existing.status ?? (event.error ? 'failed' : 'completed')
+    existing.locations = event.locations ?? existing.locations
+    existing.input = event.input ?? existing.input
+    existing.output = event.output ?? existing.output
+    existing.error = event.error ?? existing.error
     existing.state = 'completed'
     return
   }
@@ -178,10 +227,37 @@ function completeToolPart(messages: AcpChatMessage[], event: { sessionId: string
     type: 'tool',
     toolCallId: event.toolCallId,
     name: event.name ?? event.toolCallId,
+    kind: event.kind,
+    status: event.status ?? (event.error ? 'failed' : 'completed'),
+    locations: event.locations,
+    input: event.input,
     output: event.output,
     error: event.error,
     state: 'completed'
   })
+}
+
+function shouldAdoptToolName(current: string | undefined, next: string | undefined, toolCallId: string, kind?: string) {
+  if (!next || next === toolCallId) return false
+  if (current && kind && next === kind && current !== kind) return false
+  return true
+}
+
+function toolState(status?: string, error?: string | null): 'started' | 'completed' {
+  if (error || status === 'completed' || status === 'failed') return 'completed'
+  return 'started'
+}
+
+function completeOpenToolParts(messages: AcpChatMessage[], turnId: string) {
+  const message = findTurnMessage(messages, 'assistant', turnId)
+  if (!message) return
+
+  for (const part of message.parts) {
+    if (part.type === 'tool' && part.state !== 'completed') {
+      part.state = 'completed'
+      part.status = part.status === 'failed' ? part.status : 'completed'
+    }
+  }
 }
 
 function ensureAssistantMessage(messages: AcpChatMessage[], event: { sessionId: string, turnId: string, occurredAt?: string }) {

@@ -13,7 +13,7 @@ Use this before broad repository search.
 - `web/app/composables/useAcpTranscript.ts`: browser transcript state from ACP replay/live events.
 - `web/app/composables/useAppWorkspacesApi.ts`: typed frontend client for Hermesum-owned workspace routes.
 - `web/app/types/acp-api.ts`, `web/app/types/acp-chat.ts`, `web/app/types/chat.ts`: API/protocol/UI contract types.
-- `web/app/utils/acpBridgeEventNormalization.ts` and `web/app/utils/acpEventNormalization.ts`: ACP bridge events to chat transcript state.
+- `web/app/utils/acpBridgeEventNormalization.ts`, `web/app/utils/acpEventNormalization.ts`, and `web/app/utils/acpPlanNormalization.ts`: ACP bridge events to chat transcript/plan state.
 - `web/app/utils/acpSidebarSessions.ts`: ACP session/list to sidebar summary mapping.
 - `web/server/acp/bridge.ts`: ACP SDK subprocess bridge, active prompt correlation, and client handler.
 - `web/server/acp/events.ts`: session-scoped ACP SSE publish/subscribe backlog.

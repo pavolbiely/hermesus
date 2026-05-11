@@ -33,22 +33,52 @@ test('normalizes ACP tool call lifecycle without text matching', () => {
   const started = normalizeAcpBridgeEvent({
     type: 'session.update',
     sessionId: 's1',
-    notification: { sessionId: 's1', update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Read file', rawInput: { path: 'README.md' } } }
+    notification: { sessionId: 's1', update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Read file', kind: 'read', status: 'pending', locations: [{ path: 'README.md', line: 12 }], rawInput: { path: 'README.md' } } }
+  })
+  const progress = normalizeAcpBridgeEvent({
+    type: 'session.update',
+    sessionId: 's1',
+    notification: { sessionId: 's1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'in_progress', content: [{ type: 'text', text: 'reading' }] } }
   })
   const completed = normalizeAcpBridgeEvent({
     type: 'session.update',
     sessionId: 's1',
-    notification: { sessionId: 's1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', title: 'Read file', content: [{ type: 'text', text: 'done' }] } }
+    notification: { sessionId: 's1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', title: 'Read file', status: 'completed', content: [{ type: 'text', text: 'done' }] } }
   })
 
-  for (const event of [...started, ...completed]) {
+  for (const event of [...started, ...progress, ...completed]) {
     state = applyAcpChatEvent(state, event)
   }
 
   const tool = state.messages[0]?.parts[0]
   assert.equal(tool?.type, 'tool')
   assert.equal(tool.toolCallId, 'tool-1')
+  assert.equal(tool.kind, 'read')
+  assert.deepEqual(tool.locations, [{ path: 'README.md', line: 12 }])
+  assert.equal(tool.status, 'completed')
   assert.equal(tool.state, 'completed')
+})
+
+test('preserves descriptive ACP tool titles across generic completion updates', () => {
+  let state = createEmptyAcpTranscriptState()
+  const events = [
+    ...normalizeAcpBridgeEvent({
+      type: 'session.update',
+      sessionId: 's1',
+      notification: { sessionId: 's1', update: { sessionUpdate: 'tool_call', toolCallId: 'tool-2', title: 'search: toolInputSummary', kind: 'search', locations: [{ path: 'web/app' }] } }
+    }),
+    ...normalizeAcpBridgeEvent({
+      type: 'session.update',
+      sessionId: 's1',
+      notification: { sessionId: 's1', update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-2', kind: 'search', status: 'completed', content: [{ content: { type: 'text', text: 'done' }, type: 'content' }] } }
+    })
+  ]
+
+  for (const event of events) state = applyAcpChatEvent(state, event)
+  const tool = state.messages[0]?.parts[0]
+
+  assert.equal(tool?.type, 'tool')
+  assert.equal(tool.name, 'search: toolInputSummary')
 })
 
 test('normalizes permission requests with ACP option metadata', () => {
@@ -106,4 +136,22 @@ test('dedupes load-response events replayed again by SSE backlog using sequence 
 
   assert.equal(state.messages.length, 1)
   assert.equal(text(state.messages[0]), 'once')
+})
+
+test('marks open tool calls completed when a run completes without tool output updates', () => {
+  let state = createEmptyAcpTranscriptState()
+  const events = [
+    { type: 'session.update', sessionId: 's1', turnId: 't1', notification: { sessionId: 's1', update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Search files' } } },
+    { type: 'prompt.completed', sessionId: 's1', turnId: 't1', response: { stopReason: 'end_turn' } }
+  ]
+
+  for (const event of events) {
+    for (const chatEvent of normalizeAcpBridgeEvent(event)) {
+      state = applyAcpChatEvent(state, chatEvent)
+    }
+  }
+
+  const tool = state.messages[0]?.parts[0]
+  assert.equal(tool?.type, 'tool')
+  assert.equal(tool.state, 'completed')
 })

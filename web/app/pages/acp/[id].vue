@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { PlanEntry } from '@agentclientprotocol/sdk'
 import type {
   AvailableCommand,
   PermissionOption,
@@ -9,7 +10,8 @@ import type {
 } from '~/types/acp-api'
 import type { AcpChatMessage } from '~/types/acp-chat'
 import type { ChatPromptAttachment, SlashCommand } from '~/types/chat'
-import { formatDetailValue, valueSummary } from '~/utils/toolCallDetails'
+import { isAcpPlanUpdate, normalizeAcpPlanEntries } from '~/utils/acpPlanNormalization'
+import { toolCallTitle } from '~/utils/toolCalls'
 
 type PendingPermission = {
   appRequestId: string
@@ -31,6 +33,7 @@ const input = ref('')
 const loading = ref(true)
 const activePromptTurnId = ref<string | null>(null)
 const pendingPermissions = ref<PendingPermission[]>([])
+const planEntries = ref<PlanEntry[]>([])
 const modelState = ref<SessionModelState | null>(null)
 const modeState = ref<SessionModeState | null>(null)
 const configOptions = ref<SessionConfigOption[]>([])
@@ -43,6 +46,18 @@ let eventSource: EventSource | undefined
 const submitting = computed(() => Boolean(activePromptTurnId.value))
 const submitStatus = computed(() => submitting.value ? 'streaming' : 'ready')
 const messages = computed(() => transcript.messages.value)
+const displayMessages = computed(() => groupProcessMessages(messages.value))
+const activeRunMessage = computed(() => {
+  if (!activePromptTurnId.value) return null
+  return [...displayMessages.value].reverse().find(message => message.turnId === activePromptTurnId.value && hasRunDetails(message)) || null
+})
+const currentActivityLabel = computed(() => {
+  const activeMessage = activeRunMessage.value
+  if (!activePromptTurnId.value) return null
+  if (!activeMessage) return 'Starting…'
+  return runActivityLabel(activeMessage) || 'Working…'
+})
+const showRunActivityIndicator = computed(() => Boolean(currentActivityLabel.value))
 const selectedModelId = computed({
   get: () => modelState.value?.currentModelId || undefined,
   set: (modelId: string | undefined) => {
@@ -67,6 +82,17 @@ const modeItems = computed(() => {
     value: mode.id
   })) || []
 })
+const reasoningConfigOption = computed(() => {
+  return configOptions.value.find((option) => {
+    if (option.type !== 'select') return false
+    const haystack = `${option.category || ''} ${option.id} ${option.name}`.toLowerCase()
+    return option.category === 'thought_level' || haystack.includes('reasoning') || haystack.includes('thought')
+  }) || null
+})
+const reasoningItems = computed(() => {
+  const option = reasoningConfigOption.value
+  return option ? configOptionItems(option) : modeItems.value
+})
 const workspaceItems = computed(() => context.workspaces.value.map(workspace => ({
   label: workspace.label,
   value: workspace.path
@@ -77,7 +103,11 @@ const workspaceLabel = computed(() => {
   return context.workspaces.value.find(workspace => workspace.path === selected)?.label || selected
 })
 const selectedModelLabel = computed(() => selectedModelId.value ? modelItems.value.find(item => item.value === selectedModelId.value)?.label : 'Model')
-const selectedModeLabel = computed(() => selectedModeId.value ? modeItems.value.find(item => item.value === selectedModeId.value)?.label : 'Reasoning')
+const selectedReasoningId = computed(() => {
+  const value = reasoningConfigOption.value?.currentValue ?? selectedModeId.value
+  return typeof value === 'string' && value ? value : undefined
+})
+const selectedModeLabel = computed(() => selectedReasoningId.value ? reasoningItems.value.find(item => item.value === selectedReasoningId.value)?.label : 'Reasoning')
 const visibleConfigOptions = computed(() => configOptions.value.filter(option => option.type === 'select' || option.type === 'boolean'))
 const hasSessionControls = computed(() => Boolean(modelItems.value.length || modeItems.value.length || visibleConfigOptions.value.length))
 const slashCommandItems = computed<SlashCommand[]>(() => availableCommands.value.map(command => ({
@@ -117,6 +147,7 @@ async function initializeSession() {
   error.value = null
   transcript.reset()
   pendingPermissions.value = []
+  planEntries.value = []
   modelState.value = null
   modeState.value = null
   configOptions.value = []
@@ -223,6 +254,9 @@ function handleBridgeEvent(event: Parameters<typeof transcript.applyBridgeEvent>
     if (update.sessionUpdate === 'available_commands_update') {
       availableCommands.value = update.availableCommands
     }
+    if (isAcpPlanUpdate(update)) {
+      planEntries.value = normalizeAcpPlanEntries(update.entries)
+    }
   }
   if (
     event.type === 'prompt.completed'
@@ -253,6 +287,44 @@ function partText(message: AcpChatMessage) {
   return message.parts.filter(part => part.type === 'text').map(part => part.text).join('')
 }
 
+function groupProcessMessages(source: AcpChatMessage[]): AcpChatMessage[] {
+  const grouped: AcpChatMessage[] = []
+
+  for (const message of source) {
+    const clone = cloneChatMessage(message)
+    const previous = grouped[grouped.length - 1]
+    if (previous && shouldMergeAssistantProcessMessage(previous, clone)) {
+      previous.parts.push(...clone.parts)
+      previous.id = `${previous.id}:${clone.id}`
+      continue
+    }
+    grouped.push(clone)
+  }
+
+  return grouped
+}
+
+function shouldMergeAssistantProcessMessage(previous: AcpChatMessage, next: AcpChatMessage) {
+  if (previous.role !== 'assistant' || next.role !== 'assistant') return false
+  if (hasTextParts(previous) || hasTextParts(next)) return false
+  return hasProcessParts(previous) && hasProcessParts(next)
+}
+
+function cloneChatMessage(message: AcpChatMessage): AcpChatMessage {
+  return {
+    ...message,
+    parts: message.parts.map(part => ({ ...part }))
+  }
+}
+
+function hasTextParts(message: AcpChatMessage) {
+  return message.parts.some(part => part.type === 'text' && part.text.trim())
+}
+
+function hasProcessParts(message: AcpChatMessage) {
+  return message.parts.some(part => part.type === 'tool' || part.type === 'reasoning' || part.type === 'event')
+}
+
 function reasoningText(message: AcpChatMessage) {
   return message.parts.filter(part => part.type === 'reasoning').map(part => part.text).join('')
 }
@@ -261,67 +333,31 @@ function toolParts(message: AcpChatMessage): AcpToolPart[] {
   return message.parts.filter((part): part is AcpToolPart => part.type === 'tool')
 }
 
-function toolLabel(part: AcpToolPart) {
-  return friendlyToolName(part.name || part.toolCallId)
+function runDetailSummary(message: AcpChatMessage) {
+  const tools = toolParts(message)
+  const failed = tools.filter(part => part.error || part.status === 'failed').length
+  const running = runningToolParts(message).length
+  const completed = tools.length - failed - running
+  const parts: string[] = []
+  if (running) parts.push(`${running} running`)
+  if (completed) parts.push(`${completed} completed`)
+  if (failed) parts.push(`${failed} failed`)
+  return parts.join(' · ')
 }
 
-function toolSuffix(part: AcpToolPart) {
-  if (part.error) return 'Failed'
-  return part.state === 'completed' ? 'Completed' : 'Running'
+function runningToolParts(message: AcpChatMessage) {
+  return toolParts(message).filter(part => part.state !== 'completed' && !part.error)
 }
 
-function toolIcon(part: AcpToolPart) {
-  const name = normalizedToolName(part.name)
-  if (name.includes('terminal') || name.includes('shell') || name.includes('command')) return 'i-lucide-terminal'
-  if (name.includes('search') || name.includes('grep')) return 'i-lucide-search'
-  if (name.includes('read') || name.includes('file')) return 'i-lucide-file-text'
-  if (name.includes('browser')) return 'i-lucide-globe'
-  if (name.includes('skill')) return 'i-lucide-book-open'
-  return 'i-lucide-wrench'
+function runActivityLabel(message: AcpChatMessage) {
+  const runningTool = runningToolParts(message)[0]
+  if (runningTool) return `Running ${toolCallTitle(runningTool)}`
+  if (message.turnId && message.turnId === activePromptTurnId.value && reasoningText(message).trim()) return 'Thinking'
+  return ''
 }
 
-function toolSummary(part: AcpToolPart) {
-  if (part.error) return part.error
-  if (part.output !== undefined) return valueSummary(part.output)
-  if (part.input !== undefined) return valueSummary(part.input)
-  return part.state === 'completed' ? 'Finished' : 'Waiting for result…'
-}
-
-function acpToolDetailSections(part: AcpToolPart) {
-  return [
-    { label: 'Input', value: part.input },
-    { label: 'Output', value: part.output }
-  ].filter(section => section.value !== undefined && section.value !== null && section.value !== '')
-}
-
-function normalizedToolName(name: string) {
-  return name.replace(/^functions\./, '').trim()
-}
-
-function friendlyToolName(name: string) {
-  const normalized = normalizedToolName(name)
-  const known: Record<string, string> = {
-    terminal: 'Run terminal command',
-    execute: 'Run command',
-    search: 'Search files',
-    read: 'Read file',
-    search_files: 'Search files',
-    read_file: 'Read file',
-    write_file: 'Write file',
-    patch: 'Edit file',
-    browser_navigate: 'Open browser',
-    browser_click: 'Click browser element',
-    browser_snapshot: 'Inspect browser page',
-    browser_console: 'Inspect browser console',
-    skill_view: 'Load skill',
-    delegate_task: 'Delegate task'
-  }
-  if (known[normalized]) return known[normalized]
-  return normalized
-    .replace(/^mcp_/, '')
-    .replace(/_/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/^./, char => char.toUpperCase())
+function hasRunDetails(message: AcpChatMessage) {
+  return toolParts(message).length > 0 || Boolean(reasoningText(message))
 }
 
 function appendVoiceText(text: string) {
@@ -357,6 +393,11 @@ function configOptionItems(option: SessionConfigOption) {
 }
 
 async function updateSessionMode(modeId: string) {
+  const option = reasoningConfigOption.value
+  if (option) {
+    await updateConfigOption(option, modeId)
+    return
+  }
   if (modeId === modeState.value?.currentModeId) return
   updatingSessionConfig.value = true
   try {
@@ -391,7 +432,16 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
       option.id,
       option.type === 'boolean' ? { type: 'boolean', value: Boolean(value) } : { value: String(value) }
     )
-    configOptions.value = result.configOptions
+    if (result.configOptions.length) {
+      configOptions.value = result.configOptions
+    } else {
+      configOptions.value = configOptions.value.map((item) => {
+        if (item.id !== option.id) return item
+        return item.type === 'boolean'
+          ? { ...item, currentValue: Boolean(value) }
+          : { ...item, currentValue: String(value) }
+      })
+    }
   } catch (err) {
     showError(err, `Failed to update ${option.name}`)
   } finally {
@@ -458,9 +508,14 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
               </div>
             </UCard>
 
+            <AcpPlanCard
+              v-if="planEntries.length"
+              :entries="planEntries"
+            />
+
             <UChatMessages
               v-if="!loading || messages.length"
-              :messages="messages"
+              :messages="displayMessages"
               :status="submitStatus"
               :auto-scroll="true"
             >
@@ -471,41 +526,58 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                     :markdown="partText(message)"
                     class="prose prose-sm dark:prose-invert max-w-none"
                   />
-                  <UChatReasoning
-                    v-if="reasoningText(message)"
-                    :text="reasoningText(message)"
-                  />
-                  <UChatTool
-                    v-for="part in toolParts(message)"
-                    :key="part.toolCallId"
-                    :text="toolLabel(part)"
-                    :suffix="toolSuffix(part)"
-                    :icon="toolIcon(part)"
-                    :loading="part.state !== 'completed' && !part.error"
-                    :streaming="part.state !== 'completed' && !part.error"
-                    chevron="leading"
-                    variant="inline"
-                    :ui="{ body: 'space-y-2 pt-1.5 text-xs text-dimmed' }"
+                  <details
+                    v-if="hasRunDetails(message)"
+                    class="group/run-details rounded-lg border border-default bg-muted/20 text-sm"
                   >
-                    <p
-                      class="truncate text-xs"
-                      :class="part.error ? 'text-error' : 'text-muted'"
-                      :title="toolSummary(part)"
+                    <summary
+                      class="flex w-full cursor-pointer list-none items-center gap-2 overflow-hidden px-3 py-2 text-left text-muted transition-colors hover:text-default [&::-webkit-details-marker]:hidden"
                     >
-                      {{ toolSummary(part) }}
-                    </p>
-                    <div
-                      v-for="section in acpToolDetailSections(part)"
-                      :key="section.label"
-                      class="space-y-1"
-                    >
-                      <p class="text-[11px] font-medium uppercase tracking-wide text-dimmed">{{ section.label }}</p>
-                      <pre class="max-h-40 overflow-auto rounded-md bg-muted/40 p-2 text-[11px] leading-4 text-muted">{{ formatDetailValue(section.value) }}</pre>
+                      <UIcon
+                        name="i-lucide-chevron-right"
+                        class="size-3.5 shrink-0 text-dimmed transition-transform group-open/run-details:rotate-90"
+                      />
+                      <UIcon
+                        :name="toolParts(message).some(part => part.error) ? 'i-lucide-circle-alert' : 'i-lucide-list-tree'"
+                        class="size-3.5 shrink-0"
+                        :class="toolParts(message).some(part => part.error) ? 'text-error' : 'text-dimmed'"
+                      />
+                      <span class="shrink-0 font-medium text-toned">Run details</span>
+                      <span v-if="runDetailSummary(message)" class="min-w-0 truncate text-dimmed">
+                        {{ runDetailSummary(message) }}
+                      </span>
+                    </summary>
+
+                    <div class="space-y-2 border-t border-default px-3 py-2">
+                      <UChatReasoning
+                        v-if="reasoningText(message)"
+                        :text="reasoningText(message)"
+                        :ui="{ body: 'max-h-[200px] pt-1 overflow-y-auto text-sm text-dimmed whitespace-pre-wrap' }"
+                      />
+
+                      <AcpToolCallItem
+                        v-for="part in toolParts(message)"
+                        :key="part.toolCallId"
+                        :part="part"
+                      />
                     </div>
-                  </UChatTool>
+                  </details>
                 </div>
               </template>
             </UChatMessages>
+
+            <UChatMessage
+              v-if="showRunActivityIndicator"
+              id="run-activity-indicator"
+              role="assistant"
+              variant="naked"
+              :parts="[]"
+              class="px-2.5"
+            >
+              <template #content>
+                <AcpRunActivityIndicator :label="currentActivityLabel || 'Working…'" />
+              </template>
+            </UChatMessage>
           </div>
         </div>
 
@@ -543,8 +615,8 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                   :models="modelItems"
                   :selected-model="selectedModelId"
                   :model-label="selectedModelLabel || 'Model'"
-                  :modes="modeItems"
-                  :selected-mode="selectedModeId"
+                  :modes="reasoningItems"
+                  :selected-mode="selectedReasoningId"
                   :reasoning-label="selectedModeLabel || 'Reasoning'"
                   :updating-session-config="updatingSessionConfig"
                   @stop="stopPrompt"
