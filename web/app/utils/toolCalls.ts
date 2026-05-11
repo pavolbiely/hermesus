@@ -109,9 +109,9 @@ export function toolRawName(part: Pick<ToolLikePart, 'name' | 'input' | 'kind'>)
 
 export function toolDisplayInfo(part: ToolLikePart): ToolDisplayInfo {
   const rawName = toolRawName(part)
-  const lookupName = rawName.replace(/^functions\./, '')
+  const lookupName = lookupToolName(rawName)
   const definition = TOOL_DISPLAY_NAMES[lookupName] || fallbackToolDefinition(rawName, part.kind)
-  const summary = toolInputSummary(part)
+  const summary = toolInputSummary(part) || toolOutputSummary(part)
 
   return {
     ...definition,
@@ -148,6 +148,12 @@ export function toolStatusColor(part: Pick<ToolLikePart, 'status'> & { state?: s
   if (part.status === 'completed' || part.state === 'completed') return 'neutral'
   if (part.status === 'pending') return 'warning'
   return 'primary'
+}
+
+function lookupToolName(rawName: string) {
+  return rawName
+    .replace(/^functions\./, '')
+    .replace(/\s+\([^)]*\):\s+.*$/, '')
 }
 
 function fallbackToolDefinition(rawName: string, kind?: string | null): ToolDisplayDefinition {
@@ -324,7 +330,8 @@ function candidateSummary(candidates: Array<{ key: string, value: string }>): st
 
 function titleDetailSummary(toolName: string) {
   const [, detail] = toolName.split(/:\s+(.+)/, 2)
-  return detail ? compactText(detail) : undefined
+  if (!detail || detail.trim() === '?') return undefined
+  return compactText(detail)
 }
 
 function locationSummary(locations: ToolLikePart['locations']): string | undefined {
@@ -373,7 +380,15 @@ function bestInputSummary(input: unknown, toolName = '', locations?: ToolLikePar
 function outputStatusSummary(output: unknown) {
   const normalized = normalizeSummaryValue(output)
 
-  if (normalized && typeof normalized === 'object' && !Array.isArray(normalized)) {
+  if (Array.isArray(normalized)) {
+    const diffPath = normalized
+      .map(item => item && typeof item === 'object' && !Array.isArray(item) ? (item as RecordValue).path : undefined)
+      .find((path): path is string => typeof path === 'string' && path.trim().length > 0)
+    if (diffPath) return compactPath(diffPath)
+    return `${normalized.length} items`
+  }
+
+  if (normalized && typeof normalized === 'object') {
     const record = normalized as RecordValue
     const error = primitiveSummary('error', record.error) || primitiveSummary('message', record.message)
     if (record.success === false && error) return error
@@ -387,7 +402,6 @@ function outputStatusSummary(output: unknown) {
     if (record.success === true) return 'done'
   }
 
-  if (Array.isArray(normalized)) return `${normalized.length} items`
   if (typeof normalized === 'string') return compactText(normalized)
   return undefined
 }

@@ -2,6 +2,7 @@
 import type { PlanEntry } from '@agentclientprotocol/sdk'
 import type {
   AvailableCommand,
+  AcpListSessionsResponse,
   AcpTranscriptSnapshot,
   PermissionOption,
   RequestPermissionRequest,
@@ -33,17 +34,12 @@ import {
   type AcpToolPart
 } from '~/utils/acpRunDetails'
 import { scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender } from '~/utils/chatInitialScroll'
+import { acpSidebarSessions } from '~/utils/acpSidebarSessions'
 import { toolCallTitle } from '~/utils/toolCalls'
 
 type PendingPermission = {
   appRequestId: string
   request: RequestPermissionRequest
-}
-
-type CachedSessionView = {
-  transcript: AcpTranscriptSnapshot
-  hasOlderMessages: boolean
-  nextTranscriptBefore: number | null
 }
 
 type MessageAction = {
@@ -63,10 +59,11 @@ type AcpChatMessageWithActions = AcpChatMessage & {
 const route = useRoute()
 const router = useRouter()
 const api = useAcpApi()
+const sidebarSessionsData = useNuxtData<AcpListSessionsResponse>('acp-sidebar-sessions')
 const context = useChatComposerContext()
 const pendingAcpPrompts = usePendingAcpPrompt()
+const activeAcpPrompts = useAcpActivePrompts()
 const transcript = useAcpTranscript()
-const sessionViewCache = useState<Record<string, CachedSessionView>>('acp-session-view-cache', () => ({}))
 const readAloud = useAcpMessageReadAloud()
 const toast = useToast()
 
@@ -78,10 +75,16 @@ const runDetailsElements = new Map<string, HTMLElement>()
 const runDetailsScrollCleanup = new Map<string, () => void>()
 const { style: messagesScrollShadowStyle } = useScrollShadow(messagesScrollContainer)
 const loading = ref(true)
+const initialTranscriptScrollPending = ref(true)
 const activePromptTurnId = ref<string | null>(null)
+const activePromptSessionId = ref<string | null>(null)
 const activePromptStartedAt = ref<number | null>(null)
 const activePromptClockNow = ref(Date.now())
 const pendingPermissions = ref<PendingPermission[]>([])
+const editingMessageId = ref<string | null>(null)
+const editingText = ref('')
+const editingMessageContainer = ref<HTMLElement | null>(null)
+const savingEditedMessageId = ref<string | null>(null)
 const planEntries = ref<PlanEntry[]>([])
 const modelState = ref<SessionModelState | null>(null)
 const modeState = ref<SessionModeState | null>(null)
@@ -99,13 +102,41 @@ let sessionLoadSequence = 0
 let sessionLoadAbortController: AbortController | undefined
 let displayedSessionId: string | null = null
 let latestInitialScrollSequence = 0
+let latestSubmitScrollSequence = 0
 
 const transcriptPageSize = 80
 const stillWorkingDelayMs = 10_000
 
+type ChatSubmitStatus = 'ready' | 'submitted' | 'streaming'
+
+const submitStatusState = ref<ChatSubmitStatus>('ready')
 const submitting = computed(() => Boolean(activePromptTurnId.value))
-const submitStatus = computed(() => submitting.value ? 'streaming' : 'ready')
+const submitStatus = computed(() => submitting.value ? submitStatusState.value : 'ready')
 const messages = computed(() => transcript.messages.value)
+const currentAcpSession = computed(() => sidebarSessionsData.data.value?.sessions.find(session => session.sessionId === sessionId.value) || null)
+const currentSidebarSession = computed(() => acpSidebarSessions(sidebarSessionsData.data.value).find(session => session.id === sessionId.value) || null)
+const inferredChatTitle = computed(() => {
+  const firstUserMessage = messages.value.find(message => message.role === 'user')
+  const text = firstUserMessage ? acpMessageText(firstUserMessage).trim().replace(/\s+/g, ' ') : ''
+  return text.length > 80 ? `${text.slice(0, 77)}…` : text
+})
+const chatHeaderTitle = computed(() => {
+  const currentAcp = currentAcpSession.value
+  const acpTitle = currentAcp?.appMetadata?.title?.trim()
+    || currentAcp?.appLineage?.rootTitle?.trim()
+    || currentAcp?.title?.trim()
+  if (acpTitle) return acpTitle
+
+  const currentSession = currentSidebarSession.value
+  const title = currentSession?.title?.trim()
+  if (title) return title
+
+  const preview = currentSession?.preview?.trim()
+  if (preview && preview !== 'ACP chat') return preview
+
+  if (inferredChatTitle.value) return inferredChatTitle.value
+  return loading.value ? 'Loading chat…' : 'Untitled chat'
+})
 const displayMessages = computed<AcpChatMessageWithActions[]>(() => groupProcessMessages(messages.value).map(withNativeMessageActions))
 const chatUserProps = {
   side: 'right' as const,
@@ -171,7 +202,7 @@ const reasoningConfigOption = computed(() => {
 })
 const reasoningItems = computed(() => {
   const option = reasoningConfigOption.value
-  return option ? configOptionItems(option) : modeItems.value
+  return [...(option ? configOptionItems(option) : modeItems.value)].reverse()
 })
 const workspaceItems = computed(() => context.workspaces.value.map(workspace => ({
   label: workspace.label,
@@ -214,7 +245,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  cacheCurrentSessionView(displayedSessionId)
   abortActiveSessionLoad()
   closeEvents?.()
   stopActivePromptClock()
@@ -226,13 +256,21 @@ watch(sessionId, (newSessionId) => {
   void initializeSession(newSessionId)
 })
 
-watch(activePromptTurnId, (turnId) => {
+watch(activePromptTurnId, (turnId, previousTurnId) => {
   if (!turnId) {
+    submitStatusState.value = 'ready'
+    if (activePromptSessionId.value) {
+      activeAcpPrompts.markFinished(activePromptSessionId.value, previousTurnId)
+      activePromptSessionId.value = null
+    }
     activePromptStartedAt.value = null
     stopActivePromptClock()
     return
   }
 
+  if (submitStatusState.value === 'ready') submitStatusState.value = 'streaming'
+  activePromptSessionId.value = sessionId.value
+  activeAcpPrompts.markRunning(sessionId.value, turnId)
   activePromptStartedAt.value = activeTurnCreatedAtMs(turnId) ?? Date.now()
   startActivePromptClock()
 })
@@ -240,7 +278,6 @@ watch(activePromptTurnId, (turnId) => {
 async function initializeSession(targetSessionId = sessionId.value) {
   if (!targetSessionId) return
 
-  cacheCurrentSessionView(displayedSessionId)
   abortActiveSessionLoad()
   closeEvents?.()
   closeEvents = undefined
@@ -252,15 +289,9 @@ async function initializeSession(targetSessionId = sessionId.value) {
   displayedSessionId = targetSessionId
 
   loading.value = true
+  initialTranscriptScrollPending.value = true
   error.value = null
   resetSessionView()
-
-  const cached = sessionViewCache.value[targetSessionId]
-  if (cached) {
-    restoreCachedSessionView(cached)
-    loading.value = false
-    scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
-  }
 
   try {
     const stored = await api.readTranscript(
@@ -277,14 +308,14 @@ async function initializeSession(targetSessionId = sessionId.value) {
       hasOlderMessages.value = stored.hasMore
       nextTranscriptBefore.value = stored.nextBefore
       loading.value = false
-      cacheCurrentSessionView(targetSessionId)
       scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
     }
 
-    eventSource = api.subscribeSession(targetSessionId, handleBridgeEvent, () => {
-      if (targetSessionId === sessionId.value) error.value ||= 'ACP event stream disconnected.'
-    })
-    closeEvents = () => eventSource?.close()
+    if (initializedFromProjection) {
+      subscribeToSessionEvents(targetSessionId)
+      await processQueuedPrompt(targetSessionId)
+      return
+    }
 
     const loaded = await api.loadSession(targetSessionId, { signal: abortController.signal })
     if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
@@ -292,39 +323,11 @@ async function initializeSession(targetSessionId = sessionId.value) {
     modelState.value = loaded.models || modelState.value
     modeState.value = loaded.modes || modeState.value
     configOptions.value = loaded.configOptions || configOptions.value
-    if (initializedFromProjection) {
-      const refreshed = await api.readTranscript(
-        targetSessionId,
-        { limit: transcriptPageSize },
-        { signal: abortController.signal }
-      )
-      if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
-      if (refreshed.transcript) {
-        applyTranscriptSnapshot(refreshed.transcript)
-        hasOlderMessages.value = refreshed.hasMore
-        nextTranscriptBefore.value = refreshed.nextBefore
-        cacheCurrentSessionView(targetSessionId)
-        scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
-      }
-    } else {
-      loaded.events.forEach(handleBridgeEvent)
-      cacheCurrentSessionView(targetSessionId)
-      scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
-    }
+    loaded.events.forEach(handleBridgeEvent)
+    scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
 
-    const queuedPrompt = pendingAcpPrompts.value[targetSessionId]
-    if (queuedPrompt) {
-      delete pendingAcpPrompts.value[targetSessionId]
-      await router.replace({ path: route.path, query: {} })
-      await sendPrompt(queuedPrompt.message, queuedPrompt.attachments)
-      return
-    }
-
-    const queuedPromptText = typeof route.query.prompt === 'string' ? route.query.prompt : ''
-    if (queuedPromptText.trim()) {
-      await router.replace({ path: route.path, query: {} })
-      await sendPrompt(queuedPromptText)
-    }
+    subscribeToSessionEvents(targetSessionId)
+    await processQueuedPrompt(targetSessionId)
   } catch (err) {
     if (isAbortError(err)) return
     if (!isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) return
@@ -334,6 +337,32 @@ async function initializeSession(targetSessionId = sessionId.value) {
     if (isCurrentSessionLoad(loadSequence, targetSessionId, abortController)) {
       loading.value = false
     }
+  }
+}
+
+function subscribeToSessionEvents(targetSessionId: string) {
+  const replayOptions = transcript.state.value.cursor === undefined
+    ? { replay: false }
+    : { afterSequence: transcript.state.value.cursor }
+  eventSource = api.subscribeSession(targetSessionId, handleBridgeEvent, () => {
+    if (targetSessionId === sessionId.value) error.value ||= 'ACP event stream disconnected.'
+  }, replayOptions)
+  closeEvents = () => eventSource?.close()
+}
+
+async function processQueuedPrompt(targetSessionId: string) {
+  const queuedPrompt = pendingAcpPrompts.value[targetSessionId]
+  if (queuedPrompt) {
+    delete pendingAcpPrompts.value[targetSessionId]
+    await router.replace({ path: route.path, query: {} })
+    await sendPrompt(queuedPrompt.message, queuedPrompt.attachments)
+    return
+  }
+
+  const queuedPromptText = typeof route.query.prompt === 'string' ? route.query.prompt : ''
+  if (queuedPromptText.trim()) {
+    await router.replace({ path: route.path, query: {} })
+    await sendPrompt(queuedPromptText)
   }
 }
 
@@ -350,6 +379,7 @@ function abortActiveSessionLoad() {
   sessionLoadAbortController?.abort()
   sessionLoadAbortController = undefined
   latestInitialScrollSequence++
+  latestSubmitScrollSequence++
 }
 
 function isCurrentSessionLoad(loadSequence: number, targetSessionId: string, abortController: AbortController) {
@@ -363,53 +393,10 @@ function isAbortError(err: unknown) {
     || (err instanceof Error && err.name === 'AbortError')
 }
 
-function restoreCachedSessionView(view: CachedSessionView) {
-  applyTranscriptSnapshot(clonePlain(view.transcript))
-  hasOlderMessages.value = view.hasOlderMessages
-  nextTranscriptBefore.value = view.nextTranscriptBefore
-}
-
-function cacheCurrentSessionView(targetSessionId: string | null) {
-  if (!targetSessionId || displayedSessionId !== targetSessionId) return
-  if (!messages.value.length && !pendingPermissions.value.length && !planEntries.value.length) return
-
-  sessionViewCache.value = {
-    ...sessionViewCache.value,
-    [targetSessionId]: clonePlain({
-      transcript: {
-        sessionId: targetSessionId,
-        cursor: transcript.state.value.cursor,
-        updatedAt: new Date().toISOString(),
-        messages: transcript.messages.value,
-        pendingPermissions: pendingPermissions.value,
-        planEntries: planEntries.value,
-        prompt: activePromptTurnId.value
-          ? { status: 'running', turnId: activePromptTurnId.value }
-          : null,
-        models: modelState.value,
-        modes: modeState.value,
-        configOptions: configOptions.value,
-        availableCommands: availableCommands.value
-      },
-      hasOlderMessages: hasOlderMessages.value,
-      nextTranscriptBefore: nextTranscriptBefore.value
-    })
-  }
-}
-
-function clonePlain<T>(value: T): T {
-  try {
-    return structuredClone(value)
-  } catch {
-    return JSON.parse(JSON.stringify(value)) as T
-  }
-}
-
 async function sendPrompt(message: string, attachments: ChatPromptAttachment[] = []) {
   error.value = null
   const turnId = crypto.randomUUID()
   const messageId = crypto.randomUUID()
-  activePromptTurnId.value = turnId
   transcript.applyEvent({
     type: 'user.message',
     eventId: `optimistic-user:${turnId}`,
@@ -419,7 +406,10 @@ async function sendPrompt(message: string, attachments: ChatPromptAttachment[] =
     text: message,
     occurredAt: new Date().toISOString()
   })
-  cacheCurrentSessionView(sessionId.value)
+  activePromptTurnId.value = turnId
+  submitStatusState.value = 'submitted'
+  scrollSubmittedMessageToBottom(turnId)
+  promoteSubmittedStatusToStreaming(turnId)
 
   try {
     await api.startPrompt(sessionId.value, {
@@ -429,6 +419,7 @@ async function sendPrompt(message: string, attachments: ChatPromptAttachment[] =
     })
   } catch (err) {
     if (activePromptTurnId.value === turnId) activePromptTurnId.value = null
+    activeAcpPrompts.markFinished(sessionId.value, turnId)
     showError(err, 'Failed to send prompt')
   }
 }
@@ -440,6 +431,7 @@ async function stopPrompt() {
   } catch (err) {
     showError(err, 'Failed to cancel prompt')
   } finally {
+    activeAcpPrompts.markFinished(sessionId.value, activePromptTurnId.value)
     activePromptTurnId.value = null
   }
 }
@@ -459,11 +451,14 @@ function scrollInitialTranscriptToBottom(loadSequence: number, targetSessionId: 
     if (!isCurrentLoad()) return
 
     scrollElementTreeToBottom(messagesScrollContainer.value)
+
     await scrollElementTreeToBottomAfterRender(messagesScrollContainer.value, {
       waitForFrame: waitForAnimationFrame,
       stableFrameCount: 2,
       maxFrameCount: 10
     })
+
+    if (isCurrentLoad()) initialTranscriptScrollPending.value = false
   })()
 }
 
@@ -471,6 +466,48 @@ function waitForAnimationFrame() {
   return new Promise<void>((resolve) => {
     requestAnimationFrame(() => resolve())
   })
+}
+
+function promoteSubmittedStatusToStreaming(turnId: string) {
+  if (!import.meta.client) {
+    if (activePromptTurnId.value === turnId && submitStatusState.value === 'submitted') {
+      submitStatusState.value = 'streaming'
+    }
+    return
+  }
+
+  requestAnimationFrame(() => {
+    if (activePromptTurnId.value === turnId && submitStatusState.value === 'submitted') {
+      submitStatusState.value = 'streaming'
+    }
+  })
+}
+
+function scrollSubmittedMessageToBottom(turnId: string) {
+  if (!import.meta.client) return
+
+  const scrollSequence = ++latestSubmitScrollSequence
+  const isCurrentSubmit = () => (
+    scrollSequence === latestSubmitScrollSequence
+    && activePromptTurnId.value === turnId
+    && targetIsCurrentSession(displayedSessionId)
+  )
+
+  void (async () => {
+    await nextTick()
+    if (!isCurrentSubmit()) return
+
+    scrollElementTreeToBottom(messagesScrollContainer.value)
+    await scrollElementTreeToBottomAfterRender(messagesScrollContainer.value, {
+      waitForFrame: waitForAnimationFrame,
+      stableFrameCount: 2,
+      maxFrameCount: 8
+    })
+  })()
+}
+
+function targetIsCurrentSession(targetSessionId: string | null) {
+  return Boolean(targetSessionId && targetSessionId === sessionId.value)
 }
 
 function startActivePromptClock() {
@@ -511,6 +548,7 @@ function formatElapsedDuration(milliseconds: number) {
 }
 
 function resetSessionView() {
+  initialTranscriptScrollPending.value = true
   transcript.reset()
   pendingPermissions.value = []
   planEntries.value = []
@@ -522,6 +560,7 @@ function resetSessionView() {
   hasOlderMessages.value = false
   nextTranscriptBefore.value = null
   activePromptTurnId.value = null
+  submitStatusState.value = 'ready'
 }
 
 function applyTranscriptSnapshot(snapshot: AcpTranscriptSnapshot) {
@@ -533,6 +572,7 @@ function applyTranscriptSnapshot(snapshot: AcpTranscriptSnapshot) {
   configOptions.value = snapshot.configOptions
   availableCommands.value = snapshot.availableCommands
   activePromptTurnId.value = snapshot.prompt?.status === 'running' ? snapshot.prompt.turnId || null : null
+  submitStatusState.value = activePromptTurnId.value ? 'streaming' : 'ready'
 }
 
 async function loadOlderMessages() {
@@ -550,7 +590,6 @@ async function loadOlderMessages() {
     if (response.transcript) transcript.prependMessages(response.transcript.messages)
     hasOlderMessages.value = response.hasMore
     nextTranscriptBefore.value = response.nextBefore
-    cacheCurrentSessionView(sessionId.value)
     await nextTick()
     if (container) {
       container.scrollTop = container.scrollHeight - previousScrollHeight + previousScrollTop
@@ -595,10 +634,10 @@ function handleBridgeEvent(event: Parameters<typeof transcript.applyBridgeEvent>
     || event.type === 'prompt.cancelled'
   ) {
     if (!('turnId' in event) || event.turnId === activePromptTurnId.value) {
+      activeAcpPrompts.markFinished(event.sessionId, 'turnId' in event ? event.turnId : null)
       activePromptTurnId.value = null
     }
   }
-  cacheCurrentSessionView(event.sessionId)
 }
 
 function showError(err: unknown, fallback: string) {
@@ -690,7 +729,12 @@ async function scrollRunDetailsExpansionIntoView(messageId: string) {
 
 function withNativeMessageActions(message: AcpChatMessage): AcpChatMessageWithActions {
   const text = acpMessageText(message).trim()
-  if (message.role !== 'user' || !text || message.turnId === activePromptTurnId.value) return message
+  if (
+    message.role !== 'user'
+    || !text
+    || message.turnId === activePromptTurnId.value
+    || editingMessageId.value === message.id
+  ) return message
 
   return {
     ...message,
@@ -704,7 +748,7 @@ function withNativeMessageActions(message: AcpChatMessage): AcpChatMessageWithAc
         label: 'Edit message',
         icon: 'i-lucide-pencil',
         disabled: submitting.value,
-        onClick: () => editUserMessage(message)
+        onClick: () => startEditingUserMessage(message)
       }
     ]
   }
@@ -760,11 +804,7 @@ function hasAssistantFooter(message: AcpChatMessage) {
 }
 
 function messageMetadataItems(message: AcpChatMessage) {
-  if (
-    message.role !== 'assistant'
-    || message.turnId === activePromptTurnId.value
-    || !acpMessageText(message).trim()
-  ) return []
+  if (!acpMessageText(message).trim()) return []
 
   const items: Array<{ key: string, label: string, title?: string }> = []
   if (message.createdAt) {
@@ -774,6 +814,10 @@ function messageMetadataItems(message: AcpChatMessage) {
       title: acpMessageTimestampDetails(message.createdAt)
     })
   }
+
+  if (message.role === 'user') return items
+
+  if (message.role !== 'assistant' || message.turnId === activePromptTurnId.value) return []
 
   const duration = formatAcpMessageDuration(message)
   if (duration) {
@@ -836,13 +880,50 @@ async function copyMessageText(message: AcpChatMessage) {
   }
 }
 
-async function editUserMessage(message: AcpChatMessage) {
+function setEditingMessageContainer(el: unknown) {
+  editingMessageContainer.value = el instanceof HTMLElement ? el : null
+}
+
+function cancelEditingUserMessage() {
+  editingMessageId.value = null
+  editingText.value = ''
+  editingMessageContainer.value = null
+}
+
+async function focusEditingTextarea() {
+  await nextTick()
+  const textarea = editingMessageContainer.value?.querySelector('textarea')
+  if (!textarea) return
+  textarea.focus()
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+}
+
+async function startEditingUserMessage(message: AcpChatMessage) {
   const text = acpMessageText(message).trim()
   if (!text || submitting.value) return
 
-  input.value = text
-  await nextTick()
-  promptContainer.value?.querySelector('textarea')?.focus()
+  editingMessageId.value = message.id
+  editingText.value = text
+  await focusEditingTextarea()
+}
+
+async function saveEditedUserMessage(message: AcpChatMessage) {
+  const text = editingText.value.trim()
+  if (!text || submitting.value || savingEditedMessageId.value) return
+
+  const previousText = acpMessageText(message).trim()
+  if (text === previousText) {
+    cancelEditingUserMessage()
+    return
+  }
+
+  savingEditedMessageId.value = message.id
+  try {
+    cancelEditingUserMessage()
+    await sendPrompt(text)
+  } finally {
+    savingEditedMessageId.value = null
+  }
 }
 
 function groupProcessMessages(source: AcpChatMessage[]): AcpChatMessage[] {
@@ -943,6 +1024,23 @@ function hasRunDetails(message: AcpChatMessage) {
   return toolParts(message).length > 0 || hasThoughtActivity(message)
 }
 
+function isActiveRunDetailMessage(message: AcpChatMessage) {
+  return Boolean(activePromptTurnId.value && message.turnId === activePromptTurnId.value)
+}
+
+function shouldRenderRunDetailsBeforeMessage(message: AcpChatMessage) {
+  return isActiveRunDetailMessage(message) && hasRunDetails(message)
+}
+
+function shouldDefaultOpenThought(message: AcpChatMessage, groupIndex: number) {
+  return isActiveRunDetailMessage(message) && groupIndex === runDetailGroups(message).length - 1
+}
+
+function runDetailsSpacingClass(message: AcpChatMessage, position: 'before' | 'after') {
+  if (position === 'before') return partText(message) ? 'mb-4' : 'mb-2'
+  return hasAssistantFooter(message) || partText(message) ? 'mt-4' : 'mt-2'
+}
+
 function appendVoiceText(text: string) {
   input.value = input.value ? `${input.value.trimEnd()} ${text}` : text
 }
@@ -969,10 +1067,17 @@ function configOptionItems(option: SessionConfigOption) {
   if (option.type !== 'select') return []
   return option.options.flatMap((item) => {
     if ('options' in item) {
-      return item.options.map(child => ({ label: `${item.name}: ${child.name}`, value: child.value }))
+      return item.options
+        .filter(child => isSupportedReasoningOption(option, child.value))
+        .map(child => ({ label: `${item.name}: ${child.name}`, value: child.value }))
     }
-    return [{ label: item.name, value: item.value }]
+    return isSupportedReasoningOption(option, item.value) ? [{ label: item.name, value: item.value }] : []
   })
+}
+
+function isSupportedReasoningOption(option: SessionConfigOption, value: string) {
+  if (option.id !== 'reasoning_effort') return true
+  return value !== 'none' && value !== 'minimal'
 }
 
 async function updateSessionMode(modeId: string) {
@@ -1036,7 +1141,7 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="ACP chat" />
+      <AppNavbar :title="chatHeaderTitle" />
     </template>
 
     <template #body>
@@ -1046,7 +1151,10 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
           class="min-h-0 flex-1 overflow-y-auto px-4 py-6"
           :style="messagesScrollShadowStyle"
         >
-          <div class="mx-auto w-full max-w-3xl space-y-4">
+          <div
+            class="mx-auto w-full max-w-3xl space-y-4"
+            :class="initialTranscriptScrollPending && messages.length ? 'invisible' : ''"
+          >
             <UAlert
               v-if="error"
               color="error"
@@ -1126,13 +1234,90 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
             >
               <template #content="{ message }: { message: AcpChatMessage }">
                 <template v-if="message.role === 'user'">
-                  {{ partText(message) }}
+                  <div
+                    v-if="editingMessageId === message.id"
+                    :ref="element => setEditingMessageContainer(element)"
+                    class="min-w-[min(28rem,calc(100vw-4rem))] space-y-2"
+                  >
+                    <UTextarea
+                      v-model="editingText"
+                      :maxrows="10"
+                      autofocus
+                      autoresize
+                      class="w-full"
+                      :disabled="submitting || savingEditedMessageId === message.id"
+                      @keydown.esc.prevent="cancelEditingUserMessage"
+                      @keydown.meta.enter.prevent="saveEditedUserMessage(message)"
+                      @keydown.ctrl.enter.prevent="saveEditedUserMessage(message)"
+                    />
+                    <div class="flex justify-end gap-2">
+                      <UButton
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        label="Cancel"
+                        :disabled="savingEditedMessageId === message.id"
+                        @click="cancelEditingUserMessage"
+                      />
+                      <UButton
+                        size="xs"
+                        color="primary"
+                        label="Send edited"
+                        :loading="savingEditedMessageId === message.id"
+                        :disabled="!editingText.trim() || submitting"
+                        @click="saveEditedUserMessage(message)"
+                      />
+                    </div>
+                  </div>
+                  <template v-else>
+                    {{ partText(message) }}
+                  </template>
                 </template>
                 <div v-else>
-                  <Comark
+                  <UChatTool
+                    v-if="shouldRenderRunDetailsBeforeMessage(message)"
+                    text="Run details"
+                    :suffix="runDetailSummary(message)"
+                    :icon="toolParts(message).some(part => part.error) ? 'i-lucide-circle-alert' : 'i-lucide-list-tree'"
+                    variant="card"
+                    chevron="trailing"
+                    :default-open="isActiveRunDetailMessage(message)"
+                    :ref="element => setRunDetailsElement(message.id, element)"
+                    :class="runDetailsSpacingClass(message, 'before')"
+                    :ui="{
+                      root: 'bg-muted/20',
+                      trigger: 'px-3 py-2',
+                      leadingIcon: toolParts(message).some(part => part.error) ? 'text-error' : 'text-dimmed',
+                      body: 'max-h-none space-y-2 overflow-visible border-t border-default p-3 text-sm text-dimmed whitespace-normal'
+                    }"
+                    @update:open="open => onRunDetailsOpen(open, message.id)"
+                  >
+                    <div
+                      v-for="(group, groupIndex) in runDetailGroups(message)"
+                      :key="group.id"
+                      class="space-y-2"
+                      :class="groupIndex ? 'border-t border-default/70 pt-2' : ''"
+                    >
+                      <AcpThoughtItem
+                        v-if="group.thoughtText || group.thoughtDetail"
+                        :text="group.thoughtText"
+                        :detail="group.thoughtDetail"
+                        :default-open="shouldDefaultOpenThought(message, groupIndex)"
+                      />
+
+                      <AcpToolCallItem
+                        v-for="part in group.tools"
+                        :key="part.toolCallId"
+                        :part="part"
+                      />
+                    </div>
+                  </UChatTool>
+
+                  <AcpMessageMarkdown
                     v-if="partText(message)"
                     :markdown="partText(message)"
-                    class="prose prose-sm dark:prose-invert max-w-none"
+                    :workspace="context.selectedWorkspace.value"
+                    :streaming="isActiveRunDetailMessage(message)"
                   />
                   <div
                     v-if="hasAssistantFooter(message)"
@@ -1197,14 +1382,15 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                     </span>
                   </div>
                   <UChatTool
-                    v-if="hasRunDetails(message)"
+                    v-if="hasRunDetails(message) && !shouldRenderRunDetailsBeforeMessage(message)"
                     text="Run details"
                     :suffix="runDetailSummary(message)"
                     :icon="toolParts(message).some(part => part.error) ? 'i-lucide-circle-alert' : 'i-lucide-list-tree'"
                     variant="card"
                     chevron="trailing"
+                    :default-open="isActiveRunDetailMessage(message)"
                     :ref="element => setRunDetailsElement(message.id, element)"
-                    :class="hasAssistantFooter(message) || partText(message) ? 'mt-4' : 'mt-2'"
+                    :class="runDetailsSpacingClass(message, 'after')"
                     :ui="{
                       root: 'bg-muted/20',
                       trigger: 'px-3 py-2',
@@ -1223,6 +1409,7 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                         v-if="group.thoughtText || group.thoughtDetail"
                         :text="group.thoughtText"
                         :detail="group.thoughtDetail"
+                        :default-open="shouldDefaultOpenThought(message, groupIndex)"
                       />
 
                       <AcpToolCallItem
@@ -1236,7 +1423,7 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
               </template>
               <template #actions="{ message }: { message: AcpChatMessageWithActions }">
                 <div
-                  v-if="message.role === 'user' && message.actions?.length"
+                  v-if="message.role === 'user' && editingMessageId !== message.id && (messageMetadataItems(message).length || message.actions?.length)"
                   class="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 text-xs leading-none text-muted"
                 >
                   <template

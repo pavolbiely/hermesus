@@ -181,7 +181,7 @@ onBeforeUnmount(() => {
               class="-mx-1"
             />
             <template #content>
-              <pre class="mt-1 max-h-48 overflow-auto rounded-md bg-muted/50 p-2 text-xs leading-5 text-highlighted" :class="block.kind === 'code' ? 'font-mono' : 'whitespace-pre-wrap'">{{ block.value }}</pre>
+              <pre class="mt-1 max-h-48 overflow-auto rounded-md bg-muted/50 p-2 text-sm leading-6 text-highlighted" :class="block.kind === 'code' ? 'font-mono' : 'whitespace-pre-wrap'">{{ block.value }}</pre>
             </template>
           </UCollapsible>
         </section>

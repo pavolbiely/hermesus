@@ -4,9 +4,10 @@ import { useScrollShadow } from '@nuxt/ui/composables'
 const props = defineProps<{
   text?: string
   detail?: string
+  defaultOpen?: boolean
 }>()
 
-const open = ref(false)
+const open = ref(Boolean(props.defaultOpen))
 const thoughtScrollContainer = ref<HTMLElement | null>(null)
 const { style: thoughtScrollShadowStyle } = useScrollShadow(thoughtScrollContainer)
 const normalizedText = computed(() => props.text?.trim() || '')
@@ -15,6 +16,10 @@ const preview = computed(() => normalizedText.value
   ? normalizedText.value.split(/\s+/).slice(0, 12).join(' ')
   : detailText.value)
 const bodyText = computed(() => normalizedText.value || detailText.value)
+
+watch(() => props.defaultOpen, (defaultOpen) => {
+  if (defaultOpen) open.value = true
+})
 </script>
 
 <template>
@@ -27,8 +32,7 @@ const bodyText = computed(() => normalizedText.value || detailText.value)
         :name="open ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
         class="size-3.5 shrink-0 text-dimmed"
       />
-      <UIcon name="i-lucide-sparkles" class="size-3.5 shrink-0 text-dimmed" />
-      <span class="shrink-0 font-medium text-toned">Thoughts</span>
+      <span class="shrink-0 text-toned">Thoughts</span>
       <UTooltip :text="preview" :delay-duration="250">
         <span class="block min-w-0 truncate text-dimmed">
           {{ preview }}
@@ -42,10 +46,9 @@ const bodyText = computed(() => normalizedText.value || detailText.value)
         class="mt-2 max-h-[220px] overflow-y-auto rounded-md bg-muted/20 px-3 py-2"
         :style="thoughtScrollShadowStyle"
       >
-        <Comark
-          :markdown="bodyText"
-          class="chat-reasoning-markdown text-sm text-muted"
-        />
+        <div class="chat-reasoning-markdown text-sm text-muted">
+          <Comark :markdown="bodyText" />
+        </div>
       </div>
     </template>
   </UCollapsible>

@@ -7,6 +7,7 @@ body,
   min-height: 100%;
 }
 
+.chat-message-markdown .shiki,
 .chat-file-preview-code .shiki,
 .chat-file-preview-markdown .shiki {
   padding: 0.75rem 1rem;
@@ -15,6 +16,7 @@ body,
   background-color: var(--shiki-light-bg);
 }
 
+.chat-message-markdown .shiki span,
 .chat-file-preview-code .shiki span,
 .chat-file-preview-markdown .shiki span {
   color: var(--shiki-light);
@@ -71,10 +73,19 @@ html.dark .shiki span {
   width: max-content;
 }
 
-.chat-message-markdown :where(code) {
-  font-size: 0.8125rem;
-  line-height: 1.25rem;
-  font-weight: 400;
+.chat-message-markdown :where(:not(pre) > code) {
+  display: inline;
+  padding: 0 0.25rem !important;
+  font-size: 1em !important;
+  line-height: inherit !important;
+  font-weight: 400 !important;
+}
+
+.chat-message-markdown :where(pre code) {
+  display: block;
+  padding: 0 !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
 }
 
 .chat-reasoning-markdown :is(h1, h2, h3, h4, h5, h6),
@@ -100,8 +111,8 @@ html.dark .shiki span {
 }
 
 .chat-reasoning-markdown :is(pre code) {
-  font-size: 0.75rem;
-  line-height: 1.125rem;
+  font-size: inherit;
+  line-height: inherit;
   white-space: pre;
 }
 
@@ -109,7 +120,7 @@ html.dark .shiki span {
   border-radius: 0.25rem;
   background: color-mix(in oklab, var(--ui-bg-muted) 70%, transparent);
   padding: 0.05rem 0.25rem;
-  font-size: 0.8125em;
+  font-size: inherit;
 }
 
 .chat-preview-path {
@@ -176,9 +187,9 @@ button.chat-preview-path {
   counter-increment: chat-file-preview-line;
 }
 
-.chat-message-markdown :where(pre) {
-  font-size: 0.8125rem;
-  line-height: 1.25rem;
+.chat-message-markdown pre {
+  font-size: inherit !important;
+  line-height: inherit !important;
 }
 
 .tool-call-shimmer {

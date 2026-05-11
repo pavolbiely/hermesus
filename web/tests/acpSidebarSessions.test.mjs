@@ -25,6 +25,7 @@ test('maps ACP session/list results to sidebar sessions', () => {
     workspace: '/repo',
     pinned: false,
     archived: false,
+    running: false,
     messageCount: 0,
     createdAt: '2026-05-11T01:00:00.000Z',
     updatedAt: '2026-05-11T01:00:00.000Z'
@@ -65,4 +66,46 @@ test('applies app-owned ACP sidebar metadata', () => {
   assert.equal(sessions[0].workspace, '/workspace')
   assert.equal(sessions[0].pinned, true)
   assert.equal(sessions[0].archived, true)
+})
+
+test('marks sessions with active ACP prompts as running', () => {
+  const sessions = acpSidebarSessions({
+    sessions: [
+      {
+        sessionId: 'session-4',
+        cwd: '/repo',
+        title: 'Running chat',
+        updatedAt: '2026-05-11T01:00:00.000Z',
+        appActivePrompt: { turnId: 'turn-1', messageId: 'message-1' }
+      }
+    ]
+  })
+
+  assert.equal(sessions[0].running, true)
+})
+
+
+test('collapses compression lineage sessions under the live tip with the root title', () => {
+  const sessions = acpSidebarSessions({
+    sessions: [
+      {
+        sessionId: 'root-session',
+        cwd: '/repo',
+        title: 'UI zaseknuté na Starting',
+        updatedAt: '2026-05-11T01:00:00.000Z',
+        appLineage: { rootSessionId: 'root-session', rootTitle: 'UI zaseknuté na Starting' }
+      },
+      {
+        sessionId: 'tip-session',
+        cwd: '/repo',
+        title: 'UI zaseknuté na Starting #2',
+        updatedAt: '2026-05-11T02:00:00.000Z',
+        appLineage: { rootSessionId: 'root-session', rootTitle: 'UI zaseknuté na Starting' }
+      }
+    ]
+  })
+
+  assert.equal(sessions.length, 1)
+  assert.equal(sessions[0].id, 'tip-session')
+  assert.equal(sessions[0].title, 'UI zaseknuté na Starting')
 })

@@ -1,4 +1,4 @@
-import { createError, defineEventHandler, getRouterParam } from 'h3'
+import { createError, defineEventHandler, getRouterParam, getQuery } from 'h3'
 import { subscribeAcpSession, replayAcpSession, type AcpBridgeEvent } from '../../../../acp/events'
 
 function writeEvent(res: NodeJS.WritableStream, event: AcpBridgeEvent) {
@@ -13,6 +13,10 @@ export default defineEventHandler((event) => {
   }
 
   const { req, res } = event.node
+  const query = getQuery(event)
+  const afterQuery = typeof query.after === 'string' ? Number(query.after) : undefined
+  const after = afterQuery !== undefined && Number.isFinite(afterQuery) ? afterQuery : undefined
+  const replay = query.replay !== 'false'
   res.writeHead(200, {
     'cache-control': 'no-cache, no-transform',
     'connection': 'keep-alive',
@@ -22,7 +26,11 @@ export default defineEventHandler((event) => {
   res.write(': connected\n\n')
 
   const unsubscribe = subscribeAcpSession(sessionId, (acpEvent) => writeEvent(res, acpEvent))
-  replayAcpSession(sessionId).forEach((acpEvent) => writeEvent(res, acpEvent))
+  if (replay) {
+    replayAcpSession(sessionId)
+      .filter(acpEvent => after === undefined || acpEvent.sequence === undefined || acpEvent.sequence > after)
+      .forEach((acpEvent) => writeEvent(res, acpEvent))
+  }
 
   req.on('close', () => {
     unsubscribe()

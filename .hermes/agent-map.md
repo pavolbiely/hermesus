@@ -11,21 +11,22 @@ Use this before broad repository search.
 - `web/app/components/ChatSlashCommandMenu.vue`: local slash-command autocomplete UI.
 - `web/app/composables/useAcpApi.ts`: typed frontend client for `/api/acp/*` routes.
 - `web/app/composables/useAcpTranscript.ts`: browser transcript state from ACP replay/live events.
-- `web/app/composables/useAppWorkspacesApi.ts`: typed frontend client for Hermesum-owned workspace routes.
+- `web/app/composables/useAppWorkspacesApi.ts`: typed frontend client for Hermesum-owned workspace/profile routes.
 - `web/app/types/acp-api.ts`, `web/app/types/acp-chat.ts`, `web/app/types/chat.ts`, `web/shared/acp/types.ts`: API/protocol/UI contract types.
 - `web/shared/acp/bridgeEventNormalization.ts`, `web/shared/acp/eventNormalization.ts`, app re-export wrappers, and `web/app/utils/acpPlanNormalization.ts`: ACP bridge events to chat transcript/plan state.
 - `web/app/utils/acpSidebarSessions.ts`: ACP session/list to sidebar summary mapping.
+- `web/nuxt.config.ts`: Nuxt runtime config for ACP command/args/cwd; defaults to `hermes --profile hermesum acp`.
 - `web/server/acp/bridge.ts`: ACP SDK subprocess bridge, active prompt correlation, and client handler.
 - `web/server/acp/events.ts`: session-scoped ACP SSE publish/subscribe backlog.
 - `web/server/acp/transcriptStore.ts`, `web/server/acp/transcriptProjection.ts`, `web/server/acp/sessionLoadReplay.ts`: persistent normalized transcript projection, projection rebuild, and session/load replay capture.
 - `web/server/acp/turnMetadata.ts`, `web/server/acp/sessionReasoning.ts`: Hermesum sidecar/replay supplements for prompt completion usage/duration metadata and stored assistant reasoning summaries.
 - `web/server/app/acpSessionMetadata.ts`: Hermesum-owned ACP sidebar metadata store.
-- `web/server/app/workspaces.ts`: Hermesum-owned workspace settings store and validation.
+- `web/server/app/workspaces.ts`, `web/server/app/profiles.ts`: Hermesum-owned workspace settings and Hermes profile list helpers.
 - `web/server/api/acp/`: ACP protocol-backed Nitro routes.
 - `web/server/api/app/`: Hermesum product routes for non-ACP app concerns, including read-aloud speech generation.
 - `web/shared/readAloud/language.ts`: shared read-aloud language detection and Edge voice mapping.
 - `.github/workflows/tests.yml`: CI for Node tests, Nuxt typecheck, and Nuxt build.
-- `.runtime/`: disposable runtime mirror; do not edit as source.
+- `.runtime/`: disposable generated runtime/cache state; do not edit as source.
 
 ## High-token hotspots
 

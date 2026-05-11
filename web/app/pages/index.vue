@@ -44,7 +44,7 @@ const reasoningConfigOption = computed(() => {
 })
 const reasoningItems = computed(() => {
   const option = reasoningConfigOption.value
-  return option ? configOptionItems(option) : []
+  return option ? [...configOptionItems(option)].reverse() : []
 })
 const selectedReasoningId = computed(() => {
   const value = reasoningConfigOption.value?.currentValue
@@ -94,10 +94,17 @@ function configOptionItems(option: SessionConfigOption) {
   if (option.type !== 'select') return []
   return option.options.flatMap((item) => {
     if ('options' in item) {
-      return item.options.map(child => ({ label: `${item.name}: ${child.name}`, value: child.value }))
+      return item.options
+        .filter(child => isSupportedReasoningOption(option, child.value))
+        .map(child => ({ label: `${item.name}: ${child.name}`, value: child.value }))
     }
-    return [{ label: item.name, value: item.value }]
+    return isSupportedReasoningOption(option, item.value) ? [{ label: item.name, value: item.value }] : []
   })
+}
+
+function isSupportedReasoningOption(option: SessionConfigOption, value: string) {
+  if (option.id !== 'reasoning_effort') return true
+  return value !== 'none' && value !== 'minimal'
 }
 
 async function ensureDraftSession() {

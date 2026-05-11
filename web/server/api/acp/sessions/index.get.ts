@@ -2,6 +2,7 @@ import type { ListSessionsRequest } from '@agentclientprotocol/sdk'
 import { defineEventHandler, getQuery } from 'h3'
 import { useRuntimeConfig } from '#imports'
 import { getAcpBridge } from '../../../acp/bridge'
+import { listAcpSessionLineage } from '../../../app/acpSessionLineage'
 import { listAcpSessionMetadata } from '../../../app/acpSessionMetadata'
 
 export default defineEventHandler(async (event) => {
@@ -15,8 +16,10 @@ export default defineEventHandler(async (event) => {
     ...(cwd ? { cwd } : {})
   }
 
-  const [response, metadataBySessionId] = await Promise.all([
-    getAcpBridge().listSessions(config, params),
+  const bridge = getAcpBridge()
+  const [response, lineageBySessionId, metadataBySessionId] = await Promise.all([
+    bridge.listSessions(config, params),
+    listAcpSessionLineage(config),
     listAcpSessionMetadata(config)
   ])
 
@@ -24,7 +27,9 @@ export default defineEventHandler(async (event) => {
     ...response,
     sessions: response.sessions.map(session => ({
       ...session,
-      appMetadata: metadataBySessionId[session.sessionId]
+      appLineage: lineageBySessionId[session.sessionId],
+      appMetadata: metadataBySessionId[session.sessionId],
+      appActivePrompt: bridge.activePrompt(session.sessionId)
     }))
   }
 })

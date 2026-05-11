@@ -82,19 +82,30 @@ const modelButtonLabel = computed(() => props.models.find(item => item.value ===
 const reasoningButtonLabel = computed(() => props.modes.find(item => item.value === props.selectedMode)?.label || props.reasoningLabel || 'Reasoning')
 const voiceIsListening = computed(() => voiceStatus.value === 'listening')
 const voiceTooltip = computed(() => voiceIsListening.value ? 'Stop voice input' : 'Dictate by voice')
+const promptFooterButtonClass = 'justify-center hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent'
+const promptFooterIconButtonClass = `${promptFooterButtonClass} size-7 p-0`
+const promptFooterButtonUi = { leadingIcon: 'shrink-0', trailingIcon: 'shrink-0' }
 
 const permissionItems = [
   { label: 'Plan', icon: 'i-lucide-pencil-ruler' },
   { label: 'Chat', icon: 'i-lucide-message-circle' },
-  { label: 'Agent', icon: 'i-lucide-hand', checked: true },
+  { label: 'Agent', icon: 'i-lucide-hand', type: 'checkbox' as const, checked: true },
   { label: 'Full Access', icon: 'i-lucide-shield-check' }
 ]
 
 const workspaceItems = computed(() => [
-  { label: 'No workspace', icon: 'i-lucide-folder-minus', onSelect: () => emit('updateSelectedWorkspace', null) },
+  {
+    label: 'No workspace',
+    icon: 'i-lucide-folder-minus',
+    type: 'checkbox' as const,
+    checked: props.selectedWorkspace === null,
+    onSelect: () => emit('updateSelectedWorkspace', null)
+  },
   ...props.workspaces.map(workspace => ({
     label: workspace.label,
-    icon: workspace.value === props.selectedWorkspace ? 'i-lucide-check' : 'i-lucide-folder',
+    icon: 'i-lucide-folder',
+    type: 'checkbox' as const,
+    checked: workspace.value === props.selectedWorkspace,
     onSelect: () => emit('updateSelectedWorkspace', workspace.value)
   }))
 ])
@@ -103,7 +114,8 @@ const modelItems = computed(() => {
   if (!props.models.length) return [{ label: 'No ACP models', disabled: true }]
   return props.models.map(model => ({
     label: model.label,
-    icon: model.value === props.selectedModel ? 'i-lucide-check' : undefined,
+    type: 'checkbox' as const,
+    checked: model.value === props.selectedModel,
     onSelect: () => emit('updateSelectedModel', model.value)
   }))
 })
@@ -112,7 +124,8 @@ const modeItems = computed(() => {
   if (!props.modes.length) return [{ label: 'No reasoning modes', disabled: true }]
   return props.modes.map(mode => ({
     label: mode.label,
-    icon: mode.value === props.selectedMode ? 'i-lucide-check' : undefined,
+    type: 'checkbox' as const,
+    checked: mode.value === props.selectedMode,
     onSelect: () => emit('updateSelectedMode', mode.value)
   }))
 })
@@ -240,13 +253,15 @@ onBeforeUnmount(() => {
             color="neutral"
             variant="ghost"
             size="sm"
+            :class="promptFooterIconButtonClass"
+            :ui="promptFooterButtonUi"
             :disabled="controlsDisabled"
             :loading="attachmentsLoading"
             @click="openFilePicker"
           />
         </UTooltip>
 
-        <UDropdownMenu :items="permissionItems" :content="{ align: 'start', side: 'top', sideOffset: 8 }">
+        <UDropdownMenu size="sm" :items="permissionItems" :content="{ align: 'start', side: 'top', sideOffset: 8 }">
           <UButton
             aria-label="Permission mode"
             icon="i-lucide-hand"
@@ -254,7 +269,8 @@ onBeforeUnmount(() => {
             color="neutral"
             variant="ghost"
             size="sm"
-            class="shrink-0"
+            :class="['shrink-0', promptFooterButtonClass]"
+            :ui="promptFooterButtonUi"
           >
             Agent
           </UButton>
@@ -262,6 +278,7 @@ onBeforeUnmount(() => {
 
         <UDropdownMenu
           v-if="showWorkspace"
+          size="sm"
           :items="workspaceItems"
           :disabled="workspacesLoading"
           :content="{ align: 'start', side: 'top', sideOffset: 8 }"
@@ -273,7 +290,8 @@ onBeforeUnmount(() => {
             color="neutral"
             variant="ghost"
             size="sm"
-            class="max-w-48 shrink-0"
+            :class="['max-w-48 shrink-0', promptFooterButtonClass]"
+            :ui="promptFooterButtonUi"
             :loading="workspacesLoading"
           >
             <span class="min-w-0 truncate">{{ workspaceLabel }}</span>
@@ -282,7 +300,12 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="flex shrink-0 items-center gap-1.5">
-        <UDropdownMenu :items="modelItems" :content="{ align: 'end', side: 'top', sideOffset: 8 }">
+        <UDropdownMenu
+          size="sm"
+          :items="modelItems"
+          :filter="{ placeholder: 'Search models...' }"
+          :content="{ align: 'end', side: 'top', sideOffset: 8 }"
+        >
           <UButton
             aria-label="Model"
             icon="i-lucide-cpu"
@@ -290,14 +313,15 @@ onBeforeUnmount(() => {
             :color="selectedModelUnavailable ? 'error' : 'neutral'"
             :variant="selectedModelUnavailable ? 'soft' : 'ghost'"
             size="sm"
-            class="max-w-44 shrink-0"
+            :class="['max-w-44 shrink-0', promptFooterButtonClass]"
+            :ui="promptFooterButtonUi"
             :disabled="updatingSessionConfig || !models.length"
           >
             <span class="min-w-0 truncate">{{ modelButtonLabel }}</span>
           </UButton>
         </UDropdownMenu>
 
-        <UDropdownMenu :items="modeItems" :content="{ align: 'end', side: 'top', sideOffset: 8 }">
+        <UDropdownMenu size="sm" :items="modeItems" :content="{ align: 'end', side: 'top', sideOffset: 8 }">
           <UButton
             aria-label="Reasoning effort"
             icon="i-lucide-brain"
@@ -305,7 +329,8 @@ onBeforeUnmount(() => {
             :color="selectedModeUnavailable ? 'error' : 'neutral'"
             :variant="selectedModeUnavailable ? 'soft' : 'ghost'"
             size="sm"
-            class="max-w-36 shrink-0"
+            :class="['max-w-36 shrink-0', promptFooterButtonClass]"
+            :ui="promptFooterButtonUi"
             :disabled="updatingSessionConfig || !modes.length"
           >
             <span class="min-w-0 truncate">{{ reasoningButtonLabel }}</span>
@@ -320,7 +345,8 @@ onBeforeUnmount(() => {
             :variant="voiceIsListening ? 'soft' : 'ghost'"
             size="sm"
             :disabled="controlsDisabled"
-            :class="voiceIsListening ? 'animate-pulse' : undefined"
+            :class="[promptFooterIconButtonClass, voiceIsListening ? 'animate-pulse hover:!bg-error/10 active:!bg-error/10 focus-visible:!bg-error/10' : undefined]"
+            :ui="promptFooterButtonUi"
             @click="toggleVoice"
           />
         </UTooltip>

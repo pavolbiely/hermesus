@@ -87,6 +87,10 @@ class AcpBridge {
     return connection.listSessions(params)
   }
 
+  activePrompt(sessionId: string) {
+    return activePromptBySession.get(sessionId) || null
+  }
+
   async newSession(config: BridgeRuntimeConfig, params: NewSessionRequest) {
     const connection = await this.readyConnection(config)
     return connection.newSession(params)

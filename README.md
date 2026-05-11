@@ -1,13 +1,8 @@
 # Hermesum
 
-Hermesum is a native web chat prototype for Hermes Agent: a focused, product-grade interface for running ACP-native agent conversations, choosing workspaces and models, streaming responses, inspecting tool calls, and managing sessions without leaving the browser.
+Hermesum is a native web chat interface for Hermes Agent. It is built around the Agent Client Protocol (ACP): the browser talks to same-origin Nuxt/Nitro routes, Nitro owns a long-lived `hermes acp` subprocess, and the UI renders ACP sessions, prompts, streaming updates, tool activity, permissions, models, modes, and configuration options.
 
-It combines:
-
-- a polished Nuxt chat frontend built for everyday agent work
-- a Nitro server runtime that talks to `hermes acp` through the official Agent Client Protocol TypeScript SDK
-- ACP session list/load/replay, prompt streaming, cancellation, permissions, and model/mode metadata
-- Hermesum-owned app routes for product features that ACP does not own, such as workspace settings
+This repository is the source of truth for the Hermesum prototype. Hermes Agent remains the actual agent runtime; Hermesum is the product/UI layer on top of it.
 
 ## Preview
 
@@ -16,155 +11,60 @@ It combines:
   <img src="docs/assets/agent2.png" alt="Hermesum workspace changes preview" width="49%">
 </p>
 
-## Why Hermesum
+## Product Direction
 
-Hermes Agent is powerful. Hermesum focuses on making that power feel approachable, observable, and controllable in a browser.
+Hermesum focuses on making Hermes Agent easier to operate from a browser:
 
-The product direction is simple:
+- chat-first sessions with clear streaming, stop/cancel, queued follow-ups, and deterministic transcript ordering
+- visible reasoning, tool calls, plans, permissions, duration, and usage metadata where ACP exposes them
+- workspace-aware session organization without making the browser talk directly to agent stdio
+- practical controls for model, mode, reasoning/config options, profiles, and project context
+- fast session opening through a local normalized transcript projection instead of blocking every page load on ACP replay
 
-- a chat-first workspace for serious agent sessions
-- fast streaming with clear prompt status, stop/cancel controls, and deterministic transcript ordering
-- visible reasoning, tool activity, plans, permissions, durations, and usage signals where ACP provides them
-- workspace context and app-owned metadata for session organization
-- practical controls for models, modes, commands, and project switching
+## Architecture
 
-## Product Highlights
+```text
+Browser / Nuxt UI
+  -> same-origin /api/acp/* routes
+  -> Nitro ACP bridge using @agentclientprotocol/sdk
+  -> long-lived `hermes --profile hermesum acp` subprocess
+  -> Hermes Agent runtime
 
-### ACP-native agent chat
+Browser / Nuxt UI
+  -> same-origin /api/app/* routes
+  -> Hermesum-owned app features that ACP does not own
+```
 
-- Same-origin `/api/acp/*` routes backed by a Nitro-owned `hermes acp` subprocess.
-- Prompt streaming over SSE with a bounded per-session backlog so early events are replayed instead of dropped.
-- Session load replay capture for older CLI-created sessions.
-- Persistent normalized transcript projection for fast chat opens, latest-message paging, and explicit rebuild/debug workflows.
-- Transcript reconciliation keyed by ACP/session identities, not text/timestamp matching.
-- Safe permission-request handling through explicit UI/server resolution.
-- Queued follow-up messages and draft persistence for smoother continuation.
+Core boundaries:
 
-### Workspace and session organization
+- `web/app/**` is the Nuxt 4 frontend: pages, layout, components, composables, types, UI utilities, and assets.
+- `web/server/acp/**` owns ACP protocol/runtime integration: subprocess lifecycle, session replay capture, event backlog, transcript projection, permissions, reasoning/usage supplements, and prompt correlation.
+- `web/server/api/acp/**` exposes ACP-backed HTTP/SSE routes to the browser.
+- `web/server/app/**` and `web/server/api/app/**` own Hermesum product concerns that are not ACP protocol state, such as workspaces, profile listing, and read-aloud speech generation.
+- `web/shared/acp/**` contains browser/server-safe ACP event and transcript normalization helpers.
 
-- Workspace selection stored through Hermesum app routes.
-- ACP sidebar list with Hermesum-owned title, pin, archive, and workspace grouping metadata.
-- ACP-native session actions where available: load, fork/duplicate, close, model/mode/config updates.
-
-### Better inspection and review
-
-- Nuxt UI chat rendering for assistant messages, reasoning, tool activity, and command metadata.
-- Comark markdown rendering for assistant and reasoning content.
-- Local helper tests for ACP event normalization, sidebar session mapping, queued messages, read receipts, and UI utilities.
+Browser code must not connect to ACP stdio directly. All browser runtime access goes through same-origin `/api/acp/*` or `/api/app/*` routes.
 
 ## What Exists Today
 
-### Frontend
+### ACP-native chat
 
-- Nuxt 4 app in [`web/`](web)
-- ACP-native chat route at `/acp/:sessionId`
-- new-chat handoff from `/` into ACP session creation
-- ACP session sidebar with app-owned metadata actions
-- model/mode/config controls from ACP session metadata
-- live ACP plan card from `session/update` plan events
-- local slash-command autocomplete UI
-- workspace selector backed by `/api/app/workspaces`
-- read receipts, drafts, queued messages, sound settings, and layout polish
+- New-chat entry point at `/` that creates/opens an ACP session.
+- Main chat route at `/acp/:sessionId`.
+- ACP session list/load/create/fork/close.
+- Prompt submission, cancellation, visible active prompt state, and queued follow-up messages.
+- Session-scoped SSE event stream with bounded replay backlog.
+- Server-side `session/load` replay capture so early replay events are not lost before the browser subscribes.
+- Transcript reconciliation keyed by ACP/session identities instead of text or timestamp matching.
+- Safe permission UI/server resolution through validated request and option ids.
 
-### Server runtime
+### Transcript projection
 
-The server-side runtime is implemented with Nitro routes and the official ACP TypeScript SDK.
+Hermesum keeps a rebuildable normalized transcript projection under `.runtime/acp-transcripts/` for fast chat display.
 
-It handles:
+The chat route reads the projection first, then uses ACP activation/replay in the background. This keeps old sessions responsive and avoids depending on “last assistant message” or delayed snapshot patching as the primary source of truth.
 
-- `hermes acp` process lifecycle and initialization
-- ACP session list/create/load/fork/close
-- prompt start, cancellation, and session-scoped SSE events
-- server-side replay capture for `session/load` plus stored transcript projection rebuilds
-- active prompt correlation so assistant chunks attach to the right user turn
-- fast transcript reads, projection invalidation, and manual projection rebuild routes
-- permission request publication and resolution
-- app-owned ACP session metadata and workspace settings
-
-Hermes Agent remains the actual agent runtime, accessed through ACP.
-
-## Safety Model
-
-Hermesum treats this repository as the source of truth for prototype work.
-
-- Do not edit `$HOME/.hermes/hermes-agent` directly.
-- Browser code never talks to ACP stdio directly; it uses same-origin Nitro routes.
-- Runtime/build artifacts under `.runtime/`, `.nuxt/`, `.output/`, and `node_modules/` are disposable.
-- Global package-manager changes and Hermes runtime updates remain approval-sensitive.
-
-## Quick Start
-
-### Dev mode
-
-For normal UI work:
-
-```bash
-./run-local.sh --dev
-```
-
-Then open `http://127.0.0.1:3019/`.
-
-This mode:
-
-- starts the Nuxt dev server on `http://127.0.0.1:3019`
-- serves same-origin Nitro routes for `/api/acp/*` and `/api/app/*`
-- reloads frontend changes through Vite HMR
-- cleans up stale local server ports before startup
-
-Useful overrides:
-
-```bash
-WEB_DEV_PORT=3020 ./run-local.sh --dev
-WEB_DEV_HOST=0.0.0.0 ./run-local.sh --dev
-```
-
-### Direct frontend commands
-
-```bash
-cd web
-pnpm install
-pnpm dev
-```
-
-### Production-style preview
-
-```bash
-./run-local.sh
-```
-
-This builds `web/` and starts the Nitro server from `web/.output/server/index.mjs` on `http://127.0.0.1:9119` by default. Override with `PORT=9120 ./run-local.sh`.
-
-## Repo Structure
-
-```text
-web/                                        # Nuxt/Nitro app
-  app/components/                           # chat, sidebar, workspace, and layout UI
-  app/composables/                          # ACP/app API clients and local UI state
-  app/pages/acp/[id].vue                    # ACP-native chat route
-  app/types/                                # ACP API, ACP transcript, and UI chat types
-  app/utils/                                # ACP normalization re-exports, sidebar mapping, drafts, sounds, etc.
-  shared/acp/                               # server/browser-safe transcript types and event normalization
-  server/acp/                               # ACP SDK bridge, event backlog, transcript projection, and runtime helpers
-  server/api/acp/                           # ACP protocol-backed Nitro routes
-  server/api/app/                           # Hermesum-owned product routes
-  server/app/                               # app metadata/workspace helpers
-run-local.sh                                # local Nuxt dev/preview orchestration
-.runtime/                                   # disposable generated runtime state
-```
-
-## Development Notes
-
-- Use `./run-local.sh --dev` for normal UI work.
-- Use production preview for ACP API/browser smoke when Nuxt dev mode behaves differently from the built Nitro server.
-- Before agentic coding, check [`.hermes/agent-map.md`](.hermes/agent-map.md) and run `node scripts/report-hotspots.mjs` if broad file targeting is needed.
-- Keep `.hermes/agent-map.md`, active `.hermes/plans/*.md`, and this README current when code boundaries, developer workflow, verification commands, or implemented behavior change.
-- Use `/api/acp/*` for ACP runtime behavior and `/api/app/*` for Hermesum-owned product concerns.
-- Transcript display is projection-first: the chat route reads `/api/acp/sessions/:id/transcript` before background ACP activation, and older history is paged with the transcript endpoint instead of blocking on `session/load` replay.
-- Treat workspace, voice, and session-management features as high-trust flows; prefer explicit validation and clear UI feedback.
-
-### Transcript projection debugging
-
-Hermesum stores a rebuildable normalized transcript projection under `.runtime/acp-transcripts/` for fast chat display. These routes affect only the Hermesum projection, not the underlying Hermes Agent session data:
+Projection routes affect only Hermesum’s local cache, not the underlying Hermes Agent session files:
 
 ```bash
 # Read latest projected messages
@@ -176,21 +76,164 @@ curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20&bef
 # Delete one local projection
 curl -X DELETE 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript'
 
+# Delete all local projections
+curl -X DELETE 'http://127.0.0.1:4046/api/acp/transcripts'
+
 # Rebuild one projection from ACP session/load replay
 curl -X POST 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript/rebuild'
 ```
 
+### Workspace, profile, and app-owned features
+
+- Workspace list/create/edit/delete/order and directory discovery through `/api/app/workspaces/*`.
+- Sidebar grouping by workspace plus Hermesum-owned title/pin/archive metadata for ACP sessions.
+- Profile listing through `/api/app/profiles`; switching profiles is shown as an app restart boundary rather than silently changing the running ACP subprocess.
+- Read-aloud speech generation through `/api/app/read-aloud/speech`.
+- Composer-local state such as drafts, attachments, queued messages, voice/read-aloud controls, slash-command autocomplete, and UI preferences.
+
+### Inspection and UI
+
+- Nuxt UI chat primitives for messages, prompt input, tool details, reasoning, and run details where practical.
+- Comark markdown rendering for assistant and reasoning content.
+- ACP plan rendering from `session/update` plan events.
+- Model, mode, and config controls sourced from ACP session metadata. Hermesum filters unsupported/undesired reasoning choices from the UI, but the source of truth remains ACP metadata.
+
+## Quick Start
+
+### Dev mode
+
+Use dev mode for normal UI work:
+
+```bash
+./run-local.sh --dev
+```
+
+Then open `http://127.0.0.1:3019/`.
+
+This mode:
+
+- starts the Nuxt dev server on `http://127.0.0.1:3019`
+- serves same-origin Nitro routes for `/api/acp/*` and `/api/app/*`
+- starts the ACP subprocess as `hermes --profile hermesum acp` by default
+- reloads frontend changes through Vite HMR
+- cleans up stale local server ports before startup
+
+Useful overrides:
+
+```bash
+WEB_DEV_PORT=3020 ./run-local.sh --dev
+WEB_DEV_HOST=0.0.0.0 ./run-local.sh --dev
+HERMESUM_PROFILE=coder ./run-local.sh --dev
+HERMESUM_ACP_ARGS="--profile coder acp" ./run-local.sh --dev
+HERMESUM_ACP_CWD=/path/to/workspace ./run-local.sh --dev
+```
+
+### Direct frontend commands
+
+For isolated frontend-only work:
+
+```bash
+cd web
+pnpm install
+pnpm dev
+```
+
+Direct `pnpm dev` still serves Nitro routes, but it uses the environment available to that shell. If ACP behavior looks wrong, check `/api/acp/health` and confirm the command, args, cwd, and profile are expected.
+
+### Production-style preview
+
+```bash
+./run-local.sh
+```
+
+This builds `web/` and starts the Nitro server from `web/.output/server/index.mjs` on `http://127.0.0.1:9119` by default.
+
+Override the port with:
+
+```bash
+PORT=9120 ./run-local.sh
+```
+
+For one-off API/browser smoke on a safe port:
+
+```bash
+cd web
+pnpm build
+PORT=4046 HOST=127.0.0.1 node .output/server/index.mjs
+```
+
+## Repository Structure
+
+```text
+web/                                        # Nuxt/Nitro app
+  app/components/                           # chat, sidebar, workspace, prompt, and layout UI
+  app/composables/                          # ACP/app API clients and local UI state
+  app/layouts/default.vue                   # app shell, sidebar, profile/workspace controls
+  app/pages/index.vue                       # new-chat entry point
+  app/pages/acp/[id].vue                    # ACP-native chat route
+  app/types/                                # ACP API, ACP transcript, and UI chat types
+  app/utils/                                # ACP normalization re-exports, sidebar mapping, drafts, sounds, etc.
+  shared/acp/                               # browser/server-safe ACP types and normalization helpers
+  server/acp/                               # ACP bridge, event backlog, transcript projection, permissions, runtime helpers
+  server/api/acp/                           # ACP protocol-backed Nitro routes
+  server/api/app/                           # Hermesum-owned product routes
+  server/app/                               # workspace/profile/session metadata helpers
+  tests/                                    # node:test coverage for helpers and server/runtime utilities
+run-local.sh                                # local Nuxt dev/preview orchestration
+AGENTS.md                                   # coding-agent rules and architecture boundaries
+.hermes/agent-map.md                        # first-read map for future agents
+.runtime/                                   # disposable generated runtime/cache state
+```
+
+## Development Notes
+
+- Treat `/Users/pavolbiely/Sites/hermesum` as the project root.
+- Do not edit `$HOME/.hermes/hermes-agent` unless explicitly approved.
+- Use `/api/acp/*` for ACP runtime behavior and `/api/app/*` for Hermesum product behavior.
+- Do not recreate legacy `/api/web-chat/*` contracts.
+- Keep shared request/response types aligned between Nitro handlers, composables, and frontend types.
+- Prefer Nuxt UI and project-native components before creating custom UI primitives.
+- Keep `.runtime/`, `.nuxt/`, `.output/`, `node_modules/`, logs, and generated artifacts out of source changes.
+- Update `README.md`, `AGENTS.md`, `.hermes/agent-map.md`, and active `.hermes/plans/*.md` only when behavior, architecture, setup, workflow, or verification guidance changes.
+
+## Debugging ACP Startup
+
+If the app hangs on startup or browser console shows module/import errors after a failed load, first check ACP health:
+
+```bash
+curl http://127.0.0.1:3019/api/acp/health
+```
+
+Expected defaults include:
+
+```json
+{
+  "command": "hermes",
+  "args": ["--profile", "hermesum", "acp"],
+  "cwd": "/Users/pavolbiely/Sites/hermesum"
+}
+```
+
+Useful checks:
+
+- `initialized: true` means the ACP client/server handshake completed.
+- `stderr` contains diagnostics; stderr logs are not automatically health failures.
+- Wrong profile, wrong cwd, or unrelated MCP startup retries usually mean the server was launched with the wrong environment or stale runtime config.
+- Restart the dev server after changing `nuxt.config.ts` or ACP runtime env vars.
+
 ## Verification
 
-GitHub Actions runs the web checks on every push and pull request via [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+GitHub Actions runs the web checks on every push and pull request via `.github/workflows/tests.yml`.
 
-From [`web/`](web):
+From `web/`:
 
 ```bash
 node --test tests/*.test.mjs
 pnpm typecheck
 pnpm build
 ```
+
+Targeted checks are preferred while iterating. Do not claim a check passed unless it was actually run.
 
 API smoke against a production preview:
 
@@ -204,8 +247,25 @@ curl http://127.0.0.1:4046/api/acp/sessions
 curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20'
 ```
 
-Browser smoke should confirm the app renders beyond the startup loader, the sidebar lists ACP/CLI sessions, opening a session shows transcript content, sending a prompt streams visibly, cancel/permission paths remain safe, model/mode controls render when exposed by ACP, and workspace selection affects new session cwd.
+Browser smoke should confirm:
+
+- the app renders beyond the startup loader
+- the sidebar lists ACP/CLI sessions grouped by workspace
+- opening a session shows projected transcript content quickly
+- sending a prompt streams visibly and can be cancelled safely
+- tool, reasoning, plan, and permission states render safely
+- model/mode/config controls render when exposed by ACP
+- workspace selection affects new session cwd
+- no `/api/web-chat/*` requests are made
+
+## Safety Model
+
+- Browser code never talks to ACP stdio directly.
+- Permission requests must be visible, validated, resolved once, and denied/cancelled rather than silently allowed when unsupported.
+- Prompt/session correctness should be keyed by explicit ACP ids: `sessionId`, `turnId`, ACP message ids, tool ids, request ids, and server event sequences.
+- Avoid text equality, timestamps, “last assistant message”, or delayed snapshot patching as primary reconciliation mechanisms.
+- Global package-manager changes, Homebrew changes, Hermes Agent updates, and edits to `$HOME/.hermes/hermes-agent` require explicit approval.
 
 ## Positioning
 
-Hermesum is not trying to replace Hermes Agent internals. It is a prototype for a better operator experience on top of them: ACP-native, more understandable, more inspectable, and closer to something people would actually want to use every day.
+Hermesum is not a replacement for Hermes Agent internals. It is a focused ACP-native operator interface: browser-first, inspectable, workspace-aware, and designed to make real agent sessions easier to run and understand.

@@ -102,7 +102,7 @@ function childPath(key: string) {
 </script>
 
 <template>
-  <div class="font-mono text-xs leading-5 text-highlighted" :class="wrapLines ? 'whitespace-normal' : 'whitespace-nowrap'">
+  <div class="font-mono text-sm leading-6 text-highlighted" :class="wrapLines ? 'whitespace-normal' : 'whitespace-nowrap'">
     <div class="flex items-start gap-1">
       <span v-if="label !== undefined" class="shrink-0 text-primary">{{ JSON.stringify(label) }}:</span>
 

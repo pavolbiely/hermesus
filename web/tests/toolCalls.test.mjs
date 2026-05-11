@@ -45,3 +45,19 @@ test('summarizes search patterns from raw input', () => {
 
   assert.equal(toolInputSummary(part), 'tool_call_update')
 })
+
+test('normalizes ACP patch titles with unknown targets', () => {
+  const part = {
+    name: 'patch (patch): ?',
+    kind: 'edit',
+    output: [{
+      type: 'diff',
+      path: '/Users/pavolbiely/Sites/hermesum/web/app/pages/acp/[id].vue',
+      oldText: 'old',
+      newText: 'new'
+    }]
+  }
+
+  assert.equal(toolDisplayInfo(part).label, 'Edit file')
+  assert.equal(toolDisplayInfo(part).summary, '~/Sites/hermesum/web/app/pages/acp/[id].vue')
+})

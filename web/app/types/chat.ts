@@ -28,6 +28,17 @@ export type AppWorkspacesResponse = {
   activeWorkspace: string | null
 }
 
+export type HermesProfile = {
+  id: string
+  label: string
+  active: boolean
+}
+
+export type HermesProfilesResponse = {
+  profiles: HermesProfile[]
+  activeProfile: string | null
+}
+
 export type AppWorkspaceResponse = {
   workspace: AppWorkspace
 }
@@ -49,6 +60,38 @@ export type DeleteResponse = {
   deleted: boolean
 }
 
+export type FilePreviewRequest = {
+  path: string
+  workspace?: string | null
+}
+
+export type FilePreviewResolveRequest = {
+  paths: string[]
+  workspace?: string | null
+}
+
+export type AppFilePreviewReference = {
+  path: string
+  requestedPath: string
+  relativePath?: string | null
+  name: string
+  mediaType: string
+  size: number
+  language?: string | null
+  exists: boolean
+}
+
+export type FilePreviewResolveResponse = {
+  files: AppFilePreviewReference[]
+}
+
+export type AppFilePreview = AppFilePreviewReference & {
+  content?: string | null
+  truncated: boolean
+  previewable: boolean
+  reason?: string | null
+}
+
 export type ChatSessionSummary = {
   id: string
   title: string | null
@@ -60,6 +103,7 @@ export type ChatSessionSummary = {
   workspace: string | null
   pinned: boolean
   archived: boolean
+  running: boolean
   messageCount: number
   createdAt: string
   updatedAt: string

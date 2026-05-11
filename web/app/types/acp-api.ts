@@ -69,7 +69,11 @@ export type AcpSessionMetadataResponse = {
 }
 
 export type AcpListSessionsResponse = Omit<ListSessionsResponse, 'sessions'> & {
-  sessions: Array<ListSessionsResponse['sessions'][number] & { appMetadata?: AcpSessionAppMetadata }>
+  sessions: Array<ListSessionsResponse['sessions'][number] & {
+    appMetadata?: AcpSessionAppMetadata
+    appLineage?: { rootSessionId: string, rootTitle: string | null }
+    appActivePrompt?: { turnId: string, messageId: string } | null
+  }>
 }
 
 export type AcpPermissionDecisionResponse = {

@@ -3,7 +3,7 @@ import type { CommandPaletteGroup } from '@nuxt/ui'
 import { installNotificationSoundUnlock } from '~/utils/notificationSound'
 import { readMessageCountForVisibleSession, syncInitialReadMessageCounts } from '~/utils/chatReadReceipts'
 import type { SessionGroup } from '~/utils/sessionGroups'
-import type { AppWorkspace, ChatSessionSummary } from '~/types/chat'
+import type { AppWorkspace, ChatSessionSummary, HermesProfile } from '~/types/chat'
 import { acpSidebarSessions } from '~/utils/acpSidebarSessions'
 import { buildSessionGroups } from '~/utils/sessionGroups'
 
@@ -16,10 +16,12 @@ const router = useRouter()
 const toast = useToast()
 const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
+const activeAcpPrompts = useAcpActivePrompts()
 const readAloud = useAcpMessageReadAloud()
 
 const dataRefreshKey = 'acp-sidebar-sessions'
 const { data, refresh } = await useAsyncData(dataRefreshKey, () => acpApi.listSessions())
+const { data: profilesData, pending: profilesPending } = await useAsyncData('app-profiles', () => api.getProfiles())
 await context.initialize()
 
 const sessions = computed(() => acpSidebarSessions(data.value))
@@ -29,6 +31,16 @@ const groupedSessions = computed<SessionGroup[]>(() => buildSessionGroups({
   selectedWorkspace: context.selectedWorkspace.value
 }))
 const searchTerm = ref('')
+const selectedProfile = ref<string | undefined>(profilesData.value?.activeProfile || undefined)
+const profileOptions = computed(() => (profilesData.value?.profiles || []).map((profile: HermesProfile) => ({
+  label: profile.label,
+  value: profile.id,
+  disabled: !profile.active,
+  profile
+})))
+const selectedProfileLabel = computed(() => {
+  return profileOptions.value.find(item => item.value === selectedProfile.value)?.label || profilesData.value?.activeProfile || 'Profile'
+})
 const searchGroups = computed<CommandPaletteGroup[]>(() => {
   const query = normalizeSearchText(searchTerm.value)
   const sessionItems = sessions.value
@@ -133,6 +145,21 @@ function sessionSearchText(session: ChatSessionSummary) {
     workspaceDisplayLabel(session.workspace),
     session.workspace
   ].filter(Boolean).join(' '))
+}
+
+function selectProfile(profileId: string) {
+  const active = profilesData.value?.activeProfile
+  if (!profileId || profileId === active) {
+    selectedProfile.value = active || profileId || undefined
+    return
+  }
+
+  selectedProfile.value = active || undefined
+  toast.add({
+    title: 'Profile switch requires restart',
+    description: `Restart Hermesum with profile “${profileId}” to use it. Current profile: ${active || 'default'}.`,
+    color: 'neutral'
+  })
 }
 
 function startWorkspaceChat(workspacePath: string) {
@@ -321,8 +348,8 @@ function syncReadMessageCounts() {
   saveReadMessageCounts()
 }
 
-function isSessionRunning(_session: ChatSessionSummary) {
-  return false
+function isSessionRunning(session: ChatSessionSummary) {
+  return session.running || activeAcpPrompts.isRunning(session.id)
 }
 
 function hasLocalUnread(_session: ChatSessionSummary) {
@@ -506,6 +533,14 @@ function openSession(session: ChatSessionSummary) {
 }
 
 watch(
+  () => profilesData.value?.activeProfile,
+  (activeProfile) => {
+    selectedProfile.value = activeProfile || undefined
+  },
+  { immediate: true }
+)
+
+watch(
   () => route.params.id,
   (id) => {
     if (requestedSessionId.value === id) requestedSessionId.value = null
@@ -603,7 +638,32 @@ provide('requestedSessionId', readonly(requestedSessionId))
       </template>
 
       <template #footer>
-        <div class="flex w-full items-center justify-end pb-1">
+        <div class="flex w-full items-center gap-1.5 pb-1">
+          <USelectMenu
+            :model-value="selectedProfile"
+            :items="profileOptions"
+            value-key="value"
+            label-key="label"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            class="block min-w-0 flex-1 max-w-none"
+            :ui="{ base: 'w-full max-w-none justify-start', trailingIcon: 'ms-auto' }"
+            :loading="profilesPending"
+            :disabled="profilesPending || !profileOptions.length"
+            :search-input="{ placeholder: 'Search profiles...' }"
+            :content="{ side: 'top', align: 'start', sideOffset: 8 }"
+            placeholder="Profile"
+            @update:model-value="value => selectProfile(String(value || ''))"
+          >
+            <template #leading>
+              <UIcon name="i-lucide-user-round" class="size-3.5 shrink-0" />
+            </template>
+            <template #default>
+              <span class="min-w-0 flex-1 truncate text-left">{{ selectedProfileLabel }}</span>
+            </template>
+          </USelectMenu>
+
           <UTooltip text="Settings">
             <UButton
               aria-label="Settings"

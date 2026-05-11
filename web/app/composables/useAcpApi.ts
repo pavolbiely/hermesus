@@ -21,8 +21,12 @@ import type {
   SetSessionModelResponse
 } from '~/types/acp-api'
 
-function acpSessionEventsUrl(sessionId: string) {
-  return `/api/acp/sessions/${encodeURIComponent(sessionId)}/events`
+function acpSessionEventsUrl(sessionId: string, options: { afterSequence?: number, replay?: boolean } = {}) {
+  const params = new URLSearchParams()
+  if (options.afterSequence !== undefined) params.set('after', String(options.afterSequence))
+  if (options.replay === false) params.set('replay', 'false')
+  const query = params.toString()
+  return `/api/acp/sessions/${encodeURIComponent(sessionId)}/events${query ? `?${query}` : ''}`
 }
 
 export function useAcpApi() {
@@ -33,9 +37,10 @@ export function useAcpApi() {
   function subscribeSession(
     sessionId: string,
     onEvent: (event: AcpBridgeEvent) => void,
-    onError?: (event: Event) => void
+    onError?: (event: Event) => void,
+    options: { afterSequence?: number, replay?: boolean } = {}
   ) {
-    const source = new EventSource(acpSessionEventsUrl(sessionId))
+    const source = new EventSource(acpSessionEventsUrl(sessionId, options))
     const eventTypes: AcpBridgeEvent['type'][] = [
       'session.update',
       'permission.requested',

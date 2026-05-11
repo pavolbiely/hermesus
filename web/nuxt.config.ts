@@ -1,4 +1,5 @@
 const defaultAcpCwd = process.env.HERMESUM_ACP_CWD || (process.cwd().endsWith('/web') ? process.cwd().slice(0, -4) : process.cwd())
+const defaultAcpArgs = ['--profile', process.env.HERMESUM_PROFILE || 'hermesum', 'acp']
 
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
@@ -8,7 +9,7 @@ export default defineNuxtConfig({
   ssr: false,
   runtimeConfig: {
     hermesAcpCommand: process.env.HERMESUM_ACP_COMMAND || 'hermes',
-    hermesAcpArgs: process.env.HERMESUM_ACP_ARGS ? process.env.HERMESUM_ACP_ARGS.split(' ').filter(Boolean) : ['acp'],
+    hermesAcpArgs: process.env.HERMESUM_ACP_ARGS ? process.env.HERMESUM_ACP_ARGS.split(' ').filter(Boolean) : defaultAcpArgs,
     hermesAcpCwd: defaultAcpCwd,
     public: {
       hermesSessionToken: process.env.NUXT_PUBLIC_HERMES_SESSION_TOKEN || ''
