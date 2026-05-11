@@ -24,6 +24,14 @@ import {
 } from '~/utils/acpMessageMetadata'
 import { writeClipboardText } from '~/utils/clipboard'
 import { isAcpPlanUpdate, normalizeAcpPlanEntries } from '~/utils/acpPlanNormalization'
+import {
+  hasThoughtActivity,
+  reasoningText,
+  runDetailGroups,
+  thoughtDetail,
+  toolParts,
+  type AcpToolPart
+} from '~/utils/acpRunDetails'
 import { scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender } from '~/utils/chatInitialScroll'
 import { toolCallTitle } from '~/utils/toolCalls'
 
@@ -51,8 +59,6 @@ type MessageAction = {
 type AcpChatMessageWithActions = AcpChatMessage & {
   actions?: MessageAction[]
 }
-
-type AcpToolPart = Extract<AcpChatMessage['parts'][number], { type: 'tool' }>
 
 const route = useRoute()
 const router = useRouter()
@@ -816,39 +822,48 @@ function hasProcessParts(message: AcpChatMessage) {
   return message.parts.some(part => part.type === 'tool' || part.type === 'reasoning' || part.type === 'event') || hasThoughtActivity(message)
 }
 
-function reasoningText(message: AcpChatMessage) {
-  return message.parts.filter(part => part.type === 'reasoning').map(part => part.text).join('')
-}
-
-function hasThoughtActivity(message: AcpChatMessage) {
-  return Boolean(reasoningText(message).trim() || thoughtTokenCount(message))
-}
-
-function thoughtTokenCount(message: AcpChatMessage) {
-  return message.usage?.thoughtTokens && message.usage.thoughtTokens > 0 ? message.usage.thoughtTokens : 0
-}
-
-function thoughtDetail(message: AcpChatMessage) {
-  const tokens = thoughtTokenCount(message)
-  if (!tokens) return ''
-  return `${tokens.toLocaleString()} thought token${tokens === 1 ? '' : 's'} were used for this turn. Hermes ACP did not expose the raw thought text for this model response.`
-}
-
-function toolParts(message: AcpChatMessage): AcpToolPart[] {
-  return message.parts.filter((part): part is AcpToolPart => part.type === 'tool')
-}
-
 function runDetailSummary(message: AcpChatMessage) {
   const tools = toolParts(message)
   const failed = tools.filter(part => part.error || part.status === 'failed').length
   const running = runningToolParts(message).length
-  const completed = tools.length - failed - running
-  const parts: string[] = []
-  if (hasThoughtActivity(message)) parts.push('Reasoned')
-  if (running) parts.push(`${running} running`)
-  if (completed) parts.push(`${completed} completed`)
-  if (failed) parts.push(`${failed} failed`)
-  return parts.join(' · ')
+  const counts = tools.reduce<Record<string, number>>((acc, part) => {
+    const kind = classifyToolPart(part)
+    acc[kind] = (acc[kind] || 0) + 1
+    return acc
+  }, {})
+  const labels: string[] = []
+
+  if (hasThoughtActivity(message)) labels.push('Reasoned')
+  if (counts.read) labels.push(`read ${plural(counts.read, 'file')}`)
+  if (counts.edit) labels.push(`edited ${plural(counts.edit, 'file')}`)
+  if (counts.command) labels.push(`ran ${plural(counts.command, 'command')}`)
+  if (counts.browser) labels.push(plural(counts.browser, 'browser action'))
+  if (counts.api) labels.push(plural(counts.api, 'API call'))
+
+  const known = ['read', 'edit', 'command', 'browser', 'api'].reduce((sum, key) => sum + (counts[key] || 0), 0)
+  const other = tools.length - known
+  if (!labels.length && tools.length) labels.push(plural(tools.length, 'action'))
+  else if (other > 0) labels.push(plural(other, 'other action'))
+
+  if (failed) labels.push(`${failed} failed`)
+  else if (running) labels.push(`${running} running`)
+  else if (tools.length) labels.push('completed')
+
+  return labels.join(' · ')
+}
+
+function classifyToolPart(part: AcpToolPart) {
+  const value = `${part.name || ''} ${part.kind || ''}`.toLowerCase()
+  if (value.includes('read') || value.includes('search')) return 'read'
+  if (value.includes('patch') || value.includes('write') || value.includes('edit')) return 'edit'
+  if (value.includes('terminal') || value.includes('process') || value.includes('command')) return 'command'
+  if (value.includes('browser')) return 'browser'
+  if (value.includes('mcp') || value.includes('api') || value.includes('supabase') || value.includes('redis')) return 'api'
+  return 'other'
+}
+
+function plural(count: number, singular: string, pluralValue = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : pluralValue}`
 }
 
 function runningToolParts(message: AcpChatMessage) {
@@ -1136,17 +1151,24 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                     }"
                     @update:open="open => onRunDetailsOpen(open, message.id)"
                   >
-                    <AcpThoughtItem
-                      v-if="hasThoughtActivity(message)"
-                      :text="reasoningText(message)"
-                      :detail="thoughtDetail(message)"
-                    />
+                    <div
+                      v-for="(group, groupIndex) in runDetailGroups(message)"
+                      :key="group.id"
+                      class="space-y-2"
+                      :class="groupIndex ? 'border-t border-default/70 pt-2' : ''"
+                    >
+                      <AcpThoughtItem
+                        v-if="group.thoughtText || group.thoughtDetail"
+                        :text="group.thoughtText"
+                        :detail="group.thoughtDetail"
+                      />
 
-                    <AcpToolCallItem
-                      v-for="part in toolParts(message)"
-                      :key="part.toolCallId"
-                      :part="part"
-                    />
+                      <AcpToolCallItem
+                        v-for="part in group.tools"
+                        :key="part.toolCallId"
+                        :part="part"
+                      />
+                    </div>
                   </UChatTool>
                 </div>
               </template>

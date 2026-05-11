@@ -24,7 +24,7 @@ const bodyText = computed(() => normalizedText.value || detailText.value)
         class="size-3.5 shrink-0 text-dimmed"
       />
       <UIcon name="i-lucide-sparkles" class="size-3.5 shrink-0 text-dimmed" />
-      <span class="shrink-0 font-medium text-toned">Thought</span>
+      <span class="shrink-0 font-medium text-toned">Thoughts</span>
       <UTooltip :text="preview" :delay-duration="250">
         <span class="block min-w-0 truncate text-dimmed">
           {{ preview }}
