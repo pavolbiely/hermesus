@@ -10,6 +10,9 @@ import type {
   AcpPromptStartResponse,
   AcpSessionAppMetadata,
   AcpSessionMetadataResponse,
+  AcpTranscriptApiResponse,
+  AcpTranscriptDeleteResponse,
+  AcpTranscriptRebuildResponse,
   ForkSessionResponse,
   NewSessionResponse,
   SetSessionConfigOptionResponse,
@@ -58,6 +61,11 @@ export function useAcpApi() {
     listSessions: () => request<AcpListSessionsResponse>('/api/acp/sessions'),
     createSession: (payload: Record<string, unknown> = {}) => request<NewSessionResponse>('/api/acp/sessions', { method: 'POST', body: payload }),
     loadSession: (sessionId: string) => request<AcpLoadSessionApiResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}`),
+    readTranscript: (sessionId: string, params: { limit?: number, before?: number } = {}) => request<AcpTranscriptApiResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/transcript`, {
+      query: params
+    }),
+    rebuildTranscript: (sessionId: string) => request<AcpTranscriptRebuildResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/transcript/rebuild`, { method: 'POST' }),
+    deleteTranscript: (sessionId: string) => request<AcpTranscriptDeleteResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/transcript`, { method: 'DELETE' }),
     updateSessionMetadata: (sessionId: string, patch: Partial<AcpSessionAppMetadata>) => request<AcpSessionMetadataResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/metadata`, {
       method: 'PATCH',
       body: patch

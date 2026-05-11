@@ -22,6 +22,7 @@ import {
 } from '@agentclientprotocol/sdk'
 import { publishAcpEvent } from './events'
 import { requestAcpPermission } from './permissions'
+import { recordAcpTurnMetadata } from './turnMetadata'
 import type { AcpBridgeHealth } from './types'
 
 const activePromptBySession = new Map<string, { turnId: string, messageId: string }>()
@@ -129,7 +130,19 @@ class AcpBridge {
 
     try {
       const response = await connection.prompt(promptParams)
-      publishAcpEvent({ type: 'prompt.completed', sessionId: params.sessionId, turnId, messageId, response })
+      const userMessageId = response.userMessageId || messageId
+      const completedAt = new Date().toISOString()
+      try {
+        await recordAcpTurnMetadata(config, params.sessionId, {
+          turnId,
+          userMessageId,
+          completedAt,
+          usage: response.usage ?? null
+        })
+      } catch (error) {
+        console.warn('Failed to persist ACP turn metadata', error)
+      }
+      publishAcpEvent({ type: 'prompt.completed', sessionId: params.sessionId, turnId, messageId, userMessageId, completedAt, response })
       return response
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error)

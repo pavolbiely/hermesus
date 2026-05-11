@@ -17,7 +17,14 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <UDashboardNavbar :title="title">
+  <UDashboardNavbar
+    :title="title"
+    :ui="{
+      root: 'h-9 px-2.5 sm:px-3',
+      left: 'gap-1',
+      right: 'gap-1'
+    }"
+  >
     <template #trailing>
       <UTooltip v-if="workspaceStatus" :text="workspaceStatus.detail || workspaceStatus.label">
         <UBadge color="neutral" variant="subtle" icon="i-lucide-git-branch" size="sm" class="hidden max-w-64 truncate font-normal sm:inline-flex">

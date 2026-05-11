@@ -1,13 +1,7 @@
-import type { SessionNotification } from '@agentclientprotocol/sdk'
+import type { AcpBridgeEvent } from '../../shared/acp/types'
+import { recordAcpProjectionEvent } from './transcriptProjection'
 
-export type AcpBridgeEvent =
-  | { type: 'session.update', sessionId: string, sequence?: number, notification: SessionNotification, turnId?: string, messageId?: string }
-  | { type: 'permission.requested', sessionId: string, sequence?: number, appRequestId: string, request: unknown }
-  | { type: 'permission.resolved', sessionId: string, sequence?: number, appRequestId: string, response: unknown }
-  | { type: 'prompt.started', sessionId: string, sequence?: number, turnId: string, messageId: string, message?: string }
-  | { type: 'prompt.completed', sessionId: string, sequence?: number, turnId: string, messageId: string, response: unknown }
-  | { type: 'prompt.failed', sessionId: string, sequence?: number, turnId: string, messageId: string, error: string }
-  | { type: 'prompt.cancelled', sessionId: string, sequence?: number }
+export type { AcpBridgeEvent }
 
 export type AcpEventSubscriber = (event: AcpBridgeEvent) => void
 
@@ -37,9 +31,16 @@ function rememberAcpEvent(sessionId: string, event: AcpBridgeEvent) {
 export function publishAcpEvent(event: AcpBridgeEvent) {
   const sequencedEvent = withSequence(event)
   rememberAcpEvent(sequencedEvent.sessionId, sequencedEvent)
+  void recordAcpProjectionEvent(sequencedEvent)
   const subscribers = sessionSubscribers.get(sequencedEvent.sessionId)
   if (!subscribers) return
-  subscribers.forEach(subscriber => subscriber(sequencedEvent))
+  subscribers.forEach((subscriber) => {
+    try {
+      subscriber(sequencedEvent)
+    } catch (error) {
+      console.warn('ACP event subscriber failed', error)
+    }
+  })
 }
 
 export function replayAcpSession(sessionId: string) {

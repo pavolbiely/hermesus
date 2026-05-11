@@ -2,6 +2,7 @@
 import type { PlanEntry } from '@agentclientprotocol/sdk'
 import type {
   AvailableCommand,
+  AcpTranscriptSnapshot,
   PermissionOption,
   RequestPermissionRequest,
   SessionConfigOption,
@@ -10,12 +11,38 @@ import type {
 } from '~/types/acp-api'
 import type { AcpChatMessage } from '~/types/acp-chat'
 import type { ChatPromptAttachment, SlashCommand } from '~/types/chat'
+import type { ComponentPublicInstance } from 'vue'
+import { useScrollShadow } from '@nuxt/ui/composables'
+import {
+  acpMessageDurationDetails,
+  acpMessageText,
+  acpMessageTimestampDetails,
+  acpTokenDetails,
+  formatAcpMessageDuration,
+  formatAcpMessageTimestamp,
+  formatAcpTokenCount
+} from '~/utils/acpMessageMetadata'
+import { writeClipboardText } from '~/utils/clipboard'
 import { isAcpPlanUpdate, normalizeAcpPlanEntries } from '~/utils/acpPlanNormalization'
 import { toolCallTitle } from '~/utils/toolCalls'
 
 type PendingPermission = {
   appRequestId: string
   request: RequestPermissionRequest
+}
+
+type MessageAction = {
+  label: string
+  icon: string
+  disabled?: boolean
+  color?: 'neutral' | 'error'
+  class?: string
+  variant?: 'ghost'
+  onClick: (event: MouseEvent, message: AcpChatMessageWithActions) => void | Promise<void>
+}
+
+type AcpChatMessageWithActions = AcpChatMessage & {
+  actions?: MessageAction[]
 }
 
 type AcpToolPart = Extract<AcpChatMessage['parts'][number], { type: 'tool' }>
@@ -26,10 +53,15 @@ const api = useAcpApi()
 const context = useChatComposerContext()
 const pendingAcpPrompts = usePendingAcpPrompt()
 const transcript = useAcpTranscript()
+const readAloud = useAcpMessageReadAloud()
 const toast = useToast()
 
 const sessionId = computed(() => String(route.params.id || ''))
 const input = ref('')
+const messagesScrollContainer = ref<HTMLElement | null>(null)
+const promptContainer = ref<HTMLElement | null>(null)
+const runDetailsElements = new Map<string, HTMLElement>()
+const { style: messagesScrollShadowStyle } = useScrollShadow(messagesScrollContainer)
 const loading = ref(true)
 const activePromptTurnId = ref<string | null>(null)
 const pendingPermissions = ref<PendingPermission[]>([])
@@ -39,14 +71,32 @@ const modeState = ref<SessionModeState | null>(null)
 const configOptions = ref<SessionConfigOption[]>([])
 const availableCommands = ref<AvailableCommand[]>([])
 const updatingSessionConfig = ref(false)
+const loadingOlderMessages = ref(false)
+const hasOlderMessages = ref(false)
+const nextTranscriptBefore = ref<number | null>(null)
 const error = ref<string | null>(null)
 let closeEvents: (() => void) | undefined
 let eventSource: EventSource | undefined
+let sessionLoadSequence = 0
+
+const transcriptPageSize = 80
 
 const submitting = computed(() => Boolean(activePromptTurnId.value))
 const submitStatus = computed(() => submitting.value ? 'streaming' : 'ready')
 const messages = computed(() => transcript.messages.value)
-const displayMessages = computed(() => groupProcessMessages(messages.value))
+const displayMessages = computed<AcpChatMessageWithActions[]>(() => groupProcessMessages(messages.value).map(withNativeMessageActions))
+const chatUserProps = {
+  side: 'right' as const,
+  variant: 'soft' as const,
+  ui: {
+    container: 'pb-5',
+    actions: 'bottom-0'
+  }
+}
+const chatAssistantProps = {
+  side: 'left' as const,
+  variant: 'naked' as const
+}
 const activeRunMessage = computed(() => {
   if (!activePromptTurnId.value) return null
   return [...displayMessages.value].reverse().find(message => message.turnId === activePromptTurnId.value && hasRunDetails(message)) || null
@@ -137,37 +187,60 @@ onBeforeUnmount(() => {
   closeEvents?.()
 })
 
-watch(sessionId, async () => {
-  await initializeSession()
+watch(sessionId, async (newSessionId) => {
+  await initializeSession(newSessionId)
 })
 
-async function initializeSession() {
-  if (!sessionId.value) return
+async function initializeSession(targetSessionId = sessionId.value) {
+  if (!targetSessionId) return
+  const loadSequence = ++sessionLoadSequence
+
   loading.value = true
   error.value = null
-  transcript.reset()
-  pendingPermissions.value = []
-  planEntries.value = []
-  modelState.value = null
-  modeState.value = null
-  configOptions.value = []
-  availableCommands.value = []
+  resetSessionView()
   closeEvents?.()
-  activePromptTurnId.value = null
+  closeEvents = undefined
+  eventSource = undefined
+
   try {
-    const loaded = await api.loadSession(sessionId.value)
-    modelState.value = loaded.models || null
-    modeState.value = loaded.modes || null
-    configOptions.value = loaded.configOptions || []
-    loaded.events.forEach(handleBridgeEvent)
-    eventSource = api.subscribeSession(sessionId.value, handleBridgeEvent, () => {
+    const stored = await api.readTranscript(targetSessionId, { limit: transcriptPageSize })
+    if (loadSequence !== sessionLoadSequence || targetSessionId !== sessionId.value) return
+
+    const projectedTranscript = stored.transcript
+    const initializedFromProjection = Boolean(projectedTranscript)
+    if (projectedTranscript) {
+      applyTranscriptSnapshot(projectedTranscript)
+      hasOlderMessages.value = stored.hasMore
+      nextTranscriptBefore.value = stored.nextBefore
+      loading.value = false
+    }
+
+    eventSource = api.subscribeSession(targetSessionId, handleBridgeEvent, () => {
       error.value ||= 'ACP event stream disconnected.'
     })
     closeEvents = () => eventSource?.close()
 
-    const queuedPrompt = pendingAcpPrompts.value[sessionId.value]
+    const loaded = await api.loadSession(targetSessionId)
+    if (loadSequence !== sessionLoadSequence || targetSessionId !== sessionId.value) return
+
+    modelState.value = loaded.models || modelState.value
+    modeState.value = loaded.modes || modeState.value
+    configOptions.value = loaded.configOptions || configOptions.value
+    if (initializedFromProjection) {
+      const refreshed = await api.readTranscript(targetSessionId, { limit: transcriptPageSize })
+      if (loadSequence !== sessionLoadSequence || targetSessionId !== sessionId.value) return
+      if (refreshed.transcript) {
+        applyTranscriptSnapshot(refreshed.transcript)
+        hasOlderMessages.value = refreshed.hasMore
+        nextTranscriptBefore.value = refreshed.nextBefore
+      }
+    } else {
+      loaded.events.forEach(handleBridgeEvent)
+    }
+
+    const queuedPrompt = pendingAcpPrompts.value[targetSessionId]
     if (queuedPrompt) {
-      delete pendingAcpPrompts.value[sessionId.value]
+      delete pendingAcpPrompts.value[targetSessionId]
       await router.replace({ path: route.path, query: {} })
       await sendPrompt(queuedPrompt.message, queuedPrompt.attachments)
       return
@@ -179,9 +252,12 @@ async function initializeSession() {
       await sendPrompt(queuedPromptText)
     }
   } catch (err) {
+    if (loadSequence !== sessionLoadSequence || targetSessionId !== sessionId.value) return
     showError(err, 'Could not load ACP session')
   } finally {
-    loading.value = false
+    if (loadSequence === sessionLoadSequence && targetSessionId === sessionId.value) {
+      loading.value = false
+    }
   }
 }
 
@@ -232,7 +308,59 @@ async function stopPrompt() {
   }
 }
 
+function resetSessionView() {
+  transcript.reset()
+  pendingPermissions.value = []
+  planEntries.value = []
+  modelState.value = null
+  modeState.value = null
+  configOptions.value = []
+  availableCommands.value = []
+  loadingOlderMessages.value = false
+  hasOlderMessages.value = false
+  nextTranscriptBefore.value = null
+  activePromptTurnId.value = null
+}
+
+function applyTranscriptSnapshot(snapshot: AcpTranscriptSnapshot) {
+  transcript.loadSnapshot(snapshot)
+  pendingPermissions.value = snapshot.pendingPermissions
+  planEntries.value = snapshot.planEntries
+  modelState.value = snapshot.models
+  modeState.value = snapshot.modes
+  configOptions.value = snapshot.configOptions
+  availableCommands.value = snapshot.availableCommands
+  activePromptTurnId.value = snapshot.prompt?.status === 'running' ? snapshot.prompt.turnId || null : null
+}
+
+async function loadOlderMessages() {
+  if (loadingOlderMessages.value || !hasOlderMessages.value || nextTranscriptBefore.value === null) return
+  const container = messagesScrollContainer.value
+  const previousScrollHeight = container?.scrollHeight ?? 0
+  const previousScrollTop = container?.scrollTop ?? 0
+
+  loadingOlderMessages.value = true
+  try {
+    const response = await api.readTranscript(sessionId.value, {
+      limit: transcriptPageSize,
+      before: nextTranscriptBefore.value
+    })
+    if (response.transcript) transcript.prependMessages(response.transcript.messages)
+    hasOlderMessages.value = response.hasMore
+    nextTranscriptBefore.value = response.nextBefore
+    await nextTick()
+    if (container) {
+      container.scrollTop = container.scrollHeight - previousScrollHeight + previousScrollTop
+    }
+  } catch (err) {
+    showError(err, 'Failed to load older messages')
+  } finally {
+    loadingOlderMessages.value = false
+  }
+}
+
 function handleBridgeEvent(event: Parameters<typeof transcript.applyBridgeEvent>[0]) {
+  if (event.sessionId !== sessionId.value) return
   transcript.applyBridgeEvent(event)
   if (event.type === 'permission.requested') {
     pendingPermissions.value = [
@@ -287,6 +415,196 @@ function partText(message: AcpChatMessage) {
   return message.parts.filter(part => part.type === 'text').map(part => part.text).join('')
 }
 
+function setRunDetailsElement(messageId: string, element: Element | ComponentPublicInstance | null) {
+  let root: HTMLElement | null = null
+  if (element instanceof HTMLElement) {
+    root = element
+  } else if (isComponentWithHtmlRoot(element)) {
+    root = element.$el
+  }
+
+  if (root) {
+    runDetailsElements.set(messageId, root)
+  } else {
+    runDetailsElements.delete(messageId)
+  }
+}
+
+function isComponentWithHtmlRoot(value: Element | ComponentPublicInstance | null): value is ComponentPublicInstance & { $el: HTMLElement } {
+  return Boolean(value && typeof value === 'object' && '$el' in value && value.$el instanceof HTMLElement)
+}
+
+function onRunDetailsOpen(open: boolean, messageId: string) {
+  if (!open) return
+  void scrollRunDetailsExpansionIntoView(messageId)
+}
+
+async function scrollRunDetailsExpansionIntoView(messageId: string) {
+  await nextTick()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+
+  const container = messagesScrollContainer.value
+  const element = runDetailsElements.get(messageId)
+  if (!container || !element) return
+
+  const containerRect = container.getBoundingClientRect()
+  const elementRect = element.getBoundingClientRect()
+  const bottomGap = 12
+  const overflow = elementRect.bottom - containerRect.bottom + bottomGap
+  if (overflow <= 0) return
+
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  container.scrollTo({
+    top: container.scrollTop + overflow,
+    behavior: prefersReducedMotion ? 'auto' : 'smooth'
+  })
+}
+
+function withNativeMessageActions(message: AcpChatMessage): AcpChatMessageWithActions {
+  const text = acpMessageText(message).trim()
+  if (message.role !== 'user' || !text || message.turnId === activePromptTurnId.value) return message
+
+  return {
+    ...message,
+    actions: [
+      {
+        label: 'Copy message',
+        icon: 'i-lucide-copy',
+        onClick: () => copyMessageText(message)
+      },
+      {
+        label: 'Edit message',
+        icon: 'i-lucide-pencil',
+        disabled: submitting.value,
+        onClick: () => editUserMessage(message)
+      }
+    ]
+  }
+}
+
+function assistantMessageActions(message: AcpChatMessage): MessageAction[] {
+  const text = acpMessageText(message).trim()
+  if (message.role !== 'assistant' || !text || message.turnId === activePromptTurnId.value) return []
+
+  const isSpeaking = readAloud.speakingMessageId.value === message.id
+  const isGeneratingSpeech = readAloud.generatingMessageId.value === message.id
+  const isReadAloudActive = isSpeaking || isGeneratingSpeech
+  return [
+    {
+      label: 'Regenerate response',
+      icon: 'i-lucide-refresh-cw',
+      disabled: submitting.value,
+      onClick: () => regenerateResponse(message)
+    },
+    {
+      label: 'Copy message',
+      icon: 'i-lucide-copy',
+      onClick: () => copyMessageText(message)
+    },
+    {
+      label: isReadAloudActive ? 'Stop read aloud' : 'Read aloud',
+      icon: isGeneratingSpeech ? 'i-lucide-loader-circle' : isSpeaking ? 'i-lucide-square' : 'i-lucide-volume-2',
+      disabled: !readAloud.isSupported.value,
+      color: 'neutral',
+      variant: 'ghost',
+      class: isGeneratingSpeech
+        ? 'text-primary hover:text-primary animate-spin'
+        : 'text-primary hover:text-primary',
+      onClick: () => readAloud.read(message)
+    }
+  ]
+}
+
+function hasAssistantFooter(message: AcpChatMessage) {
+  return messageMetadataItems(message).length > 0 || assistantMessageActions(message).length > 0
+}
+
+function messageMetadataItems(message: AcpChatMessage) {
+  if (
+    message.role !== 'assistant'
+    || message.turnId === activePromptTurnId.value
+    || !acpMessageText(message).trim()
+  ) return []
+
+  const items: Array<{ key: string, label: string, title?: string }> = []
+  if (message.createdAt) {
+    items.push({
+      key: 'time',
+      label: formatAcpMessageTimestamp(message.createdAt),
+      title: acpMessageTimestampDetails(message.createdAt)
+    })
+  }
+
+  const duration = formatAcpMessageDuration(message)
+  if (duration) {
+    items.push({
+      key: 'duration',
+      label: duration,
+      title: acpMessageDurationDetails(message).map(item => `${item.label}: ${item.value}`).join('\n')
+    })
+  }
+
+  const tokens = formatAcpTokenCount(message)
+  if (tokens) {
+    items.push({
+      key: 'tokens',
+      label: tokens,
+      title: acpTokenDetails(message.usage).map(item => `${item.label}: ${item.value}`).join('\n')
+    })
+  }
+
+  return items
+}
+
+async function regenerateResponse(message: AcpChatMessage) {
+  if (submitting.value) return
+  const prompt = previousUserPromptFor(message)
+  if (!prompt) {
+    toast.add({ color: 'warning', title: 'Could not find the prompt to regenerate.' })
+    return
+  }
+  await sendPrompt(prompt)
+}
+
+function previousUserPromptFor(message: AcpChatMessage) {
+  const source = messages.value
+  const messageIds = new Set(message.id.split(':'))
+  let index = source.findIndex(item => messageIds.has(item.id))
+  if (index === -1 && message.turnId) {
+    index = source.findIndex(item => item.role === 'assistant' && item.turnId === message.turnId && hasTextParts(item))
+  }
+  if (index === -1) return ''
+
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = source[cursor]
+    if (candidate?.role !== 'user') continue
+    const text = acpMessageText(candidate).trim()
+    if (text) return text
+  }
+  return ''
+}
+
+async function copyMessageText(message: AcpChatMessage) {
+  const text = acpMessageText(message).trim()
+  if (!text) return
+
+  try {
+    await writeClipboardText(text)
+    toast.add({ title: 'Message copied' })
+  } catch (err) {
+    showError(err, 'Failed to copy message')
+  }
+}
+
+async function editUserMessage(message: AcpChatMessage) {
+  const text = acpMessageText(message).trim()
+  if (!text || submitting.value) return
+
+  input.value = text
+  await nextTick()
+  promptContainer.value?.querySelector('textarea')?.focus()
+}
+
 function groupProcessMessages(source: AcpChatMessage[]): AcpChatMessage[] {
   const grouped: AcpChatMessage[] = []
 
@@ -322,11 +640,25 @@ function hasTextParts(message: AcpChatMessage) {
 }
 
 function hasProcessParts(message: AcpChatMessage) {
-  return message.parts.some(part => part.type === 'tool' || part.type === 'reasoning' || part.type === 'event')
+  return message.parts.some(part => part.type === 'tool' || part.type === 'reasoning' || part.type === 'event') || hasThoughtActivity(message)
 }
 
 function reasoningText(message: AcpChatMessage) {
   return message.parts.filter(part => part.type === 'reasoning').map(part => part.text).join('')
+}
+
+function hasThoughtActivity(message: AcpChatMessage) {
+  return Boolean(reasoningText(message).trim() || thoughtTokenCount(message))
+}
+
+function thoughtTokenCount(message: AcpChatMessage) {
+  return message.usage?.thoughtTokens && message.usage.thoughtTokens > 0 ? message.usage.thoughtTokens : 0
+}
+
+function thoughtDetail(message: AcpChatMessage) {
+  const tokens = thoughtTokenCount(message)
+  if (!tokens) return ''
+  return `${tokens.toLocaleString()} thought token${tokens === 1 ? '' : 's'} were used for this turn. Hermes ACP did not expose the raw thought text for this model response.`
 }
 
 function toolParts(message: AcpChatMessage): AcpToolPart[] {
@@ -339,6 +671,7 @@ function runDetailSummary(message: AcpChatMessage) {
   const running = runningToolParts(message).length
   const completed = tools.length - failed - running
   const parts: string[] = []
+  if (hasThoughtActivity(message)) parts.push('Reasoned')
   if (running) parts.push(`${running} running`)
   if (completed) parts.push(`${completed} completed`)
   if (failed) parts.push(`${failed} failed`)
@@ -357,7 +690,7 @@ function runActivityLabel(message: AcpChatMessage) {
 }
 
 function hasRunDetails(message: AcpChatMessage) {
-  return toolParts(message).length > 0 || Boolean(reasoningText(message))
+  return toolParts(message).length > 0 || hasThoughtActivity(message)
 }
 
 function appendVoiceText(text: string) {
@@ -458,7 +791,11 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
 
     <template #body>
       <div class="flex h-full min-h-0 flex-col">
-        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-6">
+        <div
+          ref="messagesScrollContainer"
+          class="min-h-0 flex-1 overflow-y-auto px-4 py-6"
+          :style="messagesScrollShadowStyle"
+        >
           <div class="mx-auto w-full max-w-3xl space-y-4">
             <UAlert
               v-if="error"
@@ -471,6 +808,19 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
             <div v-if="loading && !messages.length" class="space-y-4" aria-label="Loading ACP session">
               <USkeleton class="h-16 w-4/5 rounded-2xl" />
               <USkeleton class="ml-auto h-10 w-2/5 rounded-2xl" />
+            </div>
+
+            <div v-if="hasOlderMessages" class="flex justify-center">
+              <UButton
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-arrow-up"
+                :loading="loadingOlderMessages"
+                @click="loadOlderMessages"
+              >
+                Load older messages
+              </UButton>
             </div>
 
             <UCard
@@ -517,51 +867,125 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
               v-if="!loading || messages.length"
               :messages="displayMessages"
               :status="submitStatus"
+              :should-auto-scroll="true"
+              :should-scroll-to-bottom="true"
               :auto-scroll="true"
+              auto-scroll-icon="i-lucide-arrow-down"
+              :user="chatUserProps"
+              :assistant="chatAssistantProps"
             >
               <template #content="{ message }: { message: AcpChatMessage }">
-                <div class="space-y-3">
+                <template v-if="message.role === 'user'">
+                  {{ partText(message) }}
+                </template>
+                <div v-else>
                   <Comark
                     v-if="partText(message)"
                     :markdown="partText(message)"
                     class="prose prose-sm dark:prose-invert max-w-none"
                   />
-                  <details
-                    v-if="hasRunDetails(message)"
-                    class="group/run-details rounded-lg border border-default bg-muted/20 text-sm"
+                  <div
+                    v-if="hasAssistantFooter(message)"
+                    class="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-none text-muted opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100"
                   >
-                    <summary
-                      class="flex w-full cursor-pointer list-none items-center gap-2 overflow-hidden px-3 py-2 text-left text-muted transition-colors hover:text-default [&::-webkit-details-marker]:hidden"
+                    <template
+                      v-for="(item, itemIndex) in messageMetadataItems(message)"
+                      :key="item.key"
                     >
-                      <UIcon
-                        name="i-lucide-chevron-right"
-                        class="size-3.5 shrink-0 text-dimmed transition-transform group-open/run-details:rotate-90"
-                      />
-                      <UIcon
-                        :name="toolParts(message).some(part => part.error) ? 'i-lucide-circle-alert' : 'i-lucide-list-tree'"
-                        class="size-3.5 shrink-0"
-                        :class="toolParts(message).some(part => part.error) ? 'text-error' : 'text-dimmed'"
-                      />
-                      <span class="shrink-0 font-medium text-toned">Run details</span>
-                      <span v-if="runDetailSummary(message)" class="min-w-0 truncate text-dimmed">
-                        {{ runDetailSummary(message) }}
-                      </span>
-                    </summary>
+                      <span v-if="itemIndex" class="text-dimmed">·</span>
+                      <span :title="item.title">{{ item.label }}</span>
+                    </template>
+                    <span
+                      v-if="assistantMessageActions(message).length"
+                      class="inline-flex items-center gap-x-1.5"
+                    >
+                      <span
+                        v-if="messageMetadataItems(message).length"
+                        class="text-dimmed"
+                      >·</span>
+                      <UTooltip
+                        v-for="(action, actionIndex) in assistantMessageActions(message)"
+                        :key="actionIndex"
+                        :text="action.label"
+                      >
+                        <UButton
+                          size="xs"
+                          :icon="action.icon"
+                          :color="action.color || 'neutral'"
+                          variant="ghost"
+                          :disabled="action.disabled"
+                          :aria-label="action.label"
+                          :class="['-my-0.5 size-4 p-0 text-muted hover:text-toned disabled:text-dimmed', action.class]"
+                          :ui="{ leadingIcon: 'size-3' }"
+                          @click="action.onClick($event, message as AcpChatMessageWithActions)"
+                        />
+                      </UTooltip>
+                    </span>
+                  </div>
+                  <UChatTool
+                    v-if="hasRunDetails(message)"
+                    text="Run details"
+                    :suffix="runDetailSummary(message)"
+                    :icon="toolParts(message).some(part => part.error) ? 'i-lucide-circle-alert' : 'i-lucide-list-tree'"
+                    variant="card"
+                    chevron="trailing"
+                    :ref="element => setRunDetailsElement(message.id, element)"
+                    :class="hasAssistantFooter(message) || partText(message) ? 'mt-4' : 'mt-2'"
+                    :ui="{
+                      root: 'bg-muted/20',
+                      trigger: 'px-3 py-2',
+                      leadingIcon: toolParts(message).some(part => part.error) ? 'text-error' : 'text-dimmed',
+                      body: 'max-h-none space-y-2 overflow-visible border-t border-default p-3 text-sm text-dimmed whitespace-normal'
+                    }"
+                    @update:open="open => onRunDetailsOpen(open, message.id)"
+                  >
+                    <AcpThoughtItem
+                      v-if="hasThoughtActivity(message)"
+                      :text="reasoningText(message)"
+                      :detail="thoughtDetail(message)"
+                    />
 
-                    <div class="space-y-2 border-t border-default px-3 py-2">
-                      <UChatReasoning
-                        v-if="reasoningText(message)"
-                        :text="reasoningText(message)"
-                        :ui="{ body: 'max-h-[200px] pt-1 overflow-y-auto text-sm text-dimmed whitespace-pre-wrap' }"
-                      />
-
-                      <AcpToolCallItem
-                        v-for="part in toolParts(message)"
-                        :key="part.toolCallId"
-                        :part="part"
-                      />
-                    </div>
-                  </details>
+                    <AcpToolCallItem
+                      v-for="part in toolParts(message)"
+                      :key="part.toolCallId"
+                      :part="part"
+                    />
+                  </UChatTool>
+                </div>
+              </template>
+              <template #actions="{ message }: { message: AcpChatMessageWithActions }">
+                <div
+                  v-if="message.role === 'user' && message.actions?.length"
+                  class="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 text-xs leading-none text-muted"
+                >
+                  <template
+                    v-for="(item, itemIndex) in messageMetadataItems(message)"
+                    :key="item.key"
+                  >
+                    <span v-if="itemIndex" class="text-dimmed">·</span>
+                    <span :title="item.title">{{ item.label }}</span>
+                  </template>
+                  <span
+                    v-if="messageMetadataItems(message).length && message.actions?.length"
+                    class="text-dimmed"
+                  >·</span>
+                  <UTooltip
+                    v-for="(action, actionIndex) in message.actions"
+                    :key="actionIndex"
+                    :text="action.label"
+                  >
+                    <UButton
+                      size="xs"
+                      :icon="action.icon"
+                      :color="action.color || 'neutral'"
+                      variant="ghost"
+                      :disabled="action.disabled"
+                      :aria-label="action.label"
+                      class="-my-0.5 size-4 p-0 text-muted hover:text-toned disabled:text-dimmed"
+                      :ui="{ leadingIcon: 'size-3' }"
+                      @click="action.onClick($event, message)"
+                    />
+                  </UTooltip>
                 </div>
               </template>
             </UChatMessages>
@@ -581,9 +1005,9 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
           </div>
         </div>
 
-        <div class="shrink-0 border-t border-default bg-default/80 px-4 py-4 backdrop-blur">
+        <div class="shrink-0 bg-default/80 px-4 py-4 backdrop-blur">
           <div class="mx-auto w-full max-w-3xl">
-            <div class="relative">
+            <div ref="promptContainer" class="relative">
               <ChatSlashCommandMenu
                 :commands="slashCommands.filteredCommands.value"
                 :open="slashCommands.isOpen.value"

@@ -1,7 +1,7 @@
 import type { LoadSessionRequest } from '@agentclientprotocol/sdk'
 import { createError, defineEventHandler, getRouterParam, getQuery } from 'h3'
 import { useRuntimeConfig } from '#imports'
-import { rebuildAcpSessionProjectionFromLoad } from '../../../acp/sessionLoadReplay'
+import { rebuildAcpSessionProjectionFromLoad } from '../../../../../acp/sessionLoadReplay'
 
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
@@ -18,6 +18,11 @@ export default defineEventHandler(async (event) => {
     mcpServers: []
   }
 
-  const { response, events } = await rebuildAcpSessionProjectionFromLoad(config, params)
-  return { ...response, events }
+  const { transcript, events } = await rebuildAcpSessionProjectionFromLoad(config, params)
+  return {
+    sessionId,
+    rebuilt: true,
+    events,
+    transcript
+  }
 })

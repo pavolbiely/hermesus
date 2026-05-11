@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { normalizeAcpBridgeEvent } from '../app/utils/acpBridgeEventNormalization.ts'
-import { applyAcpChatEvent, createEmptyAcpTranscriptState } from '../app/utils/acpEventNormalization.ts'
+import { normalizeAcpBridgeEvent } from '../shared/acp/bridgeEventNormalization.ts'
+import { applyAcpChatEvent, createEmptyAcpTranscriptState } from '../shared/acp/eventNormalization.ts'
 
 function text(message) {
   return message.parts.filter(part => part.type === 'text').map(part => part.text).join('')
@@ -13,7 +13,7 @@ test('normalizes ACP prompt and assistant chunks into one ordered turn', () => {
     { type: 'prompt.started', sessionId: 's1', turnId: 't1', messageId: 'u1', message: 'Say hello' },
     { type: 'session.update', sessionId: 's1', turnId: 't1', notification: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', messageId: 'a1', content: { type: 'text', text: 'hel' } } } },
     { type: 'session.update', sessionId: 's1', turnId: 't1', notification: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', messageId: 'a1', content: { type: 'text', text: 'lo' } } } },
-    { type: 'prompt.completed', sessionId: 's1', turnId: 't1', messageId: 'u1', response: { stopReason: 'end_turn' } }
+    { type: 'prompt.completed', sessionId: 's1', turnId: 't1', messageId: 'a1', response: { stopReason: 'end_turn', usage: { totalTokens: 9, inputTokens: 4, outputTokens: 5 } } }
   ]
 
   for (const event of events) {
@@ -22,9 +22,9 @@ test('normalizes ACP prompt and assistant chunks into one ordered turn', () => {
     }
   }
 
-  assert.deepEqual(state.messages.map(message => [message.role, message.turnId, text(message)]), [
-    ['user', 't1', 'Say hello'],
-    ['assistant', 't1', 'hello']
+  assert.deepEqual(state.messages.map(message => [message.role, message.turnId, text(message), message.usage?.totalTokens]), [
+    ['user', 't1', 'Say hello', undefined],
+    ['assistant', 't1', 'hello', 9]
   ])
 })
 
@@ -125,6 +125,32 @@ test('normalizes replayed user chunks and assistant chunks in order', () => {
   ])
 })
 
+test('keeps legacy replay turns separate when old ACP events have no message ids', () => {
+  let state = createEmptyAcpTranscriptState()
+  const events = [
+    { type: 'session.update', sessionId: 'legacy-session', sequence: 1, notification: { sessionId: 'legacy-session', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'first question' } } } },
+    { type: 'session.update', sessionId: 'legacy-session', sequence: 2, notification: { sessionId: 'legacy-session', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'first answer' } } } },
+    { type: 'session.update', sessionId: 'legacy-session', sequence: 3, notification: { sessionId: 'legacy-session', update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Read file' } } },
+    { type: 'session.update', sessionId: 'legacy-session', sequence: 4, notification: { sessionId: 'legacy-session', update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'second question' } } } },
+    { type: 'session.update', sessionId: 'legacy-session', sequence: 5, notification: { sessionId: 'legacy-session', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'second answer' } } } }
+  ]
+
+  for (const event of events) {
+    for (const chatEvent of normalizeAcpBridgeEvent(event)) {
+      state = applyAcpChatEvent(state, chatEvent)
+    }
+  }
+
+  assert.deepEqual(state.messages.map(message => [message.role, text(message)]), [
+    ['user', 'first question'],
+    ['assistant', 'first answer'],
+    ['user', 'second question'],
+    ['assistant', 'second answer']
+  ])
+  assert.equal(state.messages[1].parts.some(part => part.type === 'tool' && part.toolCallId === 'tool-1'), true)
+  assert.notEqual(state.messages[0].turnId, state.messages[2].turnId)
+})
+
 test('dedupes load-response events replayed again by SSE backlog using sequence ids', () => {
   let state = createEmptyAcpTranscriptState()
   const event = { type: 'session.update', sessionId: 's1', sequence: 1, notification: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', messageId: 'a1', content: { type: 'text', text: 'once' } } } }
@@ -142,7 +168,7 @@ test('marks open tool calls completed when a run completes without tool output u
   let state = createEmptyAcpTranscriptState()
   const events = [
     { type: 'session.update', sessionId: 's1', turnId: 't1', notification: { sessionId: 's1', update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'Search files' } } },
-    { type: 'prompt.completed', sessionId: 's1', turnId: 't1', response: { stopReason: 'end_turn' } }
+    { type: 'prompt.completed', sessionId: 's1', sequence: 2, turnId: 't1', response: { stopReason: 'end_turn' } }
   ]
 
   for (const event of events) {
@@ -154,4 +180,19 @@ test('marks open tool calls completed when a run completes without tool output u
   const tool = state.messages[0]?.parts[0]
   assert.equal(tool?.type, 'tool')
   assert.equal(tool.state, 'completed')
+})
+
+test('sequenced prompt completion emits distinct completion and run event ids', () => {
+  const events = normalizeAcpBridgeEvent({
+    type: 'prompt.completed',
+    sessionId: 's1',
+    sequence: 9,
+    turnId: 't1',
+    messageId: 'a1',
+    response: { stopReason: 'end_turn' }
+  })
+
+  assert.deepEqual(events.map(event => event.type), ['message.completed', 'run.completed'])
+  assert.equal(new Set(events.map(event => event.eventId)).size, 2)
+  assert.deepEqual(events.map(event => event.sequence), [9, 9])
 })

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { isAcpPlanUpdate, normalizeAcpPlanEntries } from '../app/utils/acpPlanNormalization.ts'
+import { isAcpPlanUpdate, normalizeAcpPlanEntries } from '../shared/acp/planNormalization.ts'
 
 test('normalizes ACP plan entries as complete replacement data', () => {
   const entries = normalizeAcpPlanEntries([

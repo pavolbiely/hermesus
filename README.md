@@ -35,6 +35,7 @@ The product direction is simple:
 - Same-origin `/api/acp/*` routes backed by a Nitro-owned `hermes acp` subprocess.
 - Prompt streaming over SSE with a bounded per-session backlog so early events are replayed instead of dropped.
 - Session load replay capture for older CLI-created sessions.
+- Persistent normalized transcript projection for fast chat opens, latest-message paging, and explicit rebuild/debug workflows.
 - Transcript reconciliation keyed by ACP/session identities, not text/timestamp matching.
 - Safe permission-request handling through explicit UI/server resolution.
 - Queued follow-up messages and draft persistence for smoother continuation.
@@ -74,8 +75,9 @@ It handles:
 - `hermes acp` process lifecycle and initialization
 - ACP session list/create/load/fork/close
 - prompt start, cancellation, and session-scoped SSE events
-- server-side replay capture for `session/load`
+- server-side replay capture for `session/load` plus stored transcript projection rebuilds
 - active prompt correlation so assistant chunks attach to the right user turn
+- fast transcript reads, projection invalidation, and manual projection rebuild routes
 - permission request publication and resolution
 - app-owned ACP session metadata and workspace settings
 
@@ -140,8 +142,9 @@ web/                                        # Nuxt/Nitro app
   app/composables/                          # ACP/app API clients and local UI state
   app/pages/acp/[id].vue                    # ACP-native chat route
   app/types/                                # ACP API, ACP transcript, and UI chat types
-  app/utils/                                # ACP normalization, sidebar mapping, drafts, sounds, etc.
-  server/acp/                               # ACP SDK bridge, event backlog, and runtime helpers
+  app/utils/                                # ACP normalization re-exports, sidebar mapping, drafts, sounds, etc.
+  shared/acp/                               # server/browser-safe transcript types and event normalization
+  server/acp/                               # ACP SDK bridge, event backlog, transcript projection, and runtime helpers
   server/api/acp/                           # ACP protocol-backed Nitro routes
   server/api/app/                           # Hermesum-owned product routes
   server/app/                               # app metadata/workspace helpers
@@ -156,7 +159,26 @@ run-local.sh                                # local Nuxt dev/preview orchestrati
 - Before agentic coding, check [`.hermes/agent-map.md`](.hermes/agent-map.md) and run `node scripts/report-hotspots.mjs` if broad file targeting is needed.
 - Keep `.hermes/agent-map.md`, active `.hermes/plans/*.md`, and this README current when code boundaries, developer workflow, verification commands, or implemented behavior change.
 - Use `/api/acp/*` for ACP runtime behavior and `/api/app/*` for Hermesum-owned product concerns.
+- Transcript display is projection-first: the chat route reads `/api/acp/sessions/:id/transcript` before background ACP activation, and older history is paged with the transcript endpoint instead of blocking on `session/load` replay.
 - Treat workspace, voice, and session-management features as high-trust flows; prefer explicit validation and clear UI feedback.
+
+### Transcript projection debugging
+
+Hermesum stores a rebuildable normalized transcript projection under `.runtime/acp-transcripts/` for fast chat display. These routes affect only the Hermesum projection, not the underlying Hermes Agent session data:
+
+```bash
+# Read latest projected messages
+curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20'
+
+# Read older messages before a returned nextBefore cursor
+curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20&before=<nextBefore>'
+
+# Delete one local projection
+curl -X DELETE 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript'
+
+# Rebuild one projection from ACP session/load replay
+curl -X POST 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript/rebuild'
+```
 
 ## Verification
 
@@ -179,6 +201,7 @@ PORT=4046 HOST=127.0.0.1 node .output/server/index.mjs
 curl http://127.0.0.1:4046/api/acp/health
 curl -X POST http://127.0.0.1:4046/api/acp/initialize
 curl http://127.0.0.1:4046/api/acp/sessions
+curl 'http://127.0.0.1:4046/api/acp/sessions/<sessionId>/transcript?limit=20'
 ```
 
 Browser smoke should confirm the app renders beyond the startup loader, the sidebar lists ACP/CLI sessions, opening a session shows transcript content, sending a prompt streams visibly, cancel/permission paths remain safe, model/mode controls render when exposed by ACP, and workspace selection affects new session cwd.

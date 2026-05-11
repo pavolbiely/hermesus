@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { applyAcpChatEvent, createEmptyAcpTranscriptState, createAcpTurnContext } from '../app/utils/acpEventNormalization.ts'
+import { applyAcpChatEvent, createEmptyAcpTranscriptState, createAcpTurnContext } from '../shared/acp/eventNormalization.ts'
 
 function text(message) {
   return message.parts.filter(part => part.type === 'text').map(part => part.text).join('')
@@ -70,11 +70,37 @@ test('completion adopts the matching turn message id without touching newer assi
   let state = createEmptyAcpTranscriptState()
   state = applyAcpChatEvent(state, { type: 'message.delta', sessionId: 'session-1', turnId: 'turn-1', text: 'OK' })
   state = applyAcpChatEvent(state, { type: 'message.delta', sessionId: 'session-1', turnId: 'turn-2', text: 'OK' })
-  state = applyAcpChatEvent(state, { type: 'message.completed', sessionId: 'session-1', turnId: 'turn-1', messageId: 'server-assistant-1' })
+  state = applyAcpChatEvent(state, {
+    type: 'message.completed',
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    messageId: 'server-assistant-1',
+    occurredAt: '2026-05-11T00:00:03.000Z',
+    usage: { totalTokens: 12, inputTokens: 5, outputTokens: 7 }
+  })
 
-  assert.deepEqual(state.messages.map(message => [message.id, message.turnId, text(message)]), [
-    ['server-assistant-1', 'turn-1', 'OK'],
-    ['assistant-turn-2', 'turn-2', 'OK']
+  assert.deepEqual(state.messages.map(message => [message.id, message.turnId, text(message), message.completedAt, message.usage?.totalTokens]), [
+    ['server-assistant-1', 'turn-1', 'OK', '2026-05-11T00:00:03.000Z', 12],
+    ['assistant-turn-2', 'turn-2', 'OK', undefined, undefined]
+  ])
+})
+
+test('replayed completion metadata attaches by user message id when turn ids differ', () => {
+  let state = createEmptyAcpTranscriptState()
+  state = applyAcpChatEvent(state, { type: 'user.message.delta', sessionId: 'session-1', turnId: 'user-message-1', messageId: 'user-message-1', text: 'Old prompt' })
+  state = applyAcpChatEvent(state, { type: 'message.delta', sessionId: 'session-1', turnId: 'assistant-message-1', messageId: 'assistant-message-1', text: 'Old answer' })
+  state = applyAcpChatEvent(state, {
+    type: 'message.completed',
+    sessionId: 'session-1',
+    turnId: 'original-live-turn-id',
+    userMessageId: 'user-message-1',
+    occurredAt: '2026-05-11T00:00:03.000Z',
+    usage: { totalTokens: 12, inputTokens: 5, outputTokens: 7 }
+  })
+
+  assert.deepEqual(state.messages.map(message => [message.id, message.turnId, text(message), message.completedAt, message.usage?.totalTokens]), [
+    ['user-message-1', 'user-message-1', 'Old prompt', undefined, undefined],
+    ['assistant-message-1', 'assistant-message-1', 'Old answer', '2026-05-11T00:00:03.000Z', 12]
   ])
 })
 
