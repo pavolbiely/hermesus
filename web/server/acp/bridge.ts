@@ -148,6 +148,8 @@ class AcpBridge {
       } catch (error) {
         console.warn('Failed to persist ACP turn metadata', error)
       }
+      const active = activePromptBySession.get(params.sessionId)
+      if (active?.turnId !== turnId) return response
       try {
         if (!activeThoughtTurns.has(turnId)) {
           const reasoningEvent = await latestReasoningEventFromSessionFile(config, params.sessionId, turnId)
@@ -159,8 +161,11 @@ class AcpBridge {
       publishAcpEvent({ type: 'prompt.completed', sessionId: params.sessionId, turnId, messageId, userMessageId, completedAt, response })
       return response
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      publishAcpEvent({ type: 'prompt.failed', sessionId: params.sessionId, turnId, messageId, error: message })
+      const active = activePromptBySession.get(params.sessionId)
+      if (active?.turnId === turnId) {
+        const message = error instanceof Error ? error.message : String(error)
+        publishAcpEvent({ type: 'prompt.failed', sessionId: params.sessionId, turnId, messageId, error: message })
+      }
       throw error
     } finally {
       const active = activePromptBySession.get(params.sessionId)
@@ -171,9 +176,17 @@ class AcpBridge {
 
   async cancel(config: BridgeRuntimeConfig, params: CancelNotification) {
     const connection = await this.readyConnection(config)
+    const active = activePromptBySession.get(params.sessionId)
     await connection.cancel(params)
+    if (!active) return
     activePromptBySession.delete(params.sessionId)
-    publishAcpEvent({ type: 'prompt.cancelled', sessionId: params.sessionId })
+    activeThoughtTurns.delete(active.turnId)
+    publishAcpEvent({
+      type: 'prompt.cancelled',
+      sessionId: params.sessionId,
+      turnId: active.turnId,
+      messageId: active.messageId
+    })
   }
 
   private async readyConnection(config: BridgeRuntimeConfig) {

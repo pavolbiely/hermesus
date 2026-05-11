@@ -43,6 +43,7 @@ export function useAcpApi() {
     const source = new EventSource(acpSessionEventsUrl(sessionId, options))
     const eventTypes: AcpBridgeEvent['type'][] = [
       'session.update',
+      'transcript.truncated',
       'permission.requested',
       'permission.resolved',
       'prompt.started',

@@ -2,11 +2,14 @@ import type { ContentBlock, PromptRequest } from '@agentclientprotocol/sdk'
 import { createError, defineEventHandler, getRouterParam, readBody } from 'h3'
 import { useRuntimeConfig } from '#imports'
 import { getAcpBridge } from '../../../../acp/bridge'
+import { ensureAcpSessionSequenceAtLeast, publishAcpEvent } from '../../../../acp/events'
+import { getAcpTranscriptStore } from '../../../../acp/transcriptStore'
 
 type PromptBody = {
   message?: string
   messageId?: string
   prompt?: ContentBlock[]
+  replaceFromMessageId?: string
   turnId?: string
 }
 
@@ -26,12 +29,24 @@ export default defineEventHandler(async (event) => {
   }
 
   const body = await readBody<PromptBody>(event).catch((): PromptBody => ({}))
+  const prompt = toPromptBlocks(body)
+  const snapshot = await getAcpTranscriptStore().get(sessionId)
+  ensureAcpSessionSequenceAtLeast(sessionId, snapshot?.cursor)
+
+  if (typeof body.replaceFromMessageId === 'string' && body.replaceFromMessageId.trim()) {
+    publishAcpEvent({
+      type: 'transcript.truncated',
+      sessionId,
+      messageId: body.replaceFromMessageId
+    })
+  }
+
   const turnId = body.turnId || crypto.randomUUID()
   const messageId = body.messageId || crypto.randomUUID()
   const params: PromptRequest = {
     sessionId,
     messageId,
-    prompt: toPromptBlocks(body)
+    prompt
   }
 
   void getAcpBridge().prompt(config, params, turnId).catch(() => undefined)

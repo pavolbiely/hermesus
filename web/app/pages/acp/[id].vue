@@ -75,6 +75,7 @@ const sessionId = computed(() => String(route.params.id || ''))
 const draftId = computed(() => chatSessionDraftId(sessionId.value))
 const { input, clearDraft } = useChatDraft(draftId)
 const messagesScrollContainer = ref<HTMLElement | null>(null)
+const messagesContentContainer = ref<HTMLElement | null>(null)
 const promptContainer = ref<HTMLElement | null>(null)
 const runDetailsElements = new Map<string, HTMLElement>()
 const runDetailsScrollCleanup = new Map<string, () => void>()
@@ -120,6 +121,13 @@ type ChatSubmitStatus = 'ready' | 'submitted' | 'streaming'
 const submitStatusState = ref<ChatSubmitStatus>('ready')
 const submitting = computed(() => Boolean(activePromptTurnId.value))
 const submitStatus = computed(() => submitting.value ? submitStatusState.value : 'ready')
+const chatMessagesStatus = computed<ChatSubmitStatus>(() => submitStatus.value === 'submitted' ? 'streaming' : submitStatus.value)
+const chatBottomFollow = useChatBottomFollow({
+  scrollContainer: messagesScrollContainer,
+  contentContainer: messagesContentContainer,
+  active: submitting,
+  waitForFrame: waitForAnimationFrame
+})
 const queuedForSession = computed(() => queuedMessages.forSession(sessionId.value))
 const messages = computed(() => transcript.messages.value)
 const currentAcpSession = computed(() => sidebarSessionsData.data.value?.sessions.find(session => session.sessionId === sessionId.value) || null)
@@ -153,8 +161,8 @@ const chatUserProps = {
   side: 'right' as const,
   variant: 'soft' as const,
   ui: {
-    container: 'pb-5',
-    actions: 'bottom-0'
+    container: 'pb-6',
+    actions: 'right-0 bottom-0 w-max'
   }
 }
 const chatAssistantProps = {
@@ -526,11 +534,16 @@ function touchSidebarSession(targetSessionId: string, updatedAt = new Date().toI
   }
 }
 
-async function sendPrompt(message: string, attachments: ChatPromptAttachment[] = []) {
+async function sendPrompt(message: string, attachments: ChatPromptAttachment[] = [], options: { replaceFromMessageId?: string } = {}) {
   error.value = null
+  const previousMessages = options.replaceFromMessageId
+    ? transcript.state.value.messages.map(item => ({ ...item, parts: item.parts.map(part => ({ ...part })) }))
+    : null
+  const previousCursor = transcript.state.value.cursor
   const turnId = crypto.randomUUID()
   const messageId = crypto.randomUUID()
   const occurredAt = new Date().toISOString()
+  if (options.replaceFromMessageId) transcript.truncateFromMessage(options.replaceFromMessageId)
   transcript.applyEvent({
     type: 'user.message',
     eventId: `optimistic-user:${turnId}`,
@@ -550,10 +563,26 @@ async function sendPrompt(message: string, attachments: ChatPromptAttachment[] =
     await api.startPrompt(sessionId.value, {
       prompt: attachmentsToPromptBlocks(message || 'See attached files.', attachments),
       turnId,
-      messageId
+      messageId,
+      replaceFromMessageId: options.replaceFromMessageId
     })
     return true
   } catch (err) {
+    if (previousMessages) {
+      transcript.loadSnapshot({
+        sessionId: sessionId.value,
+        cursor: previousCursor,
+        updatedAt: new Date().toISOString(),
+        messages: previousMessages,
+        pendingPermissions: pendingPermissions.value,
+        planEntries: planEntries.value,
+        prompt: null,
+        models: modelState.value,
+        modes: modeState.value,
+        configOptions: configOptions.value,
+        availableCommands: availableCommands.value
+      })
+    }
     if (activePromptTurnId.value === turnId) activePromptTurnId.value = null
     activeAcpPrompts.markFinished(sessionId.value, turnId)
     showError(err, 'Failed to send prompt')
@@ -630,17 +659,11 @@ function scrollSubmittedMessageToBottom(turnId: string) {
     && targetIsCurrentSession(displayedSessionId)
   )
 
-  void (async () => {
-    await nextTick()
-    if (!isCurrentSubmit()) return
-
-    scrollElementTreeToBottom(messagesScrollContainer.value)
-    await scrollElementTreeToBottomAfterRender(messagesScrollContainer.value, {
-      waitForFrame: waitForAnimationFrame,
-      stableFrameCount: 2,
-      maxFrameCount: 8
-    })
-  })()
+  void chatBottomFollow.scrollToBottomAfterRender({
+    isCurrent: isCurrentSubmit,
+    stableFrameCount: 2,
+    maxFrameCount: 8
+  })
 }
 
 function targetIsCurrentSession(targetSessionId: string | null) {
@@ -1108,7 +1131,7 @@ async function saveEditedUserMessage(message: AcpChatMessage) {
   savingEditedMessageId.value = message.id
   try {
     cancelEditingUserMessage()
-    await sendPrompt(text)
+    await sendPrompt(text, [], { replaceFromMessageId: message.id })
   } finally {
     savingEditedMessageId.value = null
   }
@@ -1338,8 +1361,10 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
           ref="messagesScrollContainer"
           class="min-h-0 flex-1 overflow-y-auto px-4 py-6"
           :style="messagesScrollShadowStyle"
+          @scroll.passive="chatBottomFollow.onScroll"
         >
           <div
+            ref="messagesContentContainer"
             class="mx-auto w-full max-w-3xl space-y-4"
             :class="initialTranscriptScrollPending && messages.length ? 'invisible' : ''"
           >
@@ -1412,8 +1437,8 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
             <UChatMessages
               v-if="!loading || messages.length"
               :messages="displayMessages"
-              :status="submitStatus"
-              :should-auto-scroll="true"
+              :status="chatMessagesStatus"
+              :should-auto-scroll="false"
               :should-scroll-to-bottom="true"
               :auto-scroll="true"
               auto-scroll-icon="i-lucide-arrow-down"
@@ -1636,7 +1661,7 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
               <template #actions="{ message }: { message: AcpChatMessageWithActions }">
                 <div
                   v-if="message.role === 'user' && editingMessageId !== message.id && (messageMetadataItems(message).length || message.actions?.length)"
-                  class="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 text-xs leading-none text-muted"
+                  class="flex min-h-4 flex-nowrap items-center justify-end gap-x-1.5 whitespace-nowrap text-xs leading-none text-muted"
                 >
                   <template
                     v-for="(item, itemIndex) in messageMetadataItems(message)"

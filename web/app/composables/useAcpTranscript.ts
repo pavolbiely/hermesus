@@ -44,6 +44,11 @@ export function useAcpTranscript() {
     }
   }
 
+  function truncateFromMessage(messageId: string) {
+    const sessionId = state.value.messages.find(message => message.id === messageId)?.sessionId || ''
+    applyEvent({ type: 'transcript.truncated', sessionId, messageId })
+  }
+
   function applyBridgeEvent(event: AcpBridgeEvent) {
     normalizeAcpBridgeEvent(event).forEach(applyEvent)
   }
@@ -54,6 +59,7 @@ export function useAcpTranscript() {
     reset,
     loadSnapshot,
     prependMessages,
+    truncateFromMessage,
     appendLocalMessage,
     applyEvent,
     applyBridgeEvent

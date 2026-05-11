@@ -53,6 +53,7 @@ export type AcpPromptRequest = {
   message?: string
   messageId?: string
   prompt?: ContentBlock[]
+  replaceFromMessageId?: string
   turnId?: string
 }
 

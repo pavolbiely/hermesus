@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { normalizeAcpBridgeEvent } from '../shared/acp/bridgeEventNormalization.ts'
 import { applyAcpChatEvent, createEmptyAcpTranscriptState, createAcpTurnContext } from '../shared/acp/eventNormalization.ts'
 
 function text(message) {
@@ -35,6 +36,58 @@ test('late assistant chunks stay with their matching older user turn', () => {
     ['user', 'old-turn', 'Old prompt'],
     ['assistant', 'old-turn', 'Old answer'],
     ['user', 'new-turn', 'New prompt']
+  ])
+})
+
+test('editing a prior user message truncates the visible branch before inserting the edited prompt', () => {
+  let state = createEmptyAcpTranscriptState()
+
+  state = applyAcpChatEvent(state, { type: 'user.message', sessionId: 'session-1', turnId: 'turn-1', messageId: 'user-1', text: 'First prompt' })
+  state = applyAcpChatEvent(state, { type: 'message.delta', sessionId: 'session-1', turnId: 'turn-1', text: 'First answer' })
+  state = applyAcpChatEvent(state, { type: 'user.message', sessionId: 'session-1', turnId: 'turn-2', messageId: 'user-2', text: 'Second prompt' })
+  state = applyAcpChatEvent(state, { type: 'message.delta', sessionId: 'session-1', turnId: 'turn-2', text: 'Second answer' })
+
+  state = applyAcpChatEvent(state, { type: 'transcript.truncated', sessionId: 'session-1', messageId: 'user-1' })
+  state = applyAcpChatEvent(state, { type: 'user.message', sessionId: 'session-1', turnId: 'turn-3', messageId: 'user-3', text: 'Edited first prompt' })
+
+  assert.deepEqual(state.messages.map(message => [message.role, message.turnId, text(message)]), [
+    ['user', 'turn-3', 'Edited first prompt']
+  ])
+})
+
+test('server truncate bridge event removes edited branch and accepts following prompt events', () => {
+  let state = createEmptyAcpTranscriptState()
+
+  state = applyAcpChatEvent(state, {
+    type: 'transcript.loaded',
+    sessionId: 'session-1',
+    cursor: 10,
+    messages: [
+      { id: 'user-1', role: 'user', sessionId: 'session-1', turnId: 'turn-1', createdAt: '2026-01-01T00:00:00.000Z', parts: [{ type: 'text', text: 'Old prompt' }] },
+      { id: 'assistant-1', role: 'assistant', sessionId: 'session-1', turnId: 'turn-1', createdAt: '2026-01-01T00:00:01.000Z', parts: [{ type: 'text', text: 'Old answer' }] }
+    ]
+  })
+
+  for (const event of normalizeAcpBridgeEvent({ type: 'transcript.truncated', sessionId: 'session-1', sequence: 11, messageId: 'user-1' })) {
+    state = applyAcpChatEvent(state, event)
+  }
+  for (const event of normalizeAcpBridgeEvent({ type: 'prompt.started', sessionId: 'session-1', sequence: 12, turnId: 'turn-2', messageId: 'user-2', message: 'Edited prompt' })) {
+    state = applyAcpChatEvent(state, event)
+  }
+  for (const event of normalizeAcpBridgeEvent({
+    type: 'session.update',
+    sessionId: 'session-1',
+    sequence: 13,
+    turnId: 'turn-2',
+    messageId: 'user-2',
+    notification: { sessionId: 'session-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'New answer' } } }
+  })) {
+    state = applyAcpChatEvent(state, event)
+  }
+
+  assert.deepEqual(state.messages.map(message => [message.role, message.turnId, text(message)]), [
+    ['user', 'turn-2', 'Edited prompt'],
+    ['assistant', 'turn-2', 'New answer']
   ])
 })
 

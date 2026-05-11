@@ -82,6 +82,7 @@ const modelButtonLabel = computed(() => props.models.find(item => item.value ===
 const reasoningButtonLabel = computed(() => props.modes.find(item => item.value === props.selectedMode)?.label || props.reasoningLabel || 'Reasoning')
 const voiceIsListening = computed(() => voiceStatus.value === 'listening')
 const voiceTooltip = computed(() => voiceIsListening.value ? 'Stop voice input' : 'Dictate by voice')
+const submitAriaLabel = computed(() => props.submitStatus === 'submitted' || props.submitStatus === 'streaming' ? 'Stop prompt' : 'Send prompt')
 const promptFooterButtonClass = 'justify-center hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent'
 const promptFooterIconButtonClass = `${promptFooterButtonClass} size-7 p-0`
 const promptFooterButtonUi = { leadingIcon: 'shrink-0', trailingIcon: 'shrink-0' }
@@ -354,6 +355,7 @@ onBeforeUnmount(() => {
         <UChatPromptSubmit
           :status="submitStatus"
           :disabled="submitDisabled"
+          :aria-label="submitAriaLabel"
           submitted-icon="i-lucide-square"
           submitted-color="error"
           submitted-variant="solid"

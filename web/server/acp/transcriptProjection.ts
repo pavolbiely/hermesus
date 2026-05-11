@@ -106,6 +106,7 @@ function applyProjectionMetadata(snapshot: AcpTranscriptSnapshot, event: AcpBrid
   }
 
   if (event.type === 'prompt.completed') {
+    if (snapshot.prompt?.status === 'cancelled' && snapshot.prompt.turnId === event.turnId) return snapshot
     return {
       ...snapshot,
       prompt: {
@@ -119,6 +120,7 @@ function applyProjectionMetadata(snapshot: AcpTranscriptSnapshot, event: AcpBrid
   }
 
   if (event.type === 'prompt.failed') {
+    if (snapshot.prompt?.status === 'cancelled' && snapshot.prompt.turnId === event.turnId) return snapshot
     return {
       ...snapshot,
       prompt: {
@@ -136,8 +138,8 @@ function applyProjectionMetadata(snapshot: AcpTranscriptSnapshot, event: AcpBrid
       ...snapshot,
       prompt: {
         status: 'cancelled',
-        turnId: snapshot.prompt?.status === 'running' ? snapshot.prompt.turnId : undefined,
-        messageId: snapshot.prompt?.status === 'running' ? snapshot.prompt.messageId : undefined,
+        turnId: event.turnId ?? (snapshot.prompt?.status === 'running' ? snapshot.prompt.turnId : undefined),
+        messageId: event.messageId ?? (snapshot.prompt?.status === 'running' ? snapshot.prompt.messageId : undefined),
         completedAt: new Date().toISOString()
       }
     }

@@ -19,6 +19,16 @@ export function applyAcpChatEvent(state: AcpTranscriptState, event: AcpChatEvent
     }
   }
 
+  if (event.type === 'transcript.truncated') {
+    const index = state.messages.findIndex(message => message.id === event.messageId)
+    if (index === -1) return cloneState(state)
+    return {
+      messages: state.messages.slice(0, index).map(cloneMessage),
+      cursor: state.cursor,
+      seenEventIds: nextSeenEventIds(state, event)
+    }
+  }
+
   const next = cloneState(state)
   rememberEvent(next, event)
 

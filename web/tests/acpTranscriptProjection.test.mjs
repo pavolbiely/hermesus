@@ -189,7 +189,20 @@ test('projection mirrors prompt terminal state', async () => {
   snapshot = applyAcpProjectionEvent(snapshot, {
     type: 'prompt.cancelled',
     sessionId,
-    sequence: 3
+    sequence: 3,
+    turnId: 'turn-1',
+    messageId: 'user-1'
+  })
+  assert.equal(snapshot.prompt.status, 'cancelled')
+  assert.equal(snapshot.prompt.turnId, 'turn-1')
+
+  snapshot = applyAcpProjectionEvent(snapshot, {
+    type: 'prompt.completed',
+    sessionId,
+    sequence: 4,
+    turnId: 'turn-1',
+    messageId: 'user-1',
+    response: {}
   })
   assert.equal(snapshot.prompt.status, 'cancelled')
 })

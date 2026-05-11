@@ -16,6 +16,12 @@ function nextSequence(sessionId: string) {
   return sequence
 }
 
+export function ensureAcpSessionSequenceAtLeast(sessionId: string, sequence: number | undefined) {
+  if (sequence === undefined || !Number.isFinite(sequence)) return
+  const current = sessionSequence.get(sessionId) ?? 0
+  if (sequence > current) sessionSequence.set(sessionId, sequence)
+}
+
 function withSequence(event: AcpBridgeEvent): AcpBridgeEvent {
   if (event.sequence !== undefined) return event
   return { ...event, sequence: nextSequence(event.sessionId) } as AcpBridgeEvent

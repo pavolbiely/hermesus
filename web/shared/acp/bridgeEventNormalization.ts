@@ -6,7 +6,7 @@ function eventId(event: AcpBridgeEvent, suffix: string) {
   if (event.type === 'prompt.started' || event.type === 'prompt.completed' || event.type === 'prompt.failed') {
     return `${event.type}:${event.turnId}:${suffix}`
   }
-  if (event.type === 'prompt.cancelled') return `${event.type}:${event.sessionId}`
+  if (event.type === 'prompt.cancelled') return `${event.type}:${event.turnId ?? event.sessionId}`
   if (event.type === 'permission.requested') return `${event.type}:${event.appRequestId}:${suffix}`
   return `${event.type}:${event.sessionId}:${suffix}`
 }
@@ -212,6 +212,16 @@ function numberField(record: Record<string, unknown>, key: string) {
 }
 
 export function normalizeAcpBridgeEvent(event: AcpBridgeEvent): AcpChatEvent[] {
+  if (event.type === 'transcript.truncated') {
+    return [{
+      type: 'transcript.truncated',
+      eventId: eventId(event, `message:${event.messageId}`),
+      sessionId: event.sessionId,
+      sequence: event.sequence,
+      messageId: event.messageId
+    }]
+  }
+
   if (event.type === 'session.update') return normalizeSessionUpdate(event)
 
   if (event.type === 'prompt.started') {

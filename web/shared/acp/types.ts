@@ -57,6 +57,7 @@ export type AcpChatEventBase = {
 
 export type AcpChatEvent =
   | (AcpChatEventBase & { type: 'transcript.loaded', cursor?: number, messages: AcpChatMessage[] })
+  | (AcpChatEventBase & { type: 'transcript.truncated', messageId: string })
   | (AcpChatEventBase & { type: 'user.message', turnId: string, messageId?: string, text: string })
   | (AcpChatEventBase & { type: 'user.message.delta', turnId: string, messageId?: string, text: string })
   | (AcpChatEventBase & { type: 'message.delta', turnId: string, messageId?: string, text: string })
@@ -77,9 +78,10 @@ export type AcpTranscriptState = {
 
 export type AcpBridgeEvent =
   | { type: 'session.update', sessionId: string, sequence?: number, notification: SessionNotification, turnId?: string, messageId?: string }
+  | { type: 'transcript.truncated', sessionId: string, sequence?: number, messageId: string }
   | { type: 'permission.requested', sessionId: string, sequence?: number, appRequestId: string, request: RequestPermissionRequest }
   | { type: 'permission.resolved', sessionId: string, sequence?: number, appRequestId: string, response: RequestPermissionResponse }
   | { type: 'prompt.started', sessionId: string, sequence?: number, turnId: string, messageId: string, message?: string }
   | { type: 'prompt.completed', sessionId: string, sequence?: number, turnId: string, messageId: string, userMessageId?: string, completedAt?: string, response: PromptResponse }
   | { type: 'prompt.failed', sessionId: string, sequence?: number, turnId: string, messageId: string, error: string }
-  | { type: 'prompt.cancelled', sessionId: string, sequence?: number }
+  | { type: 'prompt.cancelled', sessionId: string, sequence?: number, turnId?: string, messageId?: string }

@@ -1,4 +1,5 @@
 import { createError, defineEventHandler, getRouterParam, getQuery } from 'h3'
+import { ensureAcpSessionSequenceAtLeast } from '../../../../acp/events'
 import { getAcpTranscriptStore, type AcpTranscriptSnapshot } from '../../../../acp/transcriptStore'
 
 export default defineEventHandler(async (event) => {
@@ -9,6 +10,7 @@ export default defineEventHandler(async (event) => {
 
   const query = getQuery(event)
   const transcript = await getAcpTranscriptStore().get(sessionId)
+  ensureAcpSessionSequenceAtLeast(sessionId, transcript?.cursor)
   const pagedTranscript = transcript ? paginateTranscript(transcript, query) : null
   return {
     sessionId,

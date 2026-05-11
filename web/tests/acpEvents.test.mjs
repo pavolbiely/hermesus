@@ -69,3 +69,19 @@ test('publishAcpEvent keeps delivering when a subscriber throws', async () => {
   assert.equal(received[0].sequence, 1)
   assert.deepEqual(replayAcpSession(sessionId), received)
 })
+
+test('ensureAcpSessionSequenceAtLeast prevents post-restart sequence rewind', async () => {
+  const { ensureAcpSessionSequenceAtLeast, publishAcpEvent, replayAcpSession } = await eventsModule
+  const sessionId = `events-session-${randomUUID()}`
+
+  ensureAcpSessionSequenceAtLeast(sessionId, 42)
+  publishAcpEvent({
+    type: 'prompt.started',
+    sessionId,
+    turnId: 'turn-1',
+    messageId: 'message-1',
+    message: 'hello'
+  })
+
+  assert.equal(replayAcpSession(sessionId).at(-1)?.sequence, 43)
+})
