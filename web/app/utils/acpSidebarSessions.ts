@@ -21,7 +21,7 @@ export function acpSidebarSessions(response: AcpListSessionsResponse | null | un
         model: null,
         provider: null,
         reasoningEffort: null,
-        workspace: metadata?.workspace || session.cwd || null,
+        workspace: metadata?.workspace || sessionWorkspace(session.cwd),
         pinned: Boolean(metadata?.pinned),
         archived: Boolean(metadata?.archived),
         running: Boolean(session.appActivePrompt),
@@ -43,6 +43,11 @@ export function acpSidebarSessions(response: AcpListSessionsResponse | null | un
   }
 
   return Array.from(visibleSessionsByLineage.values())
+}
+
+function sessionWorkspace(cwd: string | null | undefined) {
+  const value = cwd?.trim()
+  return value && (value.startsWith('/') || value === '~' || value.startsWith('~/')) ? value : null
 }
 
 function latestIsoTimestamp(...values: Array<string | null | undefined>) {

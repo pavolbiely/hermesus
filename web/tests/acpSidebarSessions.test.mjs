@@ -101,6 +101,14 @@ test('marks sessions with active ACP prompts as running', () => {
 })
 
 
+test('ignores relative ACP cwd placeholders when deriving sidebar workspace', () => {
+  const sessions = acpSidebarSessions({
+    sessions: [{ sessionId: 'session-relative-cwd', cwd: '.', title: 'Relative cwd', updatedAt: '2026-05-11T01:00:00.000Z' }]
+  })
+
+  assert.equal(sessions[0].workspace, null)
+})
+
 test('collapses compression lineage sessions under the live tip with the root title', () => {
   const sessions = acpSidebarSessions({
     sessions: [

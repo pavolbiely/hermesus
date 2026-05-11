@@ -96,6 +96,7 @@ export type {
   LoadSessionResponse,
   NewSessionResponse,
   PermissionOption,
+  PlanEntry,
   RequestPermissionRequest,
   RequestPermissionResponse,
   SessionConfigOption,

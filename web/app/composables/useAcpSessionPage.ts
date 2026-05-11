@@ -111,7 +111,7 @@ export function useAcpSessionPage(options: AcpSessionPageOptions) {
       options.modeState.value = loaded.modes || options.modeState.value
       options.configOptions.value = loaded.configOptions || options.configOptions.value
       options.availableCommands.value = loaded.availableCommands || options.availableCommands.value
-      loaded.events.forEach(handleBridgeEvent)
+      loaded.events.forEach(event => handleBridgeEvent(event, { touchSidebar: false }))
       scrollInitialTranscriptToBottom(loadSequence, targetSessionId)
 
       subscribeToSessionEvents(targetSessionId)
@@ -223,9 +223,9 @@ export function useAcpSessionPage(options: AcpSessionPageOptions) {
     return Promise.resolve()
   }
 
-  function handleBridgeEvent(event: AcpBridgeEvent) {
+  function handleBridgeEvent(event: AcpBridgeEvent, options_: { touchSidebar?: boolean } = {}) {
     if (event.sessionId !== options.sessionId.value) return
-    options.onSessionTouched(event.sessionId)
+    if (options_.touchSidebar !== false) options.onSessionTouched(event.sessionId)
     options.transcript.applyBridgeEvent(event)
     if (event.type === 'permission.requested') {
       pendingPermissions.value = [
