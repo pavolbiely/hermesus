@@ -92,9 +92,9 @@ function runDetailsLeadingIconClass(message: AcpChatMessage) {
         />
       </div>
     </div>
-    <template v-else>
+    <span v-else class="whitespace-pre-wrap break-words">
       {{ partText(message) }}
-    </template>
+    </span>
   </template>
 
   <div
