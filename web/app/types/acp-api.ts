@@ -124,6 +124,11 @@ export type AcpTranscriptDeleteResponse = {
   deleted: boolean
 }
 
+export type AcpTranscriptClearResponse = {
+  deleted: number
+  cleared: boolean
+}
+
 export type AcpTranscriptRebuildResponse = {
   sessionId: string
   rebuilt: boolean

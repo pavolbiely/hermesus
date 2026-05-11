@@ -11,6 +11,7 @@ import type {
   AcpSessionAppMetadata,
   AcpSessionMetadataResponse,
   AcpTranscriptApiResponse,
+  AcpTranscriptClearResponse,
   AcpTranscriptDeleteResponse,
   AcpTranscriptRebuildResponse,
   ForkSessionResponse,
@@ -67,6 +68,7 @@ export function useAcpApi() {
       query: params,
       signal: options.signal
     }),
+    clearTranscripts: () => request<AcpTranscriptClearResponse>('/api/acp/transcripts', { method: 'DELETE' }),
     rebuildTranscript: (sessionId: string) => request<AcpTranscriptRebuildResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/transcript/rebuild`, { method: 'POST' }),
     deleteTranscript: (sessionId: string) => request<AcpTranscriptDeleteResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/transcript`, { method: 'DELETE' }),
     updateSessionMetadata: (sessionId: string, patch: Partial<AcpSessionAppMetadata>) => request<AcpSessionMetadataResponse>(`/api/acp/sessions/${encodeURIComponent(sessionId)}/metadata`, {

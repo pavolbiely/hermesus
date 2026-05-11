@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const props = defineProps<{
   label: string
+  elapsedLabel?: string
 }>()
 
 const runningLabel = computed(() => {
@@ -26,5 +27,12 @@ const runningLabel = computed(() => {
       <span class="min-w-0 truncate text-dimmed" :title="runningLabel.detail">{{ runningLabel.detail }}</span>
     </span>
     <UChatShimmer v-else :text="label" class="rainbow-chat-shimmer min-w-0 text-sm" />
+    <span
+      v-if="elapsedLabel"
+      class="shrink-0 font-mono text-[11px] leading-none tabular-nums text-muted/60"
+      aria-hidden="true"
+    >
+      {{ elapsedLabel }}
+    </span>
   </div>
 </template>

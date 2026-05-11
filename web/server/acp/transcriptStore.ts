@@ -44,6 +44,7 @@ export type AcpTranscriptStore = {
   get(sessionId: string): Promise<AcpTranscriptSnapshot | null>
   put(snapshot: AcpTranscriptSnapshot): Promise<void>
   delete(sessionId: string): Promise<void>
+  clear(): Promise<number>
   listSessionIds(): Promise<string[]>
 }
 
@@ -92,18 +93,14 @@ export function createFileAcpTranscriptStore(options: FileAcpTranscriptStoreOpti
       await rm(filePath(directory, sessionId), { force: true })
     },
 
+    async clear() {
+      const sessionIds = await listSessionIds(directory)
+      await Promise.all(sessionIds.map(sessionId => rm(filePath(directory, sessionId), { force: true })))
+      return sessionIds.length
+    },
+
     async listSessionIds() {
-      try {
-        const entries = await readdir(directory, { withFileTypes: true })
-        return entries
-          .filter(entry => entry.isFile() && entry.name.endsWith(transcriptFileExtension))
-          .map(entry => decodeSessionId(entry.name.slice(0, -transcriptFileExtension.length)))
-          .filter((sessionId): sessionId is string => Boolean(sessionId))
-          .sort()
-      } catch (error) {
-        if (isNotFound(error)) return []
-        throw error
-      }
+      return await listSessionIds(directory)
     }
   }
 }
@@ -123,6 +120,20 @@ export function decodeSessionId(encoded: string) {
 function filePath(directory: string, sessionId: string) {
   if (!sessionId.trim()) throw new Error('ACP transcript session id is required')
   return join(directory, `${encodeSessionId(sessionId)}${transcriptFileExtension}`)
+}
+
+async function listSessionIds(directory: string) {
+  try {
+    const entries = await readdir(directory, { withFileTypes: true })
+    return entries
+      .filter(entry => entry.isFile() && entry.name.endsWith(transcriptFileExtension))
+      .map(entry => decodeSessionId(entry.name.slice(0, -transcriptFileExtension.length)))
+      .filter((sessionId): sessionId is string => Boolean(sessionId))
+      .sort()
+  } catch (error) {
+    if (isNotFound(error)) return []
+    throw error
+  }
 }
 
 function defaultRuntimeRoot() {

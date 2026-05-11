@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { SessionConfigOption, SessionModelState } from '~/types/acp-api'
 import { NEW_CHAT_DRAFT_ID } from '~/utils/chatDrafts'
 
 const { input, clearDraft } = useChatDraft(NEW_CHAT_DRAFT_ID)
@@ -14,6 +15,11 @@ const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
 const toast = useToast()
 const spellcheck = useChatInputSpellcheck()
+const draftSessionId = ref<string | null>(null)
+const draftSessionConsumed = ref(false)
+const modelState = ref<SessionModelState | null>(null)
+const configOptions = ref<SessionConfigOption[]>([])
+const updatingSessionConfig = ref(false)
 
 const workspaceItems = computed(() => context.workspaces.value.map(workspace => ({
   label: workspace.label,
@@ -24,14 +30,43 @@ const workspaceLabel = computed(() => {
   if (!selected) return 'Workspace'
   return context.workspaces.value.find(workspace => workspace.path === selected)?.label || selected
 })
+const selectedModelId = computed(() => modelState.value?.currentModelId || undefined)
+const modelItems = computed(() => modelState.value?.availableModels.map(model => ({
+  label: model.name,
+  value: model.modelId
+})) || [])
+const reasoningConfigOption = computed(() => {
+  return configOptions.value.find((option) => {
+    if (option.type !== 'select') return false
+    const haystack = `${option.category || ''} ${option.id} ${option.name}`.toLowerCase()
+    return option.category === 'thought_level' || haystack.includes('reasoning') || haystack.includes('thought')
+  }) || null
+})
+const reasoningItems = computed(() => {
+  const option = reasoningConfigOption.value
+  return option ? configOptionItems(option) : []
+})
+const selectedReasoningId = computed(() => {
+  const value = reasoningConfigOption.value?.currentValue
+  return typeof value === 'string' && value ? value : undefined
+})
+const selectedModelLabel = computed(() => selectedModelId.value ? modelItems.value.find(item => item.value === selectedModelId.value)?.label : 'Model')
+const selectedReasoningLabel = computed(() => selectedReasoningId.value ? reasoningItems.value.find(item => item.value === selectedReasoningId.value)?.label : 'Reasoning')
 
 onMounted(() => {
   void initializeComposer()
 })
 
+onBeforeUnmount(() => {
+  if (draftSessionId.value && !draftSessionConsumed.value) {
+    void acp.closeSession(draftSessionId.value).catch(() => {})
+  }
+})
+
 async function initializeComposer() {
   try {
     await context.initialize()
+    await ensureDraftSession()
   } catch (err) {
     showError(err, 'Could not initialize new chat')
   }
@@ -53,6 +88,87 @@ watch(
 
 function appendVoiceText(text: string) {
   input.value = input.value ? `${input.value.trimEnd()} ${text}` : text
+}
+
+function configOptionItems(option: SessionConfigOption) {
+  if (option.type !== 'select') return []
+  return option.options.flatMap((item) => {
+    if ('options' in item) {
+      return item.options.map(child => ({ label: `${item.name}: ${child.name}`, value: child.value }))
+    }
+    return [{ label: item.name, value: item.value }]
+  })
+}
+
+async function ensureDraftSession() {
+  if (draftSessionId.value) return draftSessionId.value
+
+  updatingSessionConfig.value = true
+  try {
+    const result = await acp.createSession({ cwd: context.selectedWorkspace.value })
+    draftSessionId.value = result.sessionId
+    draftSessionConsumed.value = false
+    modelState.value = result.models || null
+    configOptions.value = result.configOptions || []
+    return result.sessionId
+  } finally {
+    updatingSessionConfig.value = false
+  }
+}
+
+async function resetDraftSession() {
+  const previousSessionId = draftSessionId.value
+  draftSessionId.value = null
+  modelState.value = null
+  configOptions.value = []
+  if (previousSessionId && !draftSessionConsumed.value) {
+    await acp.closeSession(previousSessionId).catch(() => {})
+  }
+  draftSessionConsumed.value = false
+  await ensureDraftSession()
+}
+
+async function updateWorkspace(path: string | null) {
+  context.selectWorkspace(path)
+  try {
+    await resetDraftSession()
+  } catch (err) {
+    showError(err, 'Could not initialize new chat')
+  }
+}
+
+async function updateSessionModel(modelId: string) {
+  if (modelId === modelState.value?.currentModelId) return
+  updatingSessionConfig.value = true
+  try {
+    const sessionId = await ensureDraftSession()
+    await acp.setSessionModel(sessionId, modelId)
+    if (modelState.value) modelState.value = { ...modelState.value, currentModelId: modelId }
+  } catch (err) {
+    showError(err, 'Failed to update ACP model')
+  } finally {
+    updatingSessionConfig.value = false
+  }
+}
+
+async function updateSessionReasoning(value: string) {
+  const option = reasoningConfigOption.value
+  if (!option || value === option.currentValue) return
+  updatingSessionConfig.value = true
+  try {
+    const sessionId = await ensureDraftSession()
+    const result = await acp.setSessionConfigOption(sessionId, option.id, { value })
+    configOptions.value = result.configOptions.length
+      ? result.configOptions
+      : configOptions.value.map((item) => {
+          if (item.id !== option.id || item.type !== 'select') return item
+          return { ...item, currentValue: value }
+        })
+  } catch (err) {
+    showError(err, `Failed to update ${option.name}`)
+  } finally {
+    updatingSessionConfig.value = false
+  }
 }
 
 function showVoiceError(message: string) {
@@ -80,11 +196,12 @@ async function onSubmit() {
   loading.value = true
   error.value = undefined
   try {
-    const result = await acp.createSession({ cwd: context.selectedWorkspace.value })
-    pendingAcpPrompts.value[result.sessionId] = { message, attachments }
+    const existingSessionId = await ensureDraftSession()
+    pendingAcpPrompts.value[existingSessionId] = { message, attachments }
+    draftSessionConsumed.value = true
     clearDraft()
     context.clearAttachments()
-    await router.push({ path: `/acp/${result.sessionId}` })
+    await router.push({ path: `/acp/${existingSessionId}` })
     void refreshSessions?.()
   } catch (err) {
     showError(err, 'Failed to create chat')
@@ -129,11 +246,20 @@ async function onSubmit() {
                   :selected-workspace="context.selectedWorkspace.value"
                   :workspaces-loading="context.workspacesLoading.value"
                   :workspace-label="workspaceLabel"
+                  :models="modelItems"
+                  :selected-model="selectedModelId"
+                  :model-label="selectedModelLabel || 'Model'"
+                  :modes="reasoningItems"
+                  :selected-mode="selectedReasoningId"
+                  :reasoning-label="selectedReasoningLabel || 'Reasoning'"
+                  :updating-session-config="updatingSessionConfig"
                   @attach-files="attachFiles"
                   @remove-attachment="context.removeAttachment"
                   @voice-text="appendVoiceText"
                   @voice-error="showVoiceError"
-                  @update-selected-workspace="context.selectWorkspace"
+                  @update-selected-workspace="updateWorkspace"
+                  @update-selected-model="updateSessionModel"
+                  @update-selected-mode="updateSessionReasoning"
                 />
               </template>
             </UChatPrompt>

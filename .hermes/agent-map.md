@@ -54,7 +54,8 @@ API/browser smoke should use a fresh production preview when ACP runtime behavio
 
 - `GET /api/acp/sessions/:sessionId/transcript?limit=80`: read latest normalized messages and persisted metadata without blocking on ACP `session/load`.
 - `GET /api/acp/sessions/:sessionId/transcript?before=<cursor>&limit=80`: read older projected messages for chat pagination.
-- `DELETE /api/acp/sessions/:sessionId/transcript`: delete only the Hermesum local projection file.
+- `DELETE /api/acp/sessions/:sessionId/transcript`: delete only one Hermesum local projection file.
+- `DELETE /api/acp/transcripts`: delete all Hermesum local projection files; exposed in Settings as `Clear transcript cache`.
 - `POST /api/acp/sessions/:sessionId/transcript/rebuild`: rebuild that projection from ACP `session/load` replay. This can be slow by design.
 
 ## Doc maintenance

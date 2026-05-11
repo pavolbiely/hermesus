@@ -79,6 +79,8 @@ const runDetailsScrollCleanup = new Map<string, () => void>()
 const { style: messagesScrollShadowStyle } = useScrollShadow(messagesScrollContainer)
 const loading = ref(true)
 const activePromptTurnId = ref<string | null>(null)
+const activePromptStartedAt = ref<number | null>(null)
+const activePromptClockNow = ref(Date.now())
 const pendingPermissions = ref<PendingPermission[]>([])
 const planEntries = ref<PlanEntry[]>([])
 const modelState = ref<SessionModelState | null>(null)
@@ -92,12 +94,14 @@ const nextTranscriptBefore = ref<number | null>(null)
 const error = ref<string | null>(null)
 let closeEvents: (() => void) | undefined
 let eventSource: EventSource | undefined
+let activePromptClockInterval: number | undefined
 let sessionLoadSequence = 0
 let sessionLoadAbortController: AbortController | undefined
 let displayedSessionId: string | null = null
 let latestInitialScrollSequence = 0
 
 const transcriptPageSize = 80
+const stillWorkingDelayMs = 10_000
 
 const submitting = computed(() => Boolean(activePromptTurnId.value))
 const submitStatus = computed(() => submitting.value ? 'streaming' : 'ready')
@@ -117,15 +121,23 @@ const chatAssistantProps = {
 }
 const activeRunMessage = computed(() => {
   if (!activePromptTurnId.value) return null
-  return [...displayMessages.value].reverse().find(message => message.turnId === activePromptTurnId.value && hasRunDetails(message)) || null
+  return [...displayMessages.value].reverse().find(message => (
+    message.turnId === activePromptTurnId.value
+    && (message.role === 'assistant' || hasRunDetails(message))
+  )) || null
 })
 const currentActivityLabel = computed(() => {
   const activeMessage = activeRunMessage.value
   if (!activePromptTurnId.value) return null
-  if (!activeMessage) return 'Starting…'
-  return runActivityLabel(activeMessage) || 'Working…'
+  if (!activeMessage) return fallbackActiveActivityLabel()
+  return runActivityLabel(activeMessage) || fallbackActiveActivityLabel()
 })
 const showRunActivityIndicator = computed(() => Boolean(currentActivityLabel.value))
+const currentActivityElapsedLabel = computed(() => {
+  const startedAt = activePromptStartedAt.value
+  if (!activePromptTurnId.value || !startedAt) return ''
+  return formatElapsedDuration(activePromptClockNow.value - startedAt)
+})
 const selectedModelId = computed({
   get: () => modelState.value?.currentModelId || undefined,
   set: (modelId: string | undefined) => {
@@ -205,12 +217,24 @@ onBeforeUnmount(() => {
   cacheCurrentSessionView(displayedSessionId)
   abortActiveSessionLoad()
   closeEvents?.()
+  stopActivePromptClock()
   runDetailsScrollCleanup.forEach(cleanup => cleanup())
   runDetailsScrollCleanup.clear()
 })
 
 watch(sessionId, (newSessionId) => {
   void initializeSession(newSessionId)
+})
+
+watch(activePromptTurnId, (turnId) => {
+  if (!turnId) {
+    activePromptStartedAt.value = null
+    stopActivePromptClock()
+    return
+  }
+
+  activePromptStartedAt.value = activeTurnCreatedAtMs(turnId) ?? Date.now()
+  startActivePromptClock()
 })
 
 async function initializeSession(targetSessionId = sessionId.value) {
@@ -447,6 +471,43 @@ function waitForAnimationFrame() {
   return new Promise<void>((resolve) => {
     requestAnimationFrame(() => resolve())
   })
+}
+
+function startActivePromptClock() {
+  activePromptClockNow.value = Date.now()
+  if (!import.meta.client || activePromptClockInterval) return
+  activePromptClockInterval = window.setInterval(() => {
+    activePromptClockNow.value = Date.now()
+  }, 1_000)
+}
+
+function stopActivePromptClock() {
+  if (!activePromptClockInterval) return
+  window.clearInterval(activePromptClockInterval)
+  activePromptClockInterval = undefined
+}
+
+function activeTurnCreatedAtMs(turnId: string) {
+  const createdAt = messages.value.find(message => message.turnId === turnId)?.createdAt
+  if (!createdAt) return null
+
+  const time = Date.parse(createdAt)
+  return Number.isFinite(time) ? time : null
+}
+
+function fallbackActiveActivityLabel() {
+  const startedAt = activePromptStartedAt.value
+  if (!startedAt) return 'Working…'
+  return activePromptClockNow.value - startedAt >= stillWorkingDelayMs ? 'Still working…' : 'Working…'
+}
+
+function formatElapsedDuration(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000))
+  if (totalSeconds < 60) return `${totalSeconds}s`
+
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`
 }
 
 function resetSessionView() {
@@ -874,6 +935,7 @@ function runActivityLabel(message: AcpChatMessage) {
   const runningTool = runningToolParts(message)[0]
   if (runningTool) return `Running ${toolCallTitle(runningTool)}`
   if (message.turnId && message.turnId === activePromptTurnId.value && reasoningText(message).trim()) return 'Thinking'
+  if (message.role === 'assistant' && hasTextParts(message)) return 'Responding…'
   return ''
 }
 
@@ -1218,7 +1280,10 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
               class="px-2.5"
             >
               <template #content>
-                <AcpRunActivityIndicator :label="currentActivityLabel || 'Working…'" />
+                <AcpRunActivityIndicator
+                  :label="currentActivityLabel || 'Working…'"
+                  :elapsed-label="currentActivityElapsedLabel"
+                />
               </template>
             </UChatMessage>
           </div>
@@ -1238,6 +1303,9 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
               <UChatPrompt
                 v-model="input"
                 :maxrows="6"
+                :should-auto-scroll="true"
+                :should-scroll-to-bottom="true"
+                :auto-scroll="true"
                 placeholder="Message Hermes through ACP…"
                 @submit="onSubmit"
                 @keydown.down="onPromptArrowDown"

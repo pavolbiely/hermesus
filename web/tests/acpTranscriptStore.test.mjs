@@ -72,6 +72,18 @@ test('delete removes only the stored projection', async () => {
   })
 })
 
+test('clear removes all stored projections', async () => {
+  await withStore(async (store) => {
+    await store.put(snapshot('first-session'))
+    await store.put(snapshot('second-session'))
+
+    assert.equal(await store.clear(), 2)
+    assert.deepEqual(await store.listSessionIds(), [])
+    assert.equal(await store.get('first-session'), null)
+    assert.equal(await store.get('second-session'), null)
+  })
+})
+
 test('invalid or mismatched projection files are ignored on read', async () => {
   await withStore(async (store, directory) => {
     const sessionId = 'expected-session'

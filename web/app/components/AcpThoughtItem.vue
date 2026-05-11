@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { useScrollShadow } from '@nuxt/ui/composables'
+
 const props = defineProps<{
   text?: string
   detail?: string
 }>()
 
 const open = ref(false)
+const thoughtScrollContainer = ref<HTMLElement | null>(null)
+const { style: thoughtScrollShadowStyle } = useScrollShadow(thoughtScrollContainer)
 const normalizedText = computed(() => props.text?.trim() || '')
 const detailText = computed(() => props.detail?.trim() || '')
 const preview = computed(() => normalizedText.value
@@ -33,7 +37,11 @@ const bodyText = computed(() => normalizedText.value || detailText.value)
     </button>
 
     <template #content>
-      <div class="mt-2 max-h-[220px] overflow-y-auto rounded-md border border-default bg-muted/20 px-3 py-2">
+      <div
+        ref="thoughtScrollContainer"
+        class="mt-2 max-h-[220px] overflow-y-auto rounded-md bg-muted/20 px-3 py-2"
+        :style="thoughtScrollShadowStyle"
+      >
         <Comark
           :markdown="bodyText"
           class="chat-reasoning-markdown text-sm text-muted"
