@@ -5,12 +5,16 @@ Use this before broad repository search.
 ## Canonical source
 
 - `web/app/pages/index.vue`: new-chat entry point and initial ACP session creation.
-- `web/app/pages/acp/[id].vue`: main ACP-native chat route and composer orchestration.
+- `web/app/pages/acp/[id].vue`: lean ACP-native chat route orchestrator.
 - `web/app/layouts/default.vue`: app shell, sidebar loading, workspace state, and session navigation.
 - `web/app/components/SidebarSessionGroups.vue`: session list rendering and ACP sidebar actions.
+- `web/app/components/AcpChatTranscript.vue`, `AcpChatMessageContent.vue`, `AcpChatComposer.vue`: main chat transcript, message body, and composer presentation.
 - `web/app/components/ChatSlashCommandMenu.vue`: local slash-command autocomplete UI.
 - `web/app/composables/useAcpApi.ts`: typed frontend client for `/api/acp/*` routes.
 - `web/app/composables/useAcpTranscript.ts`: browser transcript state from ACP replay/live events.
+- `web/app/composables/useAcpSessionPage.ts`: ACP session activation, transcript projection load, SSE subscription, permissions, and older-message pagination.
+- `web/app/composables/useAcpPromptController.ts`: prompt send/cancel, optimistic user messages, queued messages, and steer fallback.
+- `web/app/composables/useAcpActiveRunStatus.ts`, `useAcpSessionConfigControls.ts`, `useAcpMessageActions.ts`, `useAcpMessageEditing.ts`, `useAcpRunDetailsScroll.ts`: focused ACP chat route state helpers.
 - `web/app/composables/useAppWorkspacesApi.ts`: typed frontend client for Hermesum-owned workspace/profile routes.
 - `web/app/types/acp-api.ts`, `web/app/types/acp-chat.ts`, `web/app/types/chat.ts`, `web/shared/acp/types.ts`: API/protocol/UI contract types.
 - `web/shared/acp/bridgeEventNormalization.ts`, `web/shared/acp/eventNormalization.ts`, app re-export wrappers, and `web/app/utils/acpPlanNormalization.ts`: ACP bridge events to chat transcript/plan state.
@@ -30,7 +34,7 @@ Use this before broad repository search.
 
 ## High-token hotspots
 
-- ACP chat page: `web/app/pages/acp/[id].vue`.
+- ACP chat route orchestration: `web/app/pages/acp/[id].vue` plus focused `useAcp*` composables and `AcpChat*` components.
 - Layout/sidebar: `web/app/layouts/default.vue`, `SidebarSessionGroups.vue`.
 - ACP bridge/transcript state: `web/server/acp/bridge.ts`, `web/server/acp/transcriptProjection.ts`, `useAcpTranscript.ts`, `web/shared/acp/bridgeEventNormalization.ts`, `web/shared/acp/eventNormalization.ts`.
 - App-owned session metadata/workspaces: `web/server/app/acpSessionMetadata.ts`, `web/server/app/workspaces.ts`.
