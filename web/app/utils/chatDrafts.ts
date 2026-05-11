@@ -2,6 +2,10 @@ const DRAFT_STORAGE_PREFIX = 'hermesum:web-chat:draft:v1:'
 
 export const NEW_CHAT_DRAFT_ID = 'new-chat'
 
+export function chatSessionDraftId(sessionId: string) {
+  return `acp-session:${sessionId}`
+}
+
 export function chatDraftStorageKey(draftId: string) {
   return `${DRAFT_STORAGE_PREFIX}${encodeURIComponent(draftId)}`
 }

@@ -36,6 +36,14 @@ export function useAcpTranscript() {
     }
   }
 
+  function appendLocalMessage(message: AcpChatMessage) {
+    if (state.value.messages.some(item => item.id === message.id)) return
+    state.value = {
+      ...state.value,
+      messages: [...state.value.messages, message]
+    }
+  }
+
   function applyBridgeEvent(event: AcpBridgeEvent) {
     normalizeAcpBridgeEvent(event).forEach(applyEvent)
   }
@@ -46,6 +54,7 @@ export function useAcpTranscript() {
     reset,
     loadSnapshot,
     prependMessages,
+    appendLocalMessage,
     applyEvent,
     applyBridgeEvent
   }

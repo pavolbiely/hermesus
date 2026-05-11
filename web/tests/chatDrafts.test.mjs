@@ -1,47 +1,67 @@
+import test from 'node:test'
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
 import {
   NEW_CHAT_DRAFT_ID,
   chatDraftStorageKey,
+  chatSessionDraftId,
   readChatDraft,
   writeChatDraft
 } from '../app/utils/chatDrafts.ts'
 
 function createStorage() {
-  const entries = new Map()
+  const items = new Map()
   return {
-    getItem: key => entries.has(key) ? entries.get(key) : null,
-    setItem: (key, value) => entries.set(key, String(value)),
-    removeItem: key => entries.delete(key)
+    getItem: key => items.get(key) ?? null,
+    setItem: (key, value) => items.set(key, String(value)),
+    removeItem: key => items.delete(key)
   }
 }
 
-test('stores chat drafts under isolated per-chat keys', () => {
-  const storage = createStorage()
-
-  writeChatDraft(storage, NEW_CHAT_DRAFT_ID, 'homepage draft')
-  writeChatDraft(storage, 'session-a', 'first chat draft')
-  writeChatDraft(storage, 'session-b', 'second chat draft')
-
-  assert.equal(readChatDraft(storage, NEW_CHAT_DRAFT_ID), 'homepage draft')
-  assert.equal(readChatDraft(storage, 'session-a'), 'first chat draft')
-  assert.equal(readChatDraft(storage, 'session-b'), 'second chat draft')
+test('uses distinct stable draft ids for new chat and sessions', () => {
+  assert.equal(NEW_CHAT_DRAFT_ID, 'new-chat')
+  assert.equal(chatSessionDraftId('abc-123'), 'acp-session:abc-123')
+  assert.notEqual(chatSessionDraftId('new-chat'), NEW_CHAT_DRAFT_ID)
 })
 
-test('removes empty drafts without affecting other chats', () => {
-  const storage = createStorage()
-
-  writeChatDraft(storage, 'session-a', 'first chat draft')
-  writeChatDraft(storage, 'session-b', 'second chat draft')
-  writeChatDraft(storage, 'session-a', '')
-
-  assert.equal(readChatDraft(storage, 'session-a'), '')
-  assert.equal(readChatDraft(storage, 'session-b'), 'second chat draft')
-})
-
-test('encodes draft ids in localStorage keys', () => {
+test('encodes arbitrary draft ids in storage keys', () => {
   assert.equal(
-    chatDraftStorageKey('chat/id with spaces'),
-    'hermesum:web-chat:draft:v1:chat%2Fid%20with%20spaces'
+    chatDraftStorageKey('acp-session:abc/123?x=1'),
+    'hermesum:web-chat:draft:v1:acp-session%3Aabc%2F123%3Fx%3D1'
   )
+})
+
+test('reads, writes, and clears draft text', () => {
+  const storage = createStorage()
+  const draftId = chatSessionDraftId('session-a')
+
+  assert.equal(readChatDraft(storage, draftId), '')
+
+  writeChatDraft(storage, draftId, 'unfinished prompt')
+  assert.equal(readChatDraft(storage, draftId), 'unfinished prompt')
+
+  writeChatDraft(storage, draftId, '')
+  assert.equal(readChatDraft(storage, draftId), '')
+})
+
+test('keeps drafts isolated by scope', () => {
+  const storage = createStorage()
+  const newChatDraft = NEW_CHAT_DRAFT_ID
+  const sessionDraft = chatSessionDraftId('session-a')
+
+  writeChatDraft(storage, newChatDraft, 'new chat text')
+  writeChatDraft(storage, sessionDraft, 'session text')
+
+  assert.equal(readChatDraft(storage, newChatDraft), 'new chat text')
+  assert.equal(readChatDraft(storage, sessionDraft), 'session text')
+})
+
+test('storage failures are best-effort', () => {
+  const storage = {
+    getItem: () => { throw new Error('blocked') },
+    setItem: () => { throw new Error('blocked') },
+    removeItem: () => { throw new Error('blocked') }
+  }
+
+  assert.equal(readChatDraft(storage, chatSessionDraftId('session-a')), '')
+  assert.doesNotThrow(() => writeChatDraft(storage, chatSessionDraftId('session-a'), 'text'))
 })

@@ -35,6 +35,7 @@ import {
   type AcpToolPart
 } from '~/utils/acpRunDetails'
 import { scrollElementTreeToBottom, scrollElementTreeToBottomAfterRender } from '~/utils/chatInitialScroll'
+import { chatSessionDraftId } from '~/utils/chatDrafts'
 import { acpSidebarSessions } from '~/utils/acpSidebarSessions'
 import { shouldAutoSendQueuedMessage } from '~/utils/queuedMessages'
 import { toolCallTitle } from '~/utils/toolCalls'
@@ -71,7 +72,8 @@ const readAloud = useAcpMessageReadAloud()
 const toast = useToast()
 
 const sessionId = computed(() => String(route.params.id || ''))
-const input = ref('')
+const draftId = computed(() => chatSessionDraftId(sessionId.value))
+const { input, clearDraft } = useChatDraft(draftId)
 const messagesScrollContainer = ref<HTMLElement | null>(null)
 const promptContainer = ref<HTMLElement | null>(null)
 const runDetailsElements = new Map<string, HTMLElement>()
@@ -396,7 +398,7 @@ async function onSubmit() {
   }
 
   const attachments = context.attachments.value
-  input.value = ''
+  clearDraft()
   context.clearAttachments()
   await sendPrompt(message, attachments)
 }
@@ -417,7 +419,7 @@ function enqueueMessage(message: string) {
   }
 
   const queued = queuedMessages.enqueue(sessionId.value, message)
-  if (queued) input.value = ''
+  if (queued) clearDraft()
 }
 
 function editQueuedMessage(id: string) {
@@ -450,16 +452,25 @@ async function steerQueuedMessage(id: string) {
     queuedMessages.remove(id)
     activeAcpPrompts.markFinished(sessionId.value, activePromptTurnId.value)
     activePromptTurnId.value = null
-    toast.add({
-      color: 'neutral',
-      title: 'Steering after interrupt',
-      description: 'Hermes will continue with this message after the current run stops.'
-    })
+    appendSteerMessage(queued.text)
   } catch (err) {
     showError(err, 'Failed to steer run')
   } finally {
     steeringQueuedMessageId.value = null
   }
+}
+
+function appendSteerMessage(text: string) {
+  transcript.appendLocalMessage({
+    id: `local-steer:${crypto.randomUUID()}`,
+    role: 'system',
+    sessionId: sessionId.value,
+    createdAt: new Date().toISOString(),
+    parts: [
+      { type: 'event', title: 'Steer' },
+      { type: 'text', text }
+    ]
+  })
 }
 
 async function sendNextQueuedMessage() {
@@ -783,6 +794,16 @@ async function respondToPermission(appRequestId: string, option?: PermissionOpti
 
 function partText(message: AcpChatMessage) {
   return message.parts.filter(part => part.type === 'text').map(part => part.text).join('')
+}
+
+function systemEventTitle(message: AcpChatMessage) {
+  const eventPart = message.parts.find(part => part.type === 'event')
+  return eventPart?.type === 'event' ? eventPart.title : 'System event'
+}
+
+function systemEventSeverity(message: AcpChatMessage) {
+  const eventPart = message.parts.find(part => part.type === 'event')
+  return eventPart?.type === 'event' ? eventPart.severity || 'info' : 'info'
 }
 
 function setRunDetailsElement(messageId: string, element: Element | ComponentPublicInstance | null) {
@@ -1440,6 +1461,23 @@ async function updateConfigOption(option: SessionConfigOption, value: boolean | 
                     {{ partText(message) }}
                   </template>
                 </template>
+                <div
+                  v-else-if="message.role === 'system'"
+                  class="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm text-muted"
+                  :class="{
+                    'border-error/30': systemEventSeverity(message) === 'error',
+                    'border-warning/30': systemEventSeverity(message) === 'warning',
+                    'border-default': systemEventSeverity(message) !== 'error' && systemEventSeverity(message) !== 'warning'
+                  }"
+                >
+                  <div class="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-dimmed">
+                    <UIcon name="i-lucide-route" class="size-3.5" />
+                    <span>{{ systemEventTitle(message) }}</span>
+                  </div>
+                  <p v-if="partText(message)" class="whitespace-pre-wrap text-toned">
+                    {{ partText(message) }}
+                  </p>
+                </div>
                 <div
                   v-else
                   class="inline-block max-w-full"

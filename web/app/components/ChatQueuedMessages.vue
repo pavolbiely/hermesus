@@ -25,7 +25,7 @@ const actionIconClass = 'size-3.5'
     <div
       v-for="message in messages"
       :key="message.id"
-      class="flex items-start gap-3 rounded-xl border border-default bg-muted/30 px-3 py-2 text-sm shadow-sm backdrop-blur"
+      class="flex items-start gap-3 rounded-xl border border-default bg-elevated px-3 py-2 text-sm shadow-sm"
     >
       <div class="min-w-0 flex-1 space-y-1">
         <UBadge color="neutral" variant="soft" size="sm" label="Queued" />
