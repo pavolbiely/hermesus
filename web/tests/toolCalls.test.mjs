@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { toolActivityTitle, toolDisplayInfo, toolInputSummary } from '../app/utils/toolCalls.ts'
+import { toolActivityFullTitle, toolActivityTitle, toolDisplayInfo, toolInputSummary, toolInputTitle, toolOutputTitle } from '../app/utils/toolCalls.ts'
 
 test('summarizes ACP tool locations when raw input is absent', () => {
   const part = {
@@ -69,4 +69,20 @@ test('uses only the file name in active running tool labels', () => {
   }
 
   assert.equal(toolActivityTitle(part), 'Read: 2026-05-11-catalog-action-flow-refactor.md')
+  assert.equal(toolActivityFullTitle(part), 'Read: /Users/pavolbiely/Sites/beesboard/.hermes/plans/2026-05-11-catalog-action-flow-refactor.md')
+})
+
+test('keeps full file paths for compact summary titles', () => {
+  const inputPart = {
+    name: 'Read',
+    kind: 'read',
+    locations: [{ path: '/Users/pavolbiely/Sites/hermesum/web/app/utils/toolCalls.ts', line: 12 }]
+  }
+  const outputPart = {
+    output: [{ type: 'diff', path: '/Users/pavolbiely/Sites/hermesum/web/app/pages/acp/[id].vue' }]
+  }
+
+  assert.equal(toolInputSummary(inputPart), 'toolCalls.ts:12 · …/app/utils')
+  assert.equal(toolInputTitle(inputPart), '/Users/pavolbiely/Sites/hermesum/web/app/utils/toolCalls.ts:12')
+  assert.equal(toolOutputTitle(outputPart), '/Users/pavolbiely/Sites/hermesum/web/app/pages/acp/[id].vue')
 })

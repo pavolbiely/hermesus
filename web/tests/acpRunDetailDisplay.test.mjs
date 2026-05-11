@@ -25,7 +25,7 @@ function hasThoughtActivity(message) { return Boolean(message.usage?.thoughtToke
 function reasoningText(message) { return message.parts.filter(part => part.type === 'reasoning').map(part => part.text || '').join('').trim() }
 function toolParts(message) { return message.parts.filter(part => part.type === 'tool') }
 `)
-  source = source.replace("import { toolActivityTitle } from './toolCalls'\n", "function toolActivityTitle(part) { return part.name || part.kind || 'tool' }\n")
+  source = source.replace("import { toolActivityFullTitle, toolActivityTitle } from './toolCalls'\n", "function toolActivityTitle(part) { return part.name || part.kind || 'tool' }\nfunction toolActivityFullTitle(part) { return part.name || part.kind || 'tool' }\n")
   source = source.replace("import { hasTextParts, partText } from './acpChatMessageDisplay'\n", "function hasTextParts(message) { return message.parts.some(part => part.type === 'text' && part.text.trim()) }\nfunction partText(message) { return message.parts.filter(part => part.type === 'text').map(part => part.text).join('') }\n")
   await mkdir(dirname(tempPath), { recursive: true })
   await writeFile(tempPath, source, 'utf8')

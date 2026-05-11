@@ -11,6 +11,7 @@ import { groupProcessMessages } from '~/utils/acpChatMessageDisplay'
 import {
   hasRunDetails,
   runActivityLabel,
+  runActivityTitle,
   runDetailsSpacingClass as runDetailsSpacingClassForMessage,
   shouldRenderRunDetailsBeforeMessage as shouldRenderRunDetailsBeforeMessageForTurn
 } from '~/utils/acpRunDetailDisplay'
@@ -60,6 +61,7 @@ const {
   submitStatus,
   chatMessagesStatus,
   currentActivityLabel,
+  currentActivityTitle,
   showRunActivityIndicator,
   currentActivityElapsedLabel,
   promoteSubmittedStatusToStreaming,
@@ -70,7 +72,8 @@ const {
   displayMessages: groupedMessages,
   activePrompts: activeAcpPrompts,
   hasRunDetails,
-  getRunActivityLabel: runActivityLabel
+  getRunActivityLabel: runActivityLabel,
+  getRunActivityTitle: runActivityTitle
 })
 const chatBottomFollow = useChatBottomFollow({
   scrollContainer: messagesScrollContainer,
@@ -373,6 +376,7 @@ async function attachFiles(files: File[]) {
           :chat-assistant-props="chatAssistantProps"
           :show-run-activity-indicator="showRunActivityIndicator"
           :current-activity-label="currentActivityLabel"
+          :current-activity-title="currentActivityTitle"
           :current-activity-elapsed-label="currentActivityElapsedLabel"
           :editing-message-id="editingMessageId"
           :saving-edited-message-id="savingEditedMessageId"

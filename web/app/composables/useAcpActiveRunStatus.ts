@@ -16,6 +16,7 @@ type ActiveRunStatusOptions = {
   activePrompts: ActivePromptsStore
   hasRunDetails: (message: AcpChatMessage) => boolean
   getRunActivityLabel: (message: AcpChatMessage, activeTurnId: string | null) => string
+  getRunActivityTitle?: (message: AcpChatMessage, activeTurnId: string | null) => string
   stillWorkingDelayMs?: number
 }
 
@@ -45,6 +46,12 @@ export function useAcpActiveRunStatus(options: ActiveRunStatusOptions) {
     if (!activePromptTurnId.value) return null
     if (!activeMessage) return fallbackActiveActivityLabel()
     return options.getRunActivityLabel(activeMessage, activePromptTurnId.value) || fallbackActiveActivityLabel()
+  })
+  const currentActivityTitle = computed(() => {
+    const activeMessage = activeRunMessage.value
+    if (!activePromptTurnId.value) return null
+    if (!activeMessage) return currentActivityLabel.value
+    return options.getRunActivityTitle?.(activeMessage, activePromptTurnId.value) || currentActivityLabel.value
   })
 
   const showRunActivityIndicator = computed(() => Boolean(currentActivityLabel.value))
@@ -129,6 +136,7 @@ export function useAcpActiveRunStatus(options: ActiveRunStatusOptions) {
     chatMessagesStatus,
     activeRunMessage,
     currentActivityLabel,
+    currentActivityTitle,
     showRunActivityIndicator,
     currentActivityElapsedLabel,
     promoteSubmittedStatusToStreaming,

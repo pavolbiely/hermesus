@@ -35,6 +35,7 @@ type Props = {
   chatAssistantProps: ChatMessageProps
   showRunActivityIndicator: boolean
   currentActivityLabel?: string | null
+  currentActivityTitle?: string | null
   currentActivityElapsedLabel?: string
   editingMessageId: string | null
   savingEditedMessageId: string | null
@@ -255,6 +256,7 @@ function permissionTitle(permission: PendingPermission) {
         <template #content>
           <AcpRunActivityIndicator
             :label="currentActivityLabel || 'Working…'"
+            :title-label="currentActivityTitle || currentActivityLabel || 'Working…'"
             :elapsed-label="currentActivityElapsedLabel"
           />
         </template>

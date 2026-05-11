@@ -130,8 +130,16 @@ export function toolInputSummary(part: Pick<ToolLikePart, 'name' | 'input' | 'ki
   return bestInputSummary(part.input, toolRawName(part), part.locations)
 }
 
+export function toolInputTitle(part: Pick<ToolLikePart, 'name' | 'input' | 'kind' | 'locations'>) {
+  return bestInputTitle(part.input, toolRawName(part), part.locations)
+}
+
 export function toolOutputSummary(part: Pick<ToolLikePart, 'output' | 'status'>) {
   return outputStatusSummary(part.output) || humanizeStatus(part.status || undefined) || undefined
+}
+
+export function toolOutputTitle(part: Pick<ToolLikePart, 'output' | 'status'>) {
+  return outputStatusTitle(part.output) || humanizeStatus(part.status || undefined) || undefined
 }
 
 export function toolCallTitle(part: ToolLikePart) {
@@ -143,6 +151,12 @@ export function toolActivityTitle(part: ToolLikePart) {
   const summary = toolInputSummary(part)
   const activitySummary = summary ? compactPathLikeSummary(summary, { filenameOnly: true }) : undefined
   return activitySummary ? `${info.label}: ${activitySummary}` : info.label
+}
+
+export function toolActivityFullTitle(part: ToolLikePart) {
+  const info = toolDisplayInfo(part)
+  const summary = toolInputTitle(part)
+  return summary ? `${info.label}: ${summary}` : info.label
 }
 
 export function toolStatusLabel(part: Pick<ToolLikePart, 'status'> & { state?: string, error?: string | null }) {
@@ -308,6 +322,17 @@ function primitiveSummary(key: string, value: unknown): string | undefined {
   return undefined
 }
 
+function primitiveTitle(key: string, value: unknown): string | undefined {
+  if (SENSITIVE_KEY_RE.test(key)) return undefined
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (!text) return undefined
+    return PATH_KEY_RE.test(key) || /^https?:\/\//i.test(text) || text.includes('/') ? text : compactText(text)
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return undefined
+}
+
 function keyScore(key: string, value: unknown, depth: number) {
   const lower = key.toLowerCase()
   const preferredIndex = PREFERRED_KEYS.indexOf(lower)
@@ -325,6 +350,19 @@ function keyScore(key: string, value: unknown, depth: number) {
 }
 
 function collectCandidates(value: unknown, toolName = '', depth = 0): Array<{ key: string, value: string, score: number }> {
+  return collectSummaryCandidates(value, toolName, depth, primitiveSummary)
+}
+
+function collectTitleCandidates(value: unknown, toolName = '', depth = 0): Array<{ key: string, value: string, score: number }> {
+  return collectSummaryCandidates(value, toolName, depth, primitiveTitle)
+}
+
+function collectSummaryCandidates(
+  value: unknown,
+  toolName: string,
+  depth: number,
+  summarize: (key: string, value: unknown) => string | undefined
+): Array<{ key: string, value: string, score: number }> {
   if (depth > 3) return []
 
   const normalized = normalizeSummaryValue(value)
@@ -335,14 +373,14 @@ function collectCandidates(value: unknown, toolName = '', depth = 0): Array<{ ke
     if (SENSITIVE_KEY_RE.test(key)) continue
 
     const childValue = key === 'arguments' ? parseJsonishString(child) : child
-    const primitive = primitiveSummary(key, childValue)
+    const primitive = summarize(key, childValue)
     if (primitive && primitive.toLowerCase() !== toolName.toLowerCase()) {
       candidates.push({ key, value: primitive, score: keyScore(key, child, depth) })
       continue
     }
 
     if (childValue && typeof childValue === 'object' && !Array.isArray(childValue)) {
-      candidates.push(...collectCandidates(childValue, toolName, depth + 1))
+      candidates.push(...collectSummaryCandidates(childValue, toolName, depth + 1, summarize))
     }
   }
 
@@ -386,6 +424,12 @@ function titleDetailSummary(toolName: string) {
   return detail.includes('/') || /^https?:\/\//i.test(detail) ? compactPath(detail) : compactText(detail)
 }
 
+function titleDetailFull(toolName: string) {
+  const [, detail] = toolName.split(/:\s+(.+)/, 2)
+  if (!detail || detail.trim() === '?') return undefined
+  return detail.trim()
+}
+
 function locationSummary(locations: ToolLikePart['locations']): string | undefined {
   if (!Array.isArray(locations) || !locations.length) return undefined
 
@@ -399,6 +443,21 @@ function locationSummary(locations: ToolLikePart['locations']): string | undefin
   if (!readable.length) return undefined
   if (readable.length === 1) return readable[0]
   return compactText(`${readable[0]} +${readable.length - 1}`)
+}
+
+function locationTitle(locations: ToolLikePart['locations']): string | undefined {
+  if (!Array.isArray(locations) || !locations.length) return undefined
+
+  const readable = locations
+    .map((location) => {
+      if (!location?.path) return undefined
+      return typeof location.line === 'number' ? `${location.path}:${location.line}` : location.path
+    })
+    .filter((path): path is string => Boolean(path))
+
+  if (!readable.length) return undefined
+  if (readable.length === 1) return readable[0]
+  return `${readable[0]} +${readable.length - 1}`
 }
 
 function bestInputSummary(input: unknown, toolName = '', locations?: ToolLikePart['locations']): string | undefined {
@@ -428,6 +487,33 @@ function bestInputSummary(input: unknown, toolName = '', locations?: ToolLikePar
   return `${Object.keys(normalized as RecordValue).length} keys`
 }
 
+function bestInputTitle(input: unknown, toolName = '', locations?: ToolLikePart['locations']): string | undefined {
+  const args = argumentPayload(input)
+  if (args !== undefined) {
+    const argCandidates = collectTitleCandidates(args, toolName).sort((a, b) => b.score - a.score)
+    const argSummary = candidateSummary(argCandidates)
+    if (argSummary) return argSummary
+  }
+
+  const titleSummary = titleDetailFull(toolName)
+  if (titleSummary) return titleSummary
+
+  const locationsSummary = locationTitle(locations)
+  if (locationsSummary) return locationsSummary
+
+  const normalized = normalizeSummaryValue(input)
+
+  if (typeof normalized === 'string') return compactText(normalized)
+  if (Array.isArray(normalized)) return `${normalized.length} items`
+  if (!normalized || typeof normalized !== 'object') return primitiveTitle('value', normalized)
+
+  const candidates = collectTitleCandidates(normalized, toolName).sort((a, b) => b.score - a.score)
+  const summary = candidateSummary(candidates)
+  if (summary) return summary
+
+  return `${Object.keys(normalized as RecordValue).length} keys`
+}
+
 function outputStatusSummary(output: unknown) {
   const normalized = normalizeSummaryValue(output)
 
@@ -442,6 +528,35 @@ function outputStatusSummary(output: unknown) {
   if (normalized && typeof normalized === 'object') {
     const record = normalized as RecordValue
     const error = primitiveSummary('error', record.error) || primitiveSummary('message', record.message)
+    if (record.success === false && error) return error
+    if (typeof record.exit_code === 'number') return record.exit_code === 0 ? 'passed' : `failed (${record.exit_code})`
+    if (Array.isArray(record.files_modified)) return `${record.files_modified.length} files changed`
+    if (typeof record.total_count === 'number') return `${record.total_count} matches`
+    if (Array.isArray(record.matches)) return `${record.matches.length} matches`
+    if (Array.isArray(record.files)) return `${record.files.length} files`
+    if (Array.isArray(record.items)) return `${record.items.length} items`
+    if (Array.isArray(record.results)) return `${record.results.length} results`
+    if (record.success === true) return 'done'
+  }
+
+  if (typeof normalized === 'string') return compactText(normalized)
+  return undefined
+}
+
+function outputStatusTitle(output: unknown) {
+  const normalized = normalizeSummaryValue(output)
+
+  if (Array.isArray(normalized)) {
+    const diffPath = normalized
+      .map(item => item && typeof item === 'object' && !Array.isArray(item) ? (item as RecordValue).path : undefined)
+      .find((path): path is string => typeof path === 'string' && path.trim().length > 0)
+    if (diffPath) return diffPath
+    return `${normalized.length} items`
+  }
+
+  if (normalized && typeof normalized === 'object') {
+    const record = normalized as RecordValue
+    const error = primitiveTitle('error', record.error) || primitiveTitle('message', record.message)
     if (record.success === false && error) return error
     if (typeof record.exit_code === 'number') return record.exit_code === 0 ? 'passed' : `failed (${record.exit_code})`
     if (Array.isArray(record.files_modified)) return `${record.files_modified.length} files changed`

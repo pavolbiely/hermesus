@@ -2,7 +2,7 @@
 import type { AcpChatMessage } from '~/types/acp-chat'
 import type { ToolDetailSection } from '~/utils/toolCallDetails'
 import { writeClipboardText } from '~/utils/clipboard'
-import { toolDisplayInfo, toolInputSummary, toolOutputSummary, toolStatusColor, toolStatusLabel } from '~/utils/toolCalls'
+import { toolDisplayInfo, toolInputSummary, toolInputTitle, toolOutputSummary, toolOutputTitle, toolStatusColor, toolStatusLabel } from '~/utils/toolCalls'
 import { toolDetailOverview, toolDetailSections } from '~/utils/toolCallDetails'
 
 type AcpToolPart = Extract<AcpChatMessage['parts'][number], { type: 'tool' }>
@@ -22,7 +22,9 @@ const toolInfo = computed(() => toolDisplayInfo(props.part))
 const toolName = computed(() => toolInfo.value.label)
 const rawToolName = computed(() => toolInfo.value.rawName)
 const inputSummary = computed(() => toolInputSummary(props.part))
+const inputTitle = computed(() => toolInputTitle(props.part))
 const resultSummary = computed(() => toolOutputSummary(props.part))
+const resultTitle = computed(() => toolOutputTitle(props.part))
 const sections = computed(() => toolDetailSections(props.part))
 const overview = computed(() => toolDetailOverview({
   ...props.part,
@@ -33,7 +35,12 @@ const summary = computed(() => {
   if (props.part.error) return props.part.error
   return inputSummary.value || resultSummary.value || (isRunning.value ? toolStatusLabel(props.part) : undefined)
 })
+const summaryTitle = computed(() => {
+  if (props.part.error) return props.part.error
+  return inputTitle.value || resultTitle.value || summary.value
+})
 const statusLabel = computed(() => toolStatusLabel(props.part))
+const showStatusBadge = computed(() => statusLabel.value.toLowerCase() !== 'completed')
 const secondarySummary = computed(() => {
   const value = summary.value
   if (!value || value.toLowerCase() === statusLabel.value.toLowerCase()) return undefined
@@ -90,11 +97,12 @@ onBeforeUnmount(() => {
         v-if="summary"
         class="min-w-0 truncate text-dimmed"
         :class="{ 'tool-call-shimmer': isRunning, 'text-error': part.error }"
-        :title="summary"
+        :title="summaryTitle"
       >
         {{ summary }}
       </span>
       <UBadge
+        v-if="showStatusBadge"
         :color="statusColor"
         variant="soft"
         size="sm"
