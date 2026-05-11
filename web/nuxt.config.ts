@@ -1,5 +1,4 @@
-const apiOrigin = process.env.HERMES_API_ORIGIN || 'http://127.0.0.1:9119'
-const apiProxyTarget = `${apiOrigin.replace(/\/$/, '')}/api`
+const defaultAcpCwd = process.env.HERMESUM_ACP_CWD || (process.cwd().endsWith('/web') ? process.cwd().slice(0, -4) : process.cwd())
 
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
@@ -8,6 +7,9 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   ssr: false,
   runtimeConfig: {
+    hermesAcpCommand: process.env.HERMESUM_ACP_COMMAND || 'hermes',
+    hermesAcpArgs: process.env.HERMESUM_ACP_ARGS ? process.env.HERMESUM_ACP_ARGS.split(' ').filter(Boolean) : ['acp'],
+    hermesAcpCwd: defaultAcpCwd,
     public: {
       hermesSessionToken: process.env.NUXT_PUBLIC_HERMES_SESSION_TOKEN || ''
     }
@@ -30,15 +32,6 @@ export default defineNuxtConfig({
         { rel: 'apple-touch-icon', sizes: '180x180', href: '/icons/icon-180.png' },
         { rel: 'manifest', href: '/site.webmanifest' }
       ]
-    }
-  },
-  nitro: {
-    preset: 'static',
-    devProxy: {
-      '/api': {
-        target: apiProxyTarget,
-        changeOrigin: true
-      }
     }
   },
   typescript: {

@@ -1,17 +1,18 @@
-import type { WebChatSession, WebChatWorkspace } from '../types/web-chat'
+import type { ChatSessionSummary } from '../types/chat'
+import type { AppWorkspace } from '../types/chat'
 
 export type SessionGroup = {
   id: string
   label: string
   path: string | null
-  sessions: WebChatSession[]
+  sessions: ChatSessionSummary[]
   active: boolean
-  workspace?: WebChatWorkspace
+  workspace?: AppWorkspace
 }
 
 type BuildSessionGroupsOptions = {
-  sessions: WebChatSession[]
-  workspaces: WebChatWorkspace[]
+  sessions: ChatSessionSummary[]
+  workspaces: AppWorkspace[]
   selectedWorkspace: string | null
 }
 
@@ -25,7 +26,7 @@ export function workspaceKey(workspace: string | null): string {
 export function buildSessionGroups(options: BuildSessionGroupsOptions): SessionGroup[] {
   const archivedSessions = options.sessions.filter(session => session.archived)
   const visibleSessions = options.sessions.filter(session => !session.archived)
-  const sessionsByWorkspace = new Map<string, WebChatSession[]>()
+  const sessionsByWorkspace = new Map<string, ChatSessionSummary[]>()
   for (const session of visibleSessions) {
     const key = workspaceKey(session.workspace)
     sessionsByWorkspace.set(key, [...(sessionsByWorkspace.get(key) || []), session])
@@ -81,11 +82,11 @@ export function buildSessionGroups(options: BuildSessionGroupsOptions): SessionG
   return groups
 }
 
-function sortedSessions(sessions: WebChatSession[]): WebChatSession[] {
+function sortedSessions(sessions: ChatSessionSummary[]): ChatSessionSummary[] {
   return [...sessions].sort(compareSessionsByLastMessage)
 }
 
-function compareSessionsByLastMessage(a: WebChatSession, b: WebChatSession): number {
+function compareSessionsByLastMessage(a: ChatSessionSummary, b: ChatSessionSummary): number {
   return Number(b.pinned) - Number(a.pinned)
     || timestampValue(b.updatedAt) - timestampValue(a.updatedAt)
     || timestampValue(b.createdAt) - timestampValue(a.createdAt)

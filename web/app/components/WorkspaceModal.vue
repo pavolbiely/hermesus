@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { WebChatWorkspace } from '~/types/web-chat'
+import type { AppWorkspace } from '~/types/chat'
 
 const props = defineProps<{
   open: boolean
-  editingWorkspace: WebChatWorkspace | null
+  editingWorkspace: AppWorkspace | null
   label: string
   path: string
   suggestions: string[]

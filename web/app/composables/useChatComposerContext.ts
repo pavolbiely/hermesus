@@ -1,4 +1,4 @@
-import type { WebChatAttachment, WebChatSession, WebChatWorkspace } from '~/types/web-chat'
+import type { AppWorkspace, ChatPromptAttachment } from '~/types/chat'
 import { resolveSelectedWorkspace } from '~/utils/workspaceSelection'
 
 const SELECTED_WORKSPACE_KEY = 'hermes-chat-selected-workspace'
@@ -15,10 +15,10 @@ function rememberValue(key: string, value: string | null) {
 }
 
 export function useChatComposerContext() {
-  const api = useHermesApi()
+  const api = useAppWorkspacesApi()
 
-  const workspaces = useState<WebChatWorkspace[]>('chat-composer-workspaces', () => [])
-  const attachments = useState<WebChatAttachment[]>('chat-composer-attachments', () => [])
+  const workspaces = useState<AppWorkspace[]>('chat-composer-workspaces', () => [])
+  const attachments = useState<ChatPromptAttachment[]>('chat-composer-attachments', () => [])
   const selectedWorkspace = useState<string | null>('chat-composer-selected-workspace', () => null)
   const workspacesLoading = useState('chat-composer-workspaces-loading', () => false)
   const attachmentsLoading = useState('chat-composer-attachments-loading', () => false)
@@ -37,7 +37,7 @@ export function useChatComposerContext() {
     workspacesLoading.value = true
     try {
       const response = await api.getWorkspaces()
-      workspaces.value = response.workspaces
+      workspaces.value = Array.isArray(response.workspaces) ? response.workspaces : []
       reconcileWorkspace(preferredWorkspace)
     } catch (err) {
       contextError.value = new Error(getHermesErrorMessage(err, 'Could not load workspaces.'))
@@ -51,14 +51,6 @@ export function useChatComposerContext() {
     await loadWorkspaces()
   }
 
-  async function initializeForSession(session: WebChatSession) {
-    if (workspaces.value.length) {
-      reconcileWorkspace(session.workspace)
-      return
-    }
-    await loadWorkspaces(session.workspace)
-  }
-
   function selectWorkspace(path: string | null) {
     if (path !== selectedWorkspace.value) {
       attachments.value = []
@@ -68,20 +60,14 @@ export function useChatComposerContext() {
   }
 
   async function uploadFiles(files: File[]) {
-    if (!files.length) return
-    if (!selectedWorkspace.value) {
-      const error = new Error('Select a workspace before attaching files.')
+    attachmentsLoading.value = true
+    try {
+      const nextAttachments = await filesToPromptAttachments(files)
+      attachments.value = [...attachments.value, ...nextAttachments]
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Could not attach files.')
       contextError.value = error
       throw error
-    }
-    attachmentsLoading.value = true
-    contextError.value = undefined
-    try {
-      const response = await api.uploadAttachments(files, selectedWorkspace.value)
-      attachments.value = [...attachments.value, ...response.attachments]
-    } catch (err) {
-      contextError.value = new Error(getHermesErrorMessage(err, 'Could not upload attachment.'))
-      throw contextError.value
     } finally {
       attachmentsLoading.value = false
     }
@@ -103,7 +89,6 @@ export function useChatComposerContext() {
     attachmentsLoading,
     contextError,
     initialize,
-    initializeForSession,
     loadWorkspaces,
     selectWorkspace,
     uploadFiles,

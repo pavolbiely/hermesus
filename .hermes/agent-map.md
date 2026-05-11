@@ -4,37 +4,47 @@ Use this before broad repository search.
 
 ## Canonical source
 
-- `backend/hermes_cli/web_chat.py`: backend entrypoint and compatibility wrappers.
-- `backend/hermes_cli/web_chat_modules/`: backend domain modules, including `session_summaries.py` for cached out-of-band sidebar chat previews.
-- `backend/tests/hermes_cli/test_web_chat*.py`: backend tests split by domain.
-- `web/app/pages/chat/[id].vue`: main chat route/page orchestrator.
-- `web/app/components/`: chat UI components.
-- `web/app/composables/`: frontend API, run streaming, message/run state.
-- `web/app/types/web-chat.ts`: frontend API/event types.
+- `web/app/pages/index.vue`: new-chat entry point and initial ACP session creation.
+- `web/app/pages/acp/[id].vue`: main ACP-native chat route and composer orchestration.
+- `web/app/layouts/default.vue`: app shell, sidebar loading, workspace state, and session navigation.
+- `web/app/components/SidebarSessionGroups.vue`: session list rendering and ACP sidebar actions.
+- `web/app/components/ChatSlashCommandMenu.vue`: local slash-command autocomplete UI.
+- `web/app/composables/useAcpApi.ts`: typed frontend client for `/api/acp/*` routes.
+- `web/app/composables/useAcpTranscript.ts`: browser transcript state from ACP replay/live events.
+- `web/app/composables/useAppWorkspacesApi.ts`: typed frontend client for Hermesum-owned workspace routes.
+- `web/app/types/acp-api.ts`, `web/app/types/acp-chat.ts`, `web/app/types/chat.ts`: API/protocol/UI contract types.
+- `web/app/utils/acpBridgeEventNormalization.ts` and `web/app/utils/acpEventNormalization.ts`: ACP bridge events to chat transcript state.
+- `web/app/utils/acpSidebarSessions.ts`: ACP session/list to sidebar summary mapping.
+- `web/server/acp/bridge.ts`: ACP SDK subprocess bridge, active prompt correlation, and client handler.
+- `web/server/acp/events.ts`: session-scoped ACP SSE publish/subscribe backlog.
+- `web/server/app/acpSessionMetadata.ts`: Hermesum-owned ACP sidebar metadata store.
+- `web/server/app/workspaces.ts`: Hermesum-owned workspace settings store and validation.
+- `web/server/api/acp/`: ACP protocol-backed Nitro routes.
+- `web/server/api/app/`: Hermesum product routes for non-ACP app concerns.
+- `.github/workflows/tests.yml`: CI for Node tests, Nuxt typecheck, and Nuxt build.
 - `.runtime/`: disposable runtime mirror; do not edit as source.
-- `.github/workflows/tests.yml`: GitHub Actions CI for backend runtime-mirror tests and frontend checks.
-- `scripts/patch-hermes-runtime.py`: CI/local helper that patches a disposable Hermes runtime checkout to mount Hermesum web-chat routes for tests.
 
 ## High-token hotspots
 
-- Chat page: `web/app/pages/chat/[id].vue`.
+- ACP chat page: `web/app/pages/acp/[id].vue`.
 - Layout/sidebar: `web/app/layouts/default.vue`, `SidebarSessionGroups.vue`.
-- Message rendering: `ChatMessageContent.vue`, `useChatRunMessages.ts`.
-- Run state: `useActiveChatRuns.ts`, backend `run_manager.py`.
-- Backend compatibility: `web_chat.py`.
+- ACP bridge/transcript state: `web/server/acp/bridge.ts`, `useAcpTranscript.ts`, `acpBridgeEventNormalization.ts`, `acpEventNormalization.ts`.
+- App-owned session metadata/workspaces: `web/server/app/acpSessionMetadata.ts`, `web/server/app/workspaces.ts`.
+- Run/local orchestration: `run-local.sh`.
 
 ## Fast verification
 
-Frontend from `web/`:
+From `web/`:
 
+- `node --test tests/*.test.mjs`
 - `pnpm typecheck`
 - `pnpm build`
 
-Backend syntax from repo root:
+API/browser smoke should use a fresh production preview when ACP runtime behavior matters:
 
-- `python3 -m py_compile backend/hermes_cli/web_chat.py backend/hermes_cli/web_chat_modules/*.py backend/tests/hermes_cli/test_web_chat*.py backend/tests/hermes_cli/conftest.py backend/tests/hermes_cli/web_chat_test_helpers.py`
-
-Backend pytest must use the runtime mirror flow from `AGENTS.md`.
+- `PORT=4046 HOST=127.0.0.1 node web/.output/server/index.mjs` after `pnpm --dir web build`
+- `curl http://127.0.0.1:4046/api/acp/health`
+- browser smoke: app renders, sidebar loads, chat opens, prompt streams, no `/api/web-chat/*` requests.
 
 ## Doc maintenance
 

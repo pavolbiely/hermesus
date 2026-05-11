@@ -3,40 +3,31 @@ import type { CommandPaletteGroup } from '@nuxt/ui'
 import { installNotificationSoundUnlock } from '~/utils/notificationSound'
 import { readMessageCountForVisibleSession, syncInitialReadMessageCounts } from '~/utils/chatReadReceipts'
 import type { SessionGroup } from '~/utils/sessionGroups'
-import type { WebChatMessage, WebChatProfile, WebChatSession, WebChatWorkspace } from '~/types/web-chat'
+import type { AppWorkspace, ChatSessionSummary } from '~/types/chat'
+import { acpSidebarSessions } from '~/utils/acpSidebarSessions'
 import { buildSessionGroups } from '~/utils/sessionGroups'
 
 type ConfirmSessionAction = 'duplicate' | 'archive' | 'delete'
 
-const api = useHermesApi()
-const sessionCache = useWebChatSessionCache(api)
+const api = useAppWorkspacesApi()
+const acpApi = useAcpApi()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
-const activeChatRuns = useActiveChatRuns()
-const sessionTitleOverrides = useSessionTitleOverrides()
 const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
-const {
-  activeSessionId: readAloudSessionId,
-  status: readAloudStatus,
-  stopSession: stopReadAloudSession
-} = useMessageReadAloud()
 
-const dataRefreshKey = 'web-chat-sessions'
-const { data, refresh } = await useAsyncData(dataRefreshKey, () => api.listSessions({ includeArchived: true }))
-const { data: profilesData, pending: profilesPending } = await useAsyncData('web-chat-profiles', () => api.getProfiles())
+const dataRefreshKey = 'acp-sidebar-sessions'
+const { data, refresh } = await useAsyncData(dataRefreshKey, () => acpApi.listSessions())
 await context.initialize()
 
-const sessions = computed(() => data.value?.sessions || [])
+const sessions = computed(() => acpSidebarSessions(data.value))
 const groupedSessions = computed<SessionGroup[]>(() => buildSessionGroups({
   sessions: sessions.value,
   workspaces: context.workspaces.value,
   selectedWorkspace: context.selectedWorkspace.value
 }))
 const searchTerm = ref('')
-const searchMessageTextBySessionId = ref<Record<string, string>>({})
-const searchIndexedSessionIds = ref(new Set<string>())
 const searchGroups = computed<CommandPaletteGroup[]>(() => {
   const query = normalizeSearchText(searchTerm.value)
   const sessionItems = sessions.value
@@ -53,36 +44,25 @@ const searchGroups = computed<CommandPaletteGroup[]>(() => {
     ? [{ id: 'chats', label: 'Chats', ignoreFilter: Boolean(query), items: sessionItems }]
     : []
 })
-const profileOptions = computed(() => (profilesData.value?.profiles || []).map(profile => ({
-  label: profile.label,
-  value: profile.id,
-  profile
-})))
-const selectedProfile = ref<string | undefined>(profilesData.value?.activeProfile || undefined)
-const selectedProfileLabel = computed(() => profileOptions.value.find(option => option.value === selectedProfile.value)?.label)
-const profileSwitchPending = ref(false)
 const now = ref(new Date())
 const readMessageCounts = ref<Record<string, number>>({})
 const readMessageCountsLoaded = ref(false)
 const readMessageCountsSynced = ref(false)
-const renameSession = ref<WebChatSession | null>(null)
+const renameSession = ref<ChatSessionSummary | null>(null)
 const renameTitle = ref('')
 const confirmAction = ref<ConfirmSessionAction | null>(null)
-const confirmSession = ref<WebChatSession | null>(null)
+const confirmSession = ref<ChatSessionSummary | null>(null)
 const pendingSessionId = ref<string | null>(null)
 const workspaceModalOpen = ref(false)
 const settingsModalOpen = ref(false)
-const editingWorkspace = ref<WebChatWorkspace | null>(null)
+const editingWorkspace = ref<AppWorkspace | null>(null)
 const workspaceLabel = ref('')
 const workspacePath = ref('')
 const workspacePending = ref(false)
 const workspaceDirectorySuggestions = ref<string[]>([])
 let workspaceDirectorySuggestionTimer: ReturnType<typeof setTimeout> | undefined
-let searchIndexTimer: ReturnType<typeof setTimeout> | undefined
 const READ_MESSAGE_COUNTS_KEY = 'hermes-chat-read-message-counts'
-const SESSION_PREFETCH_MESSAGE_LIMIT = 60
 let timer: ReturnType<typeof setInterval> | undefined
-let unsubscribeRunFinished: (() => void) | undefined
 const requestedSessionId = ref<string | null>(null)
 const activeSidebarSessionId = computed(() => {
   if (requestedSessionId.value) return requestedSessionId.value
@@ -130,14 +110,8 @@ const confirmDescription = computed(() => {
   return `Permanently delete “${title}”? This cannot be undone.`
 })
 
-function sessionTitle(session: WebChatSession) {
+function sessionTitle(session: ChatSessionSummary) {
   return session.title || session.preview || 'Untitled chat'
-}
-
-function syncActiveRunSessionTitles() {
-  for (const session of sessions.value) {
-    activeChatRuns.setSessionTitle(session.id, sessionTitle(session))
-  }
 }
 
 function workspaceDisplayLabel(path: string | null) {
@@ -149,43 +123,13 @@ function normalizeSearchText(value: string | null | undefined) {
   return (value || '').toLowerCase()
 }
 
-function sessionSearchText(session: WebChatSession) {
+function sessionSearchText(session: ChatSessionSummary) {
   return normalizeSearchText([
     sessionTitle(session),
     session.preview,
     workspaceDisplayLabel(session.workspace),
-    session.workspace,
-    searchMessageTextBySessionId.value[session.id]
+    session.workspace
   ].filter(Boolean).join(' '))
-}
-
-function messageSearchText(message: WebChatMessage) {
-  return message.parts
-    .map(part => part.text || part.description || part.title || '')
-    .filter(Boolean)
-    .join(' ')
-}
-
-function sessionMessagesSearchText(messages: WebChatMessage[]) {
-  return messages.map(messageSearchText).filter(Boolean).join(' ')
-}
-
-async function indexSessionsForSearch() {
-  const query = normalizeSearchText(searchTerm.value.trim())
-  if (query.length < 2) return
-
-  const indexedIds = searchIndexedSessionIds.value
-  const sessionsToIndex = sessions.value.filter(session => !indexedIds.has(session.id))
-  if (!sessionsToIndex.length) return
-
-  await Promise.allSettled(sessionsToIndex.map(async (session) => {
-    const detail = await api.getSession(session.id, { includeWorkspaceChanges: false })
-    searchMessageTextBySessionId.value = {
-      ...searchMessageTextBySessionId.value,
-      [session.id]: sessionMessagesSearchText(detail.messages)
-    }
-    searchIndexedSessionIds.value = new Set([...searchIndexedSessionIds.value, session.id])
-  }))
 }
 
 function startWorkspaceChat(workspacePath: string) {
@@ -202,7 +146,7 @@ function beginCreateWorkspace() {
   workspaceModalOpen.value = true
 }
 
-function beginEditWorkspace(workspace: WebChatWorkspace) {
+function beginEditWorkspace(workspace: AppWorkspace) {
   editingWorkspace.value = workspace
   workspaceLabel.value = workspace.label
   workspacePath.value = workspace.path
@@ -245,23 +189,16 @@ watch(workspacePath, (path) => {
   }, 150)
 })
 
-watch(searchTerm, () => {
-  if (searchIndexTimer) clearTimeout(searchIndexTimer)
-  searchIndexTimer = setTimeout(() => {
-    void indexSessionsForSearch()
-  }, 200)
-})
-
 async function refreshWorkspacesAndSessions() {
   await context.loadWorkspaces(context.selectedWorkspace.value)
   await refresh()
 }
 
-function applyWorkspaceOrder(workspaces: WebChatWorkspace[], workspaceIds: string[]) {
+function applyWorkspaceOrder(workspaces: AppWorkspace[], workspaceIds: string[]) {
   const workspacesById = new Map(workspaces.map(workspace => [workspace.id, workspace]))
   const requestedIds = new Set(workspaceIds)
   return [
-    ...workspaceIds.map(id => workspacesById.get(id)).filter((workspace): workspace is WebChatWorkspace => Boolean(workspace)),
+    ...workspaceIds.map(id => workspacesById.get(id)).filter((workspace): workspace is AppWorkspace => Boolean(workspace)),
     ...workspaces.filter(workspace => !requestedIds.has(workspace.id))
   ]
 }
@@ -327,80 +264,9 @@ async function deleteWorkspace() {
   }
 }
 
-function activeProfileId() {
-  return profilesData.value?.profiles.find(profile => profile.active)?.id
-    || profilesData.value?.activeProfile
-    || undefined
-}
 
-async function reloadWhenProfileReady(profile: string) {
-  if (!import.meta.client) return
-
-  const deadline = Date.now() + 12_000
-  while (Date.now() < deadline) {
-    await new Promise(resolve => window.setTimeout(resolve, 600))
-
-    try {
-      const response = await api.getProfiles()
-      profilesData.value = response
-      selectedProfile.value = response.activeProfile
-      if (response.activeProfile === profile || response.profiles.some(item => item.id === profile && item.active)) {
-        window.location.reload()
-        return
-      }
-    } catch {
-      // Backend may be between process exit and restart.
-    }
-  }
-
-  window.location.reload()
-}
-
-async function selectProfile(profileId: string | WebChatProfile | null) {
-  const requested = typeof profileId === 'string' ? profileId : profileId?.id || null
-  const active = activeProfileId()
-  if (!requested || requested === active || profileSwitchPending.value) {
-    selectedProfile.value = active
-    return
-  }
-
-  selectedProfile.value = requested
-  profileSwitchPending.value = true
-  let keepPending = false
-  try {
-    const response = await api.switchProfile(requested)
-    profilesData.value = response
-    selectedProfile.value = response.activeProfile
-    toast.add({
-      title: response.restarting ? 'Switching profile…' : 'Profile switched',
-      description: response.restarting
-        ? `Hermes backend is restarting with profile “${response.activeProfile}”.`
-        : `Active profile: ${response.activeProfile}.`,
-      color: 'neutral'
-    })
-
-    if (response.restarting && import.meta.client) {
-      keepPending = true
-      void reloadWhenProfileReady(response.activeProfile)
-    }
-  } catch (err) {
-    selectedProfile.value = active
-    toast.add({
-      title: 'Failed to switch profile',
-      description: getHermesErrorMessage(err, 'Could not switch Hermes profile.'),
-      color: 'error'
-    })
-  } finally {
-    if (!keepPending) profileSwitchPending.value = false
-  }
-}
-
-watch(profilesData, () => {
-  selectedProfile.value = activeProfileId()
-}, { immediate: true })
-
-function isActiveSession(session: WebChatSession) {
-  return route.params.id === session.id
+function isActiveSession(session: ChatSessionSummary) {
+  return route.path === `/acp/${session.id}`
 }
 
 function loadReadMessageCounts() {
@@ -436,7 +302,7 @@ function markSessionRead(sessionId: string, messageCount: number) {
   saveReadMessageCounts()
 }
 
-function initialReadMessageCount(session: Pick<WebChatSession, 'id' | 'messageCount'>) {
+function initialReadMessageCount(session: Pick<ChatSessionSummary, 'id' | 'messageCount'>) {
   if (!readMessageCountsSynced.value) return session.messageCount || 0
   return session.id === activeSidebarSessionId.value ? session.messageCount || 0 : 0
 }
@@ -452,15 +318,15 @@ function syncReadMessageCounts() {
   saveReadMessageCounts()
 }
 
-function isSessionRunning(session: WebChatSession) {
-  return activeChatRuns.isRunning(session.id)
+function isSessionRunning(_session: ChatSessionSummary) {
+  return false
 }
 
-function hasLocalUnread(session: WebChatSession) {
-  return activeChatRuns.hasLocalUnread(session.id)
+function hasLocalUnread(_session: ChatSessionSummary) {
+  return false
 }
 
-function beginRename(session: WebChatSession) {
+function beginRename(session: ChatSessionSummary) {
   renameSession.value = session
   renameTitle.value = sessionTitle(session)
 }
@@ -482,9 +348,7 @@ async function saveRename() {
 
   pendingSessionId.value = session.id
   try {
-    const response = await api.renameSession(session.id, title)
-    sessionTitleOverrides.set(response.session.id, response.session.title || title)
-    activeChatRuns.setSessionTitle(response.session.id, response.session.title || title)
+    await acpApi.updateSessionMetadata(session.id, { title })
     await refresh()
     cancelRename()
   } catch (err) {
@@ -498,7 +362,7 @@ async function saveRename() {
   }
 }
 
-function beginConfirmAction(action: ConfirmSessionAction, session: WebChatSession) {
+function beginConfirmAction(action: ConfirmSessionAction, session: ChatSessionSummary) {
   confirmAction.value = action
   confirmSession.value = session
 }
@@ -522,14 +386,13 @@ async function confirmSessionAction() {
   }
 }
 
-async function duplicateSession(session: WebChatSession) {
+async function duplicateSession(session: ChatSessionSummary) {
   pendingSessionId.value = session.id
   try {
-    const duplicated = await api.duplicateSession(session.id)
-    sessionCache.set(duplicated)
+    const duplicated = await acpApi.forkSession(session.id)
     await refresh()
     cancelConfirmAction()
-    await router.push(`/chat/${duplicated.session.id}`)
+    await router.push(`/acp/${duplicated.sessionId}`)
   } catch (err) {
     toast.add({
       title: 'Failed to duplicate chat',
@@ -541,10 +404,10 @@ async function duplicateSession(session: WebChatSession) {
   }
 }
 
-async function toggleSessionPinned(session: WebChatSession) {
+async function toggleSessionPinned(session: ChatSessionSummary) {
   pendingSessionId.value = session.id
   try {
-    await api.setSessionPinned(session.id, !session.pinned)
+    await acpApi.updateSessionMetadata(session.id, { pinned: !session.pinned })
     await refresh()
   } catch (err) {
     toast.add({
@@ -557,13 +420,12 @@ async function toggleSessionPinned(session: WebChatSession) {
   }
 }
 
-async function moveSessionToWorkspace(session: WebChatSession, workspace: WebChatWorkspace) {
+async function moveSessionToWorkspace(session: ChatSessionSummary, workspace: AppWorkspace) {
   if (session.workspace === workspace.path) return
 
   pendingSessionId.value = session.id
   try {
-    const response = await api.setSessionWorkspace(session.id, workspace.path)
-    sessionCache.set(response)
+    await acpApi.updateSessionMetadata(session.id, { workspace: workspace.path })
     await refresh()
     toast.add({
       title: 'Chat moved',
@@ -581,24 +443,14 @@ async function moveSessionToWorkspace(session: WebChatSession, workspace: WebCha
   }
 }
 
-async function setSessionArchived(session: WebChatSession, archived: boolean) {
+async function setSessionArchived(session: ChatSessionSummary, archived: boolean) {
   pendingSessionId.value = session.id
   try {
-    const response = await api.setSessionArchived(session.id, archived)
-    sessionCache.set(response)
+    await acpApi.updateSessionMetadata(session.id, { archived })
     await refresh()
     if (archived && isActiveSession(session)) await router.push('/')
   } catch (err) {
     const message = getHermesErrorMessage(err, archived ? 'Could not archive chat.' : 'Could not restore chat.')
-    if (!archived && message.includes('Choose another workspace')) {
-      await router.push(`/chat/${session.id}`)
-      toast.add({
-        title: 'Choose a workspace to restore this chat',
-        description: 'The original workspace no longer exists.',
-        color: 'warning'
-      })
-      return
-    }
     toast.add({
       title: archived ? 'Failed to archive chat' : 'Failed to restore chat',
       description: message,
@@ -609,21 +461,19 @@ async function setSessionArchived(session: WebChatSession, archived: boolean) {
   }
 }
 
-async function archiveSession(session: WebChatSession) {
+async function archiveSession(session: ChatSessionSummary) {
   await setSessionArchived(session, true)
   cancelConfirmAction()
 }
 
-async function restoreSession(session: WebChatSession) {
+async function restoreSession(session: ChatSessionSummary) {
   await setSessionArchived(session, false)
 }
 
-async function deleteSession(session: WebChatSession) {
+async function deleteSession(session: ChatSessionSummary) {
   pendingSessionId.value = session.id
   try {
-    await api.deleteSession(session.id)
-    sessionCache.remove(session.id)
-    activeChatRuns.markFinished(session.id)
+    await acpApi.closeSession(session.id)
     await refresh()
     cancelConfirmAction()
     if (isActiveSession(session)) await router.push('/')
@@ -638,13 +488,12 @@ async function deleteSession(session: WebChatSession) {
   }
 }
 
-function prefetchSession(session: WebChatSession) {
-  sessionCache.prefetch(session.id, { messageLimit: SESSION_PREFETCH_MESSAGE_LIMIT })
+function prefetchSession(_session: ChatSessionSummary) {
 }
 
-function openSession(session: WebChatSession) {
+function openSession(session: ChatSessionSummary) {
   requestedSessionId.value = session.id
-  void router.push(`/chat/${session.id}`).catch(() => {
+  void router.push(`/acp/${session.id}`).catch(() => {
     requestedSessionId.value = null
   })
 }
@@ -661,8 +510,6 @@ watch(
   () => syncReadMessageCounts()
 )
 
-watch(sessions, syncActiveRunSessionTitles, { immediate: true })
-
 onMounted(() => {
   installNotificationSoundUnlock()
   loadReadMessageCounts()
@@ -670,14 +517,11 @@ onMounted(() => {
   timer = setInterval(() => {
     now.value = new Date()
   }, 15_000)
-  unsubscribeRunFinished = activeChatRuns.onFinished(() => refresh())
 })
 
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
   if (workspaceDirectorySuggestionTimer) clearTimeout(workspaceDirectorySuggestionTimer)
-  if (searchIndexTimer) clearTimeout(searchIndexTimer)
-  unsubscribeRunFinished?.()
 })
 
 provide('refreshSessions', refresh)
@@ -735,8 +579,6 @@ provide('requestedSessionId', readonly(requestedSessionId))
           :read-message-counts-loaded="readMessageCountsLoaded"
           :is-session-running="isSessionRunning"
           :has-local-unread="hasLocalUnread"
-          :read-aloud-session-id="readAloudSessionId"
-          :read-aloud-status="readAloudStatus"
           @edit-workspace="beginEditWorkspace"
           @start-workspace-chat="startWorkspaceChat"
           @reorder-workspaces="reorderWorkspaces"
@@ -747,44 +589,11 @@ provide('requestedSessionId', readonly(requestedSessionId))
           @toggle-session-pinned="toggleSessionPinned"
           @restore-session="restoreSession"
           @confirm-session-action="beginConfirmAction"
-          @stop-read-aloud="stopReadAloudSession"
         />
       </template>
 
       <template #footer>
-        <div class="flex w-full items-center gap-1 pb-1">
-          <USelectMenu
-            :model-value="selectedProfile"
-            :items="profileOptions"
-            value-key="value"
-            label-key="label"
-            size="xs"
-            class="block min-w-0 flex-1 max-w-none"
-            :ui="{
-              base: 'w-full max-w-none !justify-start text-left',
-              value: 'flex-1 text-left',
-              placeholder: 'flex-1 text-left',
-              trailing: 'ms-auto'
-            }"
-            :loading="profilesPending || profileSwitchPending"
-            :disabled="profilesPending || profileSwitchPending || !profileOptions.length"
-            placeholder="Hermes profile"
-            @update:model-value="selectProfile"
-          >
-            <template #default>
-              <span class="min-w-0 flex-1 truncate text-left">
-                {{ selectedProfileLabel || 'Hermes profile' }}
-              </span>
-            </template>
-            <template #leading>
-              <UIcon
-                :name="profileSwitchPending ? 'i-lucide-cpu' : 'i-lucide-user-round'"
-                class="size-3.5"
-                :class="profileSwitchPending ? 'animate-spin' : undefined"
-              />
-            </template>
-          </USelectMenu>
-
+        <div class="flex w-full items-center justify-end pb-1">
           <UTooltip text="Settings">
             <UButton
               aria-label="Settings"

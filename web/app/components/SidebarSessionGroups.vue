@@ -1,34 +1,34 @@
 <script setup lang="ts">
 import type { DropdownMenuItem } from '@nuxt/ui'
 import type { SessionGroup } from '~/utils/sessionGroups'
-import type { WebChatSession, WebChatSessionPreviewResponse, WebChatWorkspace } from '~/types/web-chat'
+import type { AppWorkspace, ChatSessionSummary } from '~/types/chat'
 import { isSessionUnread } from '~/utils/chatReadReceipts'
 import { displayedGroupSessions, hiddenGroupSessionCount, MAX_COLLAPSED_SESSION_COUNT, sessionTitle, sortedGroupSessions } from '~/utils/sidebarSessions'
 
 const props = defineProps<{
   groups: SessionGroup[]
-  workspaces: WebChatWorkspace[]
+  workspaces: AppWorkspace[]
   activeSessionId?: string
   pendingSessionId?: string | null
   now: Date
   readMessageCounts: Record<string, number>
   readMessageCountsLoaded: boolean
-  isSessionRunning: (session: WebChatSession) => boolean
-  hasLocalUnread?: (session: WebChatSession) => boolean
+  isSessionRunning: (session: ChatSessionSummary) => boolean
+  hasLocalUnread?: (session: ChatSessionSummary) => boolean
   readAloudSessionId?: string | null
   readAloudStatus?: 'generating' | 'speaking' | 'idle'
 }>()
 
 const emit = defineEmits<{
-  editWorkspace: [workspace: WebChatWorkspace]
+  editWorkspace: [workspace: AppWorkspace]
   startWorkspaceChat: [path: string]
-  openSession: [session: WebChatSession]
-  prefetchSession: [session: WebChatSession]
-  renameSession: [session: WebChatSession]
-  moveSessionToWorkspace: [session: WebChatSession, workspace: WebChatWorkspace]
-  toggleSessionPinned: [session: WebChatSession]
-  restoreSession: [session: WebChatSession]
-  confirmSessionAction: [action: 'duplicate' | 'archive' | 'delete', session: WebChatSession]
+  openSession: [session: ChatSessionSummary]
+  prefetchSession: [session: ChatSessionSummary]
+  renameSession: [session: ChatSessionSummary]
+  moveSessionToWorkspace: [session: ChatSessionSummary, workspace: AppWorkspace]
+  toggleSessionPinned: [session: ChatSessionSummary]
+  restoreSession: [session: ChatSessionSummary]
+  confirmSessionAction: [action: 'duplicate' | 'archive' | 'delete', session: ChatSessionSummary]
   reorderWorkspaces: [workspaceIds: string[]]
   stopReadAloud: [sessionId: string]
 }>()
@@ -37,17 +37,6 @@ const OTHER_CHATS_GROUP_ID = '__other__'
 const COLLAPSED_GROUPS_STORAGE_KEY = 'hermes-chat-collapsed-session-groups'
 
 const openMenuSessionId = ref<string | null>(null)
-const hoveredPreviewSessionId = ref<string | null>(null)
-const openPreviewSessionId = ref<string | null>(null)
-const suppressPreviewOpenUntil = ref(0)
-const api = useHermesApi()
-type PreviewState = {
-  data?: WebChatSessionPreviewResponse
-  loading?: boolean
-  generating?: boolean
-  error?: string
-}
-const previewStates = ref<Record<string, PreviewState>>({})
 const draggingWorkspaceId = ref<string | null>(null)
 const dragPreviewWorkspaceIds = ref<string[] | null>(null)
 const preserveDroppedPreview = ref(false)
@@ -63,37 +52,18 @@ function sessionTime(updatedAt: string) {
   return formatCompactRelativeTime(updatedAt, props.now)
 }
 
-function isActiveSession(session: WebChatSession) {
+function isActiveSession(session: ChatSessionSummary) {
   return props.activeSessionId === session.id
 }
 
-function isReadAloudSession(session: WebChatSession) {
+function isReadAloudSession(session: ChatSessionSummary) {
   return props.readAloudSessionId === session.id
 }
 
-function readAloudSessionLabel(session: WebChatSession) {
+function readAloudSessionLabel(session: ChatSessionSummary) {
   return props.readAloudStatus === 'generating'
     ? `Stop generating speech for ${sessionTitle(session)}`
     : `Stop reading ${sessionTitle(session)}`
-}
-
-function previewState(session: WebChatSession) {
-  return previewStates.value[session.id] || {}
-}
-
-function setPreviewState(sessionId: string, state: PreviewState) {
-  previewStates.value = {
-    ...previewStates.value,
-    [sessionId]: {
-      ...previewStates.value[sessionId],
-      ...state
-    }
-  }
-}
-
-function sessionPreviewSummary(session: WebChatSession) {
-  const state = previewState(session)
-  return state.data?.summary?.trim() || ''
 }
 
 function suppressNativeTitleTooltip(event: Event) {
@@ -106,64 +76,14 @@ function suppressNativeTitleTooltip(event: Event) {
   }
 }
 
-function closeSessionPreview(sessionId?: string) {
-  if (!sessionId || hoveredPreviewSessionId.value === sessionId) {
-    hoveredPreviewSessionId.value = null
-  }
-  if (!sessionId || openPreviewSessionId.value === sessionId) {
-    openPreviewSessionId.value = null
-  }
-}
-
-function handleSessionPreviewOpen(session: WebChatSession, open: boolean) {
-  if (!open) {
-    closeSessionPreview(session.id)
-    return
-  }
-
-  if (openMenuSessionId.value || hoveredPreviewSessionId.value !== session.id || Date.now() < suppressPreviewOpenUntil.value) {
-    openPreviewSessionId.value = null
-    return
-  }
-
-  openPreviewSessionId.value = session.id
-  emit('prefetchSession', session)
-  if (!previewState(session).data && !previewState(session).loading) {
-    void loadSessionPreview(session.id)
-  }
-}
-
-function enterSessionPreviewTrigger(session: WebChatSession, event: Event) {
-  hoveredPreviewSessionId.value = session.id
+function enterSessionPreviewTrigger(session: ChatSessionSummary, event: Event) {
   suppressNativeTitleTooltip(event)
 }
 
-function openSessionFromPointer(session: WebChatSession, event: MouseEvent) {
-  suppressPreviewOpenUntil.value = Date.now() + 1500
-  closeSessionPreview()
+function openSessionFromPointer(session: ChatSessionSummary, event: MouseEvent) {
   emit('openSession', session)
   if (event.currentTarget instanceof HTMLElement) {
     event.currentTarget.blur()
-  }
-}
-
-async function loadSessionPreview(sessionId: string) {
-  setPreviewState(sessionId, { loading: true, error: undefined })
-  try {
-    const data = await api.getSessionPreview(sessionId)
-    setPreviewState(sessionId, { data, loading: false, error: undefined })
-  } catch (error) {
-    setPreviewState(sessionId, { loading: false, error: error instanceof Error ? error.message : 'Failed to load summary' })
-  }
-}
-
-async function generateSessionPreview(session: WebChatSession) {
-  setPreviewState(session.id, { generating: true, error: undefined })
-  try {
-    const data = await api.generateSessionPreviewSummary(session.id)
-    setPreviewState(session.id, { data, generating: false, loading: false, error: undefined })
-  } catch (error) {
-    setPreviewState(session.id, { generating: false, loading: false, error: error instanceof Error ? error.message : 'Failed to generate summary' })
   }
 }
 
@@ -267,7 +187,7 @@ function toggleWorkspaceGroup(group: SessionGroup) {
   toggleGroupCollapsed(group)
 }
 
-function isUnreadSession(session: WebChatSession) {
+function isUnreadSession(session: ChatSessionSummary) {
   return isSessionUnread(
     session,
     props.readMessageCounts,
@@ -276,7 +196,7 @@ function isUnreadSession(session: WebChatSession) {
   )
 }
 
-function isPromotedUnreadSession(session: WebChatSession) {
+function isPromotedUnreadSession(session: ChatSessionSummary) {
   return isUnreadSession(session) || promotedUnreadSessionIds.value.has(session.id)
 }
 
@@ -435,14 +355,12 @@ onUnmounted(() => {
   if (clearDroppedPreviewTimer) clearTimeout(clearDroppedPreviewTimer)
 })
 
-function openSessionMenu(session: WebChatSession) {
-  closeSessionPreview()
+function openSessionMenu(session: ChatSessionSummary) {
   contextMenuReference.value = null
   openMenuSessionId.value = session.id
 }
 
-function openSessionContextMenu(session: WebChatSession, event: MouseEvent) {
-  closeSessionPreview()
+function openSessionContextMenu(session: ChatSessionSummary, event: MouseEvent) {
   const { clientX, clientY } = event
   contextMenuReference.value = {
     getBoundingClientRect: () => new DOMRect(clientX, clientY, 0, 0)
@@ -450,9 +368,8 @@ function openSessionContextMenu(session: WebChatSession, event: MouseEvent) {
   openMenuSessionId.value = session.id
 }
 
-function closeSessionMenu(open: boolean, session: WebChatSession) {
+function closeSessionMenu(open: boolean, session: ChatSessionSummary) {
   if (open) {
-    closeSessionPreview()
     openMenuSessionId.value = session.id
     return
   }
@@ -461,7 +378,7 @@ function closeSessionMenu(open: boolean, session: WebChatSession) {
   contextMenuReference.value = null
 }
 
-function sessionMenuContent(session: WebChatSession) {
+function sessionMenuContent(session: ChatSessionSummary) {
   if (contextMenuReference.value && openMenuSessionId.value === session.id) {
     return {
       reference: contextMenuReference.value,
@@ -474,31 +391,31 @@ function sessionMenuContent(session: WebChatSession) {
   return { align: 'end' as const, side: 'right' as const, sideOffset: 6 }
 }
 
-function actionButtonClass(session: WebChatSession) {
+function actionButtonClass(session: ChatSessionSummary) {
   return openMenuSessionId.value === session.id
     ? 'opacity-100'
     : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
 }
 
-function renameSession(session: WebChatSession) {
+function renameSession(session: ChatSessionSummary) {
   openMenuSessionId.value = null
   contextMenuReference.value = null
   emit('renameSession', session)
 }
 
-function toggleSessionPinned(session: WebChatSession) {
+function toggleSessionPinned(session: ChatSessionSummary) {
   openMenuSessionId.value = null
   contextMenuReference.value = null
   emit('toggleSessionPinned', session)
 }
 
-function moveSessionToWorkspace(session: WebChatSession, workspace: WebChatWorkspace) {
+function moveSessionToWorkspace(session: ChatSessionSummary, workspace: AppWorkspace) {
   openMenuSessionId.value = null
   contextMenuReference.value = null
   emit('moveSessionToWorkspace', session, workspace)
 }
 
-function moveWorkspaceItems(session: WebChatSession): DropdownMenuItem[] {
+function moveWorkspaceItems(session: ChatSessionSummary): DropdownMenuItem[] {
   const targetWorkspaces = props.workspaces.filter(workspace => workspace.path !== session.workspace)
   if (!targetWorkspaces.length) {
     return [{ label: 'No other workspaces', disabled: true }]
@@ -511,33 +428,29 @@ function moveWorkspaceItems(session: WebChatSession): DropdownMenuItem[] {
   }))
 }
 
-function restoreSession(session: WebChatSession) {
+function restoreSession(session: ChatSessionSummary) {
   openMenuSessionId.value = null
   contextMenuReference.value = null
   emit('restoreSession', session)
 }
 
-function confirmSessionAction(action: 'duplicate' | 'archive' | 'delete', session: WebChatSession) {
+function confirmSessionAction(action: 'duplicate' | 'archive' | 'delete', session: ChatSessionSummary) {
   openMenuSessionId.value = null
   contextMenuReference.value = null
   emit('confirmSessionAction', action, session)
 }
 
-function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
+function sessionActionItems(session: ChatSessionSummary): DropdownMenuItem[] {
   if (session.archived) {
-    return [
+    const items: DropdownMenuItem[] = [
       {
         label: 'Restore',
         icon: 'i-lucide-archive-restore',
         onSelect: () => restoreSession(session)
-      },
-      {
-        label: 'Delete permanently',
-        icon: 'i-lucide-trash-2',
-        color: 'error',
-        onSelect: () => confirmSessionAction('delete', session)
       }
     ]
+
+    return items
   }
 
   return [
@@ -639,16 +552,10 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
       </div>
 
       <div v-if="group.sessions.length && !isGroupCollapsed(group)" class="space-y-1">
-        <UPopover
+        <div
           v-for="session in displayedSessions(group)"
           :key="session.id"
-          mode="hover"
           class="block w-full"
-          :open-delay="1000"
-          :close-delay="100"
-          :content="{ side: 'right', align: 'start', sideOffset: 8 }"
-          :open="openPreviewSessionId === session.id"
-          @update:open="handleSessionPreviewOpen(session, $event)"
         >
           <div
             role="button"
@@ -735,58 +642,7 @@ function sessionActionItems(session: WebChatSession): DropdownMenuItem[] {
               </span>
             </div>
           </div>
-
-          <template #content>
-            <div class="w-80 p-3 text-sm">
-              <div class="truncate font-medium text-highlighted">
-                {{ sessionTitle(session) }}
-              </div>
-              <div
-                v-if="isReadAloudSession(session)"
-                class="mt-2 flex items-center justify-between gap-3 rounded-md bg-primary/10 px-2 py-1.5 text-xs text-primary"
-              >
-                <span class="select-text inline-flex min-w-0 items-center gap-1.5">
-                  <UIcon
-                    :name="readAloudStatus === 'generating' ? 'i-lucide-loader-circle' : 'i-lucide-volume-2'"
-                    class="size-3 shrink-0"
-                    :class="readAloudStatus === 'generating' ? 'animate-spin' : ''"
-                  />
-                  <span class="truncate">
-                    {{ readAloudStatus === 'generating' ? 'Generating speech' : 'Reading aloud' }}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  class="inline-flex shrink-0 items-center gap-1 rounded px-1 hover:bg-primary/10"
-                  @click.stop.prevent="emit('stopReadAloud', session.id)"
-                >
-                  <UIcon name="i-lucide-square" class="size-3" />
-                  <span>Stop</span>
-                </button>
-              </div>
-              <p v-if="sessionPreviewSummary(session)" class="mt-2 text-sm leading-5 text-muted">
-                {{ sessionPreviewSummary(session) }}
-              </p>
-              <div v-else class="mt-2 space-y-2">
-                <p class="text-sm leading-5 text-muted">
-                  {{ previewState(session).loading ? 'Loading summary…' : 'No summary cached yet.' }}
-                </p>
-                <p v-if="previewState(session).error" class="text-xs text-error">
-                  {{ previewState(session).error }}
-                </p>
-                <UButton
-                  size="xs"
-                  color="neutral"
-                  variant="soft"
-                  loading-icon="i-lucide-cpu"
-                  :loading="previewState(session).generating"
-                  :label="previewState(session).error ? 'Retry summary' : 'Generate summary'"
-                  @click.stop="generateSessionPreview(session)"
-                />
-              </div>
-            </div>
-          </template>
-        </UPopover>
+        </div>
 
         <UButton
           v-if="group.sessions.length > MAX_COLLAPSED_SESSION_COUNT"

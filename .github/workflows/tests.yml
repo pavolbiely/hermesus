@@ -12,68 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out Hermesum
-        uses: actions/checkout@v4
-
-      - name: Check out Hermes Agent runtime
-        uses: actions/checkout@v4
-        with:
-          repository: NousResearch/hermes-agent
-          path: .runtime/hermes-agent
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-          cache-dependency-glob: .runtime/hermes-agent/uv.lock
-
-      - name: Syntax check canonical backend sources
-        run: >-
-          python3 -m py_compile
-          backend/hermes_cli/web_chat.py
-          backend/hermes_cli/web_chat_modules/*.py
-          backend/tests/hermes_cli/test_web_chat*.py
-          backend/tests/hermes_cli/conftest.py
-          backend/tests/hermes_cli/web_chat_test_helpers.py
-
-      - name: Install runtime test dependencies
-        working-directory: .runtime/hermes-agent
-        run: uv sync --extra dev --extra web --extra acp
-
-      - name: Mirror Hermesum backend into runtime
-        run: |
-          cp backend/hermes_cli/web_chat.py .runtime/hermes-agent/hermes_cli/web_chat.py
-
-          rm -rf .runtime/hermes-agent/hermes_cli/web_chat_modules
-          mkdir -p .runtime/hermes-agent/hermes_cli/web_chat_modules
-          cp -R backend/hermes_cli/web_chat_modules/. .runtime/hermes-agent/hermes_cli/web_chat_modules/
-
-          mkdir -p .runtime/hermes-agent/tests/hermes_cli
-          cp backend/tests/hermes_cli/conftest.py .runtime/hermes-agent/tests/hermes_cli/
-          cp backend/tests/hermes_cli/web_chat_test_helpers.py .runtime/hermes-agent/tests/hermes_cli/
-          cp backend/tests/hermes_cli/test_web_chat*.py .runtime/hermes-agent/tests/hermes_cli/
-
-      - name: Patch runtime web-chat integration
-        run: python3 scripts/patch-hermes-runtime.py
-
-      - name: Run backend tests
-        working-directory: .runtime/hermes-agent
-        env:
-          PYTHONPATH: tests/hermes_cli
-        run: uv run --extra dev --extra web --extra acp python -m pytest tests/hermes_cli/test_web_chat*.py
-
-  frontend:
-    name: Frontend
+  web:
+    name: Web
     runs-on: ubuntu-latest
 
     steps:
@@ -96,10 +36,14 @@ jobs:
         working-directory: web
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck frontend
+      - name: Run Node tests
+        working-directory: web
+        run: node --test tests/*.test.mjs
+
+      - name: Typecheck
         working-directory: web
         run: pnpm typecheck
 
-      - name: Build frontend
+      - name: Build
         working-directory: web
         run: pnpm build

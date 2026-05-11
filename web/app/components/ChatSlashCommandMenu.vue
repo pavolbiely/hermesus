@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { WebChatCommand } from '~/types/web-chat'
+import type { SlashCommand } from '~/types/chat'
 
 type ChatSlashCommandMenuProps = {
-  commands?: WebChatCommand[]
+  commands?: SlashCommand[]
   open?: boolean
   loading?: boolean
   highlightedIndex?: number
@@ -16,7 +16,7 @@ withDefaults(defineProps<ChatSlashCommandMenuProps>(), {
 })
 
 const emit = defineEmits<{
-  select: [command: WebChatCommand]
+  select: [command: SlashCommand]
   highlight: [index: number]
 }>()
 </script>

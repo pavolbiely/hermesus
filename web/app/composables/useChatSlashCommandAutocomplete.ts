@@ -1,13 +1,21 @@
 import type { Ref } from 'vue'
-import type { WebChatCommand } from '~/types/web-chat'
+import type { SlashCommand } from '~/types/chat'
+
+type SlashAutocompleteState = {
+  isOpen: Ref<boolean>
+  highlightedIndex: Ref<number>
+  close: () => void
+  moveHighlight: (delta: number) => void
+  highlightedCommand: () => SlashCommand | null
+}
 
 type UseChatSlashCommandAutocompleteOptions = {
   input: Ref<string>
-  slashCommands: ReturnType<typeof useSlashCommands>
+  slashCommands: SlashAutocompleteState
 }
 
 export function useChatSlashCommandAutocomplete(options: UseChatSlashCommandAutocompleteOptions) {
-  function selectSlashCommand(command: WebChatCommand) {
+  function selectSlashCommand(command: SlashCommand) {
     options.input.value = command.name
     options.slashCommands.close()
   }

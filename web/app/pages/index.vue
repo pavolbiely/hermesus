@@ -1,27 +1,29 @@
 <script setup lang="ts">
-import { playNotificationSound, prepareNotificationSound } from '../utils/notificationSound'
-import { filesFromClipboard } from '~/utils/clipboard'
 import { NEW_CHAT_DRAFT_ID } from '~/utils/chatDrafts'
 
 const { input, clearDraft } = useChatDraft(NEW_CHAT_DRAFT_ID)
 const loading = ref(false)
 const error = ref<Error | undefined>()
 const workspaceInvalidSignal = ref(0)
-const api = useHermesApi()
+const acp = useAcpApi()
+const pendingAcpPrompts = usePendingAcpPrompt()
 const router = useRouter()
 const refreshSessions = inject<() => Promise<void> | void>('refreshSessions')
-const composer = useChatComposerCapabilities()
-const providerUsage = useProviderUsage(
-  composer.selectedProvider,
-  composer.selectedModel
-)
 const CHAT_PROMPT_MAX_ROWS = 6
-const activeChatRuns = useActiveChatRuns()
 const context = useChatComposerContext()
 const newChatRequest = useNewChatRequest()
 const toast = useToast()
-const slashCommands = useSlashCommands({ input })
 const spellcheck = useChatInputSpellcheck()
+
+const workspaceItems = computed(() => context.workspaces.value.map(workspace => ({
+  label: workspace.label,
+  value: workspace.path
+})))
+const workspaceLabel = computed(() => {
+  const selected = context.selectedWorkspace.value
+  if (!selected) return 'Workspace'
+  return context.workspaces.value.find(workspace => workspace.path === selected)?.label || selected
+})
 
 onMounted(() => {
   void initializeComposer()
@@ -29,7 +31,6 @@ onMounted(() => {
 
 async function initializeComposer() {
   try {
-    composer.initializeForNewChat()
     await context.initialize()
   } catch (err) {
     showError(err, 'Could not initialize new chat')
@@ -51,7 +52,19 @@ watch(
 )
 
 function appendVoiceText(text: string) {
-  input.value = input.value ? `${input.value} ${text}` : text
+  input.value = input.value ? `${input.value.trimEnd()} ${text}` : text
+}
+
+function showVoiceError(message: string) {
+  toast.add({ color: 'error', title: 'Voice input failed', description: message })
+}
+
+async function attachFiles(files: File[]) {
+  try {
+    await context.uploadFiles(files)
+  } catch (err) {
+    showError(err, 'Failed to attach files')
+  }
 }
 
 function showError(err: unknown, fallback: string) {
@@ -60,81 +73,18 @@ function showError(err: unknown, fallback: string) {
   toast.add({ color: 'error', title: fallback, description: message })
 }
 
-async function attachFiles(files: File[]) {
-  try {
-    await context.uploadFiles(files)
-  } catch (err) {
-    showError(err, 'Could not upload attachment.')
-  }
-}
-
-const {
-  isDraggingFiles,
-  onPromptDragEnter,
-  onPromptDragOver,
-  onPromptDragLeave,
-  onPromptDrop
-} = useChatAttachmentDrop({
-  disabled: computed(() => loading.value || context.attachmentsLoading.value),
-  attachFiles,
-  toast,
-  unavailableTitle: 'Attachment upload is already in progress'
-})
-
-async function onPromptPaste(event: ClipboardEvent) {
-  const files = filesFromClipboard(event)
-  if (!files.length) return
-
-  event.preventDefault()
-  if (loading.value || context.attachmentsLoading.value) {
-    toast.add({ color: 'warning', title: 'Attachment upload is already in progress' })
-    return
-  }
-
-  await attachFiles(files)
-}
-
-function showVoiceError(message: string) {
-  showError(new Error(message), 'Voice input failed')
-}
-
-const {
-  selectSlashCommand,
-  onPromptArrowDown,
-  onPromptArrowUp,
-  onPromptEscape,
-  onPromptEnter: onPromptAutocompleteEnter
-} = useChatSlashCommandAutocomplete({
-  input,
-  slashCommands
-})
-
 async function onSubmit() {
   const message = input.value.trim()
-  if (!message || loading.value) return
-  if (!context.selectedWorkspace.value) {
-    workspaceInvalidSignal.value += 1
-    return
-  }
-
+  if ((!message && !context.attachments.value.length) || loading.value) return
+  const attachments = context.attachments.value
   loading.value = true
   error.value = undefined
-  void prepareNotificationSound()
   try {
-    const result = await api.startRun(message, {
-      model: composer.selectedModel.value,
-      provider: composer.selectedProvider.value,
-      reasoningEffort: composer.selectedReasoningEffort.value,
-      workspace: context.selectedWorkspace.value,
-      attachments: context.attachments.value.map(attachment => attachment.id)
-    })
-    composer.rememberLastUsedSelection()
-    composer.rememberSessionSelection(result.sessionId)
-    context.clearAttachments()
+    const result = await acp.createSession({ cwd: context.selectedWorkspace.value })
+    pendingAcpPrompts.value[result.sessionId] = { message, attachments }
     clearDraft()
-    playNotificationSound('sent')
-    activeChatRuns.trackRun(result.sessionId, result.runId, { title: message })
-    await router.push({ path: `/chat/${result.sessionId}`, query: { run: result.runId } })
+    context.clearAttachments()
+    await router.push({ path: `/acp/${result.sessionId}` })
     void refreshSessions?.()
   } catch (err) {
     showError(err, 'Failed to create chat')
@@ -161,74 +111,32 @@ async function onSubmit() {
             <p class="text-muted">Start a native web chat session backed by Hermes Agent.</p>
           </div>
 
-          <div
-            class="relative rounded-xl"
-            :class="isDraggingFiles ? 'ring-2 ring-primary/40 ring-offset-2 ring-offset-default' : undefined"
-            @dragenter="onPromptDragEnter"
-            @dragover="onPromptDragOver"
-            @dragleave="onPromptDragLeave"
-            @drop="onPromptDrop"
-          >
+          <div class="relative rounded-xl">
             <UChatPrompt
               v-model="input"
               :maxrows="CHAT_PROMPT_MAX_ROWS"
               :spellcheck="spellcheck.spellcheck.value"
               :lang="spellcheck.lang.value"
               @submit="onSubmit"
-              @paste="onPromptPaste"
-              @keydown.down="onPromptArrowDown"
-              @keydown.up="onPromptArrowUp"
-              @keydown.esc="onPromptEscape"
-              @keydown.enter="onPromptAutocompleteEnter"
             >
               <template #footer>
-                <ChatPromptFooter
+                <AcpChatPromptFooter
                   :submit-status="loading ? 'submitted' : 'ready'"
-                  :submit-disabled="!input.trim()"
-                  :workspaces="context.workspaces.value"
-                  :selected-workspace="context.selectedWorkspace.value"
-                  :workspace-invalid-signal="workspaceInvalidSignal"
-                  :workspaces-loading="context.workspacesLoading.value"
+                  :submit-disabled="!input.trim() && !context.attachments.value.length"
                   :attachments="context.attachments.value"
                   :attachments-loading="context.attachmentsLoading.value"
-                  :models="composer.models.value"
-                  :selected-model="composer.selectedModel.value"
-                  :selected-provider="composer.selectedProvider.value"
-                  :selected-reasoning-effort="composer.selectedReasoningEffort.value"
-                  :capabilities-loading="composer.capabilitiesLoading.value"
-                  :capabilities-refreshing="composer.capabilitiesRefreshing.value"
-                  :capabilities-error="composer.capabilitiesError.value"
-                  :slash-commands="slashCommands.filteredCommands.value"
-                  :slash-commands-open="slashCommands.isOpen.value"
-                  :slash-commands-loading="slashCommands.loading.value"
-                  :highlighted-slash-command-index="slashCommands.highlightedIndex.value"
-                  @update-selected-workspace="context.selectWorkspace"
+                  :workspaces="workspaceItems"
+                  :selected-workspace="context.selectedWorkspace.value"
+                  :workspaces-loading="context.workspacesLoading.value"
+                  :workspace-label="workspaceLabel"
                   @attach-files="attachFiles"
                   @remove-attachment="context.removeAttachment"
                   @voice-text="appendVoiceText"
                   @voice-error="showVoiceError"
-                  @update-selected-model="composer.selectedModel.value = $event"
-                  @update-selected-provider="composer.selectedProvider.value = $event"
-                  @update-selected-reasoning-effort="composer.selectedReasoningEffort.value = $event"
-                  @refresh-models="composer.refreshCapabilities({ force: true })"
-                  @select-slash-command="selectSlashCommand"
-                  @highlight-slash-command="slashCommands.highlightedIndex.value = $event"
+                  @update-selected-workspace="context.selectWorkspace"
                 />
               </template>
             </UChatPrompt>
-            <div class="mt-2 flex justify-start">
-              <ProviderUsageBadge
-                display="text"
-                :usage="providerUsage.usage.value"
-                :loading="providerUsage.loading.value"
-              />
-            </div>
-            <div
-              v-if="isDraggingFiles"
-              class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border border-dashed border-primary/50 bg-primary/10 text-sm font-medium text-highlighted backdrop-blur-sm"
-            >
-              Drop files to attach
-            </div>
           </div>
         </div>
       </UContainer>

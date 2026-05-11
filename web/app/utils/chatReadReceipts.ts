@@ -1,7 +1,9 @@
-import type { WebChatSession } from '~/types/web-chat'
+import type { ChatSessionSummary } from '~/types/chat'
+
+type SessionReadState = Pick<ChatSessionSummary, 'id' | 'messageCount'>
 
 export function isSessionUnread(
-  session: Pick<WebChatSession, 'id' | 'messageCount'>,
+  session: SessionReadState,
   readMessageCounts: Record<string, number>,
   readMessageCountsLoaded: boolean,
   hasLocalUnread = false
@@ -13,16 +15,16 @@ export function isSessionUnread(
 }
 
 export function readMessageCountForVisibleSession(
-  session: Pick<WebChatSession, 'messageCount'> | undefined,
+  session: Pick<ChatSessionSummary, 'messageCount'> | undefined,
   observedMessageCount: number
 ) {
   return Math.max(0, observedMessageCount || 0, session?.messageCount || 0)
 }
 
 export function syncInitialReadMessageCounts(
-  sessions: Pick<WebChatSession, 'id' | 'messageCount'>[],
+  sessions: SessionReadState[],
   readMessageCounts: Record<string, number>,
-  initialReadCount = (session: Pick<WebChatSession, 'id' | 'messageCount'>) => Math.max(0, session.messageCount || 0)
+  initialReadCount = (session: SessionReadState) => Math.max(0, session.messageCount || 0)
 ) {
   let changed = false
   const next = { ...readMessageCounts }
